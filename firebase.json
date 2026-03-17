@@ -1,0 +1,29 @@
+{
+  "functions": {
+    "source": "functions",
+    "runtime": "nodejs20"
+  },
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "quickohunt-app",
+          "appId": "1:759157073844:android:c2323516427f2f4e7e74e1",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "quickohunt-app",
+          "configurations": {
+            "android": "1:759157073844:android:c2323516427f2f4e7e74e1",
+            "ios": "1:759157073844:ios:59010764bb4de2d97e74e1",
+            "macos": "1:759157073844:ios:e1bc4256dc9818b47e74e1",
+            "web": "1:759157073844:web:c15da3c7299a80cd7e74e1",
+            "windows": "1:759157073844:web:c11a04dfe90087e67e74e1"
+          }
+        }
+      }
+    }
+  }
+}

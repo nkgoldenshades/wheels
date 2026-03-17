@@ -1,0 +1,575 @@
+import 'package:flutter/material.dart';
+import '../../services/user_post_repository.dart';
+import '../../services/user_post_acceptance_repository.dart';
+import '../../services/auth_repository.dart';
+import '../../services/payment_service.dart';
+import '../../models/user_post_acceptance.dart';
+import '../../models/service_type.dart';
+import '../../models/slot_type.dart';
+import 'package:razorpay_flutter/razorpay_flutter.dart';
+
+class UserPostDetailScreen extends StatefulWidget {
+  final UserPost post;
+  final bool isProvider; // true if viewing as provider, false if viewing as post owner
+
+  const UserPostDetailScreen({
+    super.key,
+    required this.post,
+    required this.isProvider,
+  });
+
+  @override
+  State<UserPostDetailScreen> createState() => _UserPostDetailScreenState();
+}
+
+class _UserPostDetailScreenState extends State<UserPostDetailScreen> {
+  final _acceptanceRepo = UserPostAcceptanceRepository.instance;
+  final _otpController = TextEditingController();
+  bool _isProcessing = false;
+  late Razorpay _razorpay;
+
+  @override
+  void initState() {
+    super.initState();
+    _razorpay = Razorpay();
+    _razorpay.on(Razorpay.EVENT_PAYMENT_SUCCESS, _handlePaymentSuccess);
+    _razorpay.on(Razorpay.EVENT_PAYMENT_ERROR, _handlePaymentError);
+    _razorpay.on(Razorpay.EVENT_EXTERNAL_WALLET, _handleExternalWallet);
+  }
+
+  @override
+  void dispose() {
+    _razorpay.clear();
+    _otpController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(widget.isProvider ? 'Accept Request' : 'Your Request'),
+        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildPostDetails(),
+            const SizedBox(height: 24),
+            _buildAcceptanceSection(),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPostDetails() {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Request Details',
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
+            const Divider(),
+            const SizedBox(height: 8),
+            _buildDetailRow('Service', _getServiceTypeName(widget.post.serviceType)),
+            _buildDetailRow('Type', widget.post.slotType == SlotType.fromTo ? 'From-To' : 'Base-Range'),
+            if (widget.post.fromLocation != null)
+              _buildDetailRow('From', widget.post.fromLocation!),
+            if (widget.post.toLocation != null)
+              _buildDetailRow('To', widget.post.toLocation!),
+            if (widget.post.baseLocation != null)
+              _buildDetailRow('Base', widget.post.baseLocation!),
+            if (widget.post.radius != null)
+              _buildDetailRow('Radius', '${widget.post.radius} km'),
+            _buildDetailRow('Start', _formatDateTime(widget.post.startTime)),
+            _buildDetailRow('End', _formatDateTime(widget.post.endTime)),
+            _buildDetailRow('Persons', widget.post.persons.toString()),
+            _buildDetailRow(
+              'Budget',
+              '₹${widget.post.budget.toStringAsFixed(0)}',
+              isHighlighted: true,
+            ),
+            if (widget.post.notes != null && widget.post.notes!.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Text(
+                'Terms:',
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+              Text(widget.post.notes!),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDetailRow(String label, String value, {bool isHighlighted = false}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 100,
+            child: Text(
+              '$label:',
+              style: TextStyle(
+                color: Colors.grey[600],
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: TextStyle(
+                fontWeight: isHighlighted ? FontWeight.bold : FontWeight.normal,
+                fontSize: isHighlighted ? 18 : 14,
+                color: isHighlighted ? Colors.green : Colors.black,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAcceptanceSection() {
+    return ValueListenableBuilder(
+      valueListenable: _acceptanceRepo.acceptances,
+      builder: (context, acceptances, _) {
+        final postAcceptances = acceptances
+            .where((a) => a.postId == widget.post.id)
+            .toList();
+
+        if (widget.isProvider) {
+          return _buildProviderActions(postAcceptances);
+        } else {
+          return _buildUserActions(postAcceptances);
+        }
+      },
+    );
+  }
+
+  Widget _buildProviderActions(List<UserPostAcceptance> acceptances) {
+    final currentUser = AuthRepository.instance.currentUser;
+    if (currentUser == null) return const SizedBox();
+
+    final myAcceptance = acceptances.firstWhere(
+      (a) => a.providerId == currentUser.id && a.status != AcceptanceStatus.cancelled,
+      orElse: () => acceptances.first, // dummy
+    );
+
+    final hasAccepted = acceptances.any(
+      (a) => a.providerId == currentUser.id && a.status != AcceptanceStatus.cancelled,
+    );
+
+    if (hasAccepted) {
+      return Card(
+        color: Colors.green.shade50,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            children: [
+              const Icon(Icons.check_circle, color: Colors.green, size: 48),
+              const SizedBox(height: 8),
+              const Text(
+                'Request Accepted!',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 8),
+              Text('OTP sent to user: ${myAcceptance.otp}'),
+              const SizedBox(height: 4),
+              Text(
+                'Status: ${_getStatusText(myAcceptance.status)}',
+                style: TextStyle(
+                  color: _getStatusColor(myAcceptance.status),
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return ElevatedButton.icon(
+      onPressed: _isProcessing ? null : _acceptPost,
+      icon: const Icon(Icons.check),
+      label: _isProcessing
+          ? const Text('Processing...')
+          : const Text('Accept Request'),
+      style: ElevatedButton.styleFrom(
+        minimumSize: const Size(double.infinity, 50),
+        backgroundColor: Colors.green,
+        foregroundColor: Colors.white,
+      ),
+    );
+  }
+
+  Widget _buildUserActions(List<UserPostAcceptance> acceptances) {
+    if (acceptances.isEmpty) {
+      return const Card(
+        child: Padding(
+          padding: EdgeInsets.all(16),
+          child: Text(
+            'Waiting for providers to accept your request...',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Colors.grey),
+          ),
+        ),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Acceptances (${acceptances.length})',
+          style: Theme.of(context).textTheme.titleLarge,
+        ),
+        const SizedBox(height: 12),
+        ...acceptances.map((acceptance) => _buildAcceptanceCard(acceptance)),
+      ],
+    );
+  }
+
+  Widget _buildAcceptanceCard(UserPostAcceptance acceptance) {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                CircleAvatar(
+                  child: Text(acceptance.providerId.substring(0, 2).toUpperCase()),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Provider ${acceptance.providerId.substring(0, 8)}',
+                        style: const TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      Text(
+                        _getStatusText(acceptance.status),
+                        style: TextStyle(
+                          color: _getStatusColor(acceptance.status),
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Text(
+                  '₹${acceptance.amount.toStringAsFixed(0)}',
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.green,
+                  ),
+                ),
+              ],
+            ),
+            if (acceptance.status == AcceptanceStatus.pending) ...[
+              const SizedBox(height: 16),
+              const Text(
+                'Enter OTP to proceed with payment:',
+                style: TextStyle(fontWeight: FontWeight.w500),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _otpController,
+                      decoration: const InputDecoration(
+                        labelText: 'Enter 6-digit OTP',
+                        border: OutlineInputBorder(),
+                      ),
+                      keyboardType: TextInputType.number,
+                      maxLength: 6,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  ElevatedButton(
+                    onPressed: _isProcessing
+                        ? null
+                        : () => _verifyOTPAndPay(acceptance),
+                    child: _isProcessing
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Text('Verify & Pay'),
+                  ),
+                ],
+              ),
+            ],
+            if (acceptance.status == AcceptanceStatus.paid) ...[
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.green.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.check_circle, color: Colors.green),
+                    const SizedBox(width: 8),
+                    const Text(
+                      'Payment Completed',
+                      style: TextStyle(
+                        color: Colors.green,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _acceptPost() async {
+    setState(() => _isProcessing = true);
+
+    try {
+      final currentUser = AuthRepository.instance.currentUser;
+      if (currentUser == null) {
+        throw Exception('Please login to accept requests');
+      }
+
+      await _acceptanceRepo.acceptPost(
+        postId: widget.post.id,
+        userId: widget.post.userId,
+        amount: widget.post.budget,
+      );
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Request accepted! OTP sent to user.'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to accept: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isProcessing = false);
+      }
+    }
+  }
+
+  Future<void> _verifyOTPAndPay(UserPostAcceptance acceptance) async {
+    final otp = _otpController.text.trim();
+    if (otp.length != 6) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter 6-digit OTP')),
+      );
+      return;
+    }
+
+    setState(() => _isProcessing = true);
+
+    try {
+      // Verify OTP
+      final verified = await _acceptanceRepo.verifyOTP(
+        acceptanceId: acceptance.id,
+        enteredOTP: otp,
+      );
+
+      if (!verified) {
+        throw Exception('Invalid or expired OTP');
+      }
+
+      // Create Razorpay order
+      final orderData = await PaymentService.instance.createOrder(
+        amount: acceptance.amount.toInt(),
+        currency: 'INR',
+        notes: {
+          'acceptance_id': acceptance.id,
+          'post_id': acceptance.postId,
+          'type': 'user_post_payment',
+        },
+      );
+
+      // Update acceptance with order ID
+      await _acceptanceRepo.updatePaymentDetails(
+        acceptanceId: acceptance.id,
+        razorpayOrderId: orderData['id'],
+      );
+
+      // Open Razorpay
+      _openRazorpay(orderData, acceptance);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isProcessing = false);
+      }
+    }
+  }
+
+  void _openRazorpay(Map<String, dynamic> orderData, UserPostAcceptance acceptance) {
+    final currentUser = AuthRepository.instance.currentUser;
+    if (currentUser == null) return;
+
+    var options = {
+      'key': 'rzp_test_SMpj1xxJxAcT6K',
+      'amount': orderData['amount'],
+      'currency': orderData['currency'],
+      'name': 'QuickOHunt',
+      'description': 'Payment for service request',
+      'order_id': orderData['id'],
+      'prefill': {
+        'email': currentUser.email,
+        'contact': '',
+      },
+      'theme': {
+        'color': '#3399cc',
+      },
+    };
+
+    try {
+      _razorpay.open(options);
+    } catch (e) {
+      debugPrint('Error opening Razorpay: $e');
+    }
+  }
+
+  void _handlePaymentSuccess(PaymentSuccessResponse response) async {
+    try {
+      // Verify payment on server
+      final verified = await PaymentService.instance.verifyPayment(
+        razorpayOrderId: response.orderId ?? '',
+        razorpayPaymentId: response.paymentId ?? '',
+        razorpaySignature: response.signature ?? '',
+      );
+
+      if (verified['success'] == true) {
+        // Update acceptance status
+        final acceptance = _acceptanceRepo.acceptances.value.firstWhere(
+          (a) => a.razorpayOrderId == response.orderId,
+        );
+
+        await _acceptanceRepo.updatePaymentDetails(
+          acceptanceId: acceptance.id,
+          razorpayOrderId: response.orderId!,
+          razorpayPaymentId: response.paymentId!,
+          status: AcceptanceStatus.paid,
+        );
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Payment successful!'),
+              backgroundColor: Colors.green,
+            ),
+          );
+          _otpController.clear();
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Payment verification failed: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  void _handlePaymentError(PaymentFailureResponse response) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Payment failed: ${response.message}'),
+        backgroundColor: Colors.red,
+      ),
+    );
+  }
+
+  void _handleExternalWallet(ExternalWalletResponse response) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('External wallet: ${response.walletName}')),
+    );
+  }
+
+  String _formatDateTime(DateTime dt) {
+    return '${dt.day}/${dt.month}/${dt.year} ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+  }
+
+  String _getServiceTypeName(ServiceType type) {
+    switch (type) {
+      case ServiceType.passenger:
+        return 'Passenger';
+      case ServiceType.parcel:
+        return 'Parcel';
+      case ServiceType.lease:
+        return 'Lease';
+      case ServiceType.working:
+        return 'Working';
+    }
+  }
+
+  String _getStatusText(AcceptanceStatus status) {
+    switch (status) {
+      case AcceptanceStatus.pending:
+        return 'Pending OTP Verification';
+      case AcceptanceStatus.otpVerified:
+        return 'OTP Verified - Processing Payment';
+      case AcceptanceStatus.paid:
+        return 'Payment Completed';
+      case AcceptanceStatus.cancelled:
+        return 'Cancelled';
+    }
+  }
+
+  Color _getStatusColor(AcceptanceStatus status) {
+    switch (status) {
+      case AcceptanceStatus.pending:
+        return Colors.orange;
+      case AcceptanceStatus.otpVerified:
+        return Colors.blue;
+      case AcceptanceStatus.paid:
+        return Colors.green;
+      case AcceptanceStatus.cancelled:
+        return Colors.red;
+    }
+  }
+}
