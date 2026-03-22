@@ -495,9 +495,16 @@ class SlotCard extends StatelessWidget {
         children: [
           Text(
             flag.isNotEmpty ? '$flag  $label' : label,
-            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87),
+            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.black87),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
           ),
-          Text(geoLine, style: TextStyle(fontSize: 11, color: Colors.grey[500])),
+          Text(
+            geoLine,
+            style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
         ],
       );
     }
@@ -526,10 +533,17 @@ class SlotCard extends StatelessWidget {
             children: [
               Text(
                 resolvedFlag.isNotEmpty ? '$resolvedFlag  $label' : label,
-                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87),
+                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.black87),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
               ),
               if (fallbackLine.isNotEmpty)
-                Text(fallbackLine, style: TextStyle(fontSize: 11, color: Colors.grey[500])),
+                Text(
+                  fallbackLine,
+                  style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
             ],
           );
         },
@@ -538,7 +552,9 @@ class SlotCard extends StatelessWidget {
 
     return Text(
       label,
-      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87),
+      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.black87),
+      maxLines: 2,
+      overflow: TextOverflow.ellipsis,
     );
   }
 

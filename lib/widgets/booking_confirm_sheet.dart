@@ -5,6 +5,7 @@ import '../models/slot_type.dart';
 import '../models/seat_layout.dart';
 import '../models/booking.dart';
 import '../models/passenger.dart';
+import '../models/service_type.dart';
 import '../services/app_preferences.dart';
 import '../services/booking_repository.dart';
 import '../services/seat_layout_repository.dart';
@@ -522,6 +523,54 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
                 const Divider(height: 24),
               ],
               
+              // Parcel sender details OR passenger forms
+              if (widget.slot.serviceType == ServiceType.parcel) ...[
+                const Text(
+                  '📦 Sender Details',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _passengerForms.isNotEmpty ? _passengerForms[0].nameController : TextEditingController(),
+                  decoration: const InputDecoration(
+                    labelText: 'Sender name *',
+                    border: OutlineInputBorder(),
+                    prefixIcon: Icon(Icons.person),
+                  ),
+                  textCapitalization: TextCapitalization.words,
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _passengerForms.isNotEmpty ? _passengerForms[0].phoneController : TextEditingController(),
+                  decoration: const InputDecoration(
+                    labelText: 'Sender phone *',
+                    border: OutlineInputBorder(),
+                    prefixIcon: Icon(Icons.phone),
+                  ),
+                  keyboardType: TextInputType.phone,
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _passengerForms.isNotEmpty ? _passengerForms[0].emailController : TextEditingController(),
+                  decoration: const InputDecoration(
+                    labelText: 'Recipient contact *',
+                    border: OutlineInputBorder(),
+                    prefixIcon: Icon(Icons.contact_phone),
+                  ),
+                  keyboardType: TextInputType.phone,
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _passengerForms.isNotEmpty ? _passengerForms[0].ageController : TextEditingController(),
+                  decoration: const InputDecoration(
+                    labelText: 'Parcel description (optional)',
+                    hintText: 'e.g. Documents, Electronics, Clothes',
+                    border: OutlineInputBorder(),
+                    prefixIcon: Icon(Icons.inventory_2),
+                  ),
+                ),
+                const SizedBox(height: 8),
+              ] else ...[
               ValueListenableBuilder<List<Passenger>>(
                 valueListenable: PassengerRepository.instance.savedPassengers,
                 builder: (context, saved, _) {
@@ -554,7 +603,6 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
                               ),
                               label: Text(p.name),
                               onPressed: () {
-                                // Show dialog to select which form to fill
                                 _showPassengerFormSelector(p);
                               },
                             );
@@ -663,6 +711,7 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
                 contentPadding: EdgeInsets.zero,
                 controlAffinity: ListTileControlAffinity.leading,
               ),
+              ], // end else (non-parcel)
               if (!hasSeatLayout) ...[
                 const SizedBox(height: 8),
                 Row(
@@ -721,7 +770,9 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
                               bool shouldResetProcessing = true;
 
                               try {
-                                // Validate all passenger forms
+                                final isParcel = widget.slot.serviceType == ServiceType.parcel;
+
+                                // Validate forms
                                 for (int i = 0; i < _passengerForms.length; i++) {
                                   final form = _passengerForms[i];
                                   final name = form.nameController.text.trim();
@@ -729,22 +780,51 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
                                   if (name.isEmpty) {
                                     ScaffoldMessenger.of(context).showSnackBar(
                                       SnackBar(
-                                        content: Text('Please enter name for Passenger ${i + 1}'),
+                                        content: Text(isParcel
+                                            ? 'Please enter sender name'
+                                            : 'Please enter name for Passenger ${i + 1}'),
                                       ),
                                     );
                                     return;
                                   }
 
                                   final phone = form.phoneController.text.trim();
+                                  if (isParcel && phone.isEmpty) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(content: Text('Please enter sender phone')),
+                                    );
+                                    return;
+                                  }
                                   if (phone.isNotEmpty && phone.length < 8) {
                                     ScaffoldMessenger.of(context).showSnackBar(
                                       SnackBar(
-                                        content: Text('Invalid phone for Passenger ${i + 1}'),
+                                        content: Text(isParcel
+                                            ? 'Invalid sender phone number'
+                                            : 'Invalid phone for Passenger ${i + 1}'),
                                       ),
                                     );
                                     return;
                                   }
 
+                                  // Recipient contact required for parcel
+                                  if (isParcel) {
+                                    final recipient = form.emailController.text.trim();
+                                    if (recipient.isEmpty) {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        const SnackBar(content: Text('Please enter recipient contact')),
+                                      );
+                                      return;
+                                    }
+                                    if (recipient.length < 8) {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        const SnackBar(content: Text('Invalid recipient contact number')),
+                                      );
+                                      return;
+                                    }
+                                  }
+
+                                  // Skip email/age validation for parcel
+                                  if (!isParcel) {
                                   final email = form.emailController.text.trim();
                                   if (email.isNotEmpty && !email.contains('@')) {
                                     ScaffoldMessenger.of(context).showSnackBar(
@@ -765,6 +845,7 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
                                     );
                                     return;
                                   }
+                                  } // end if (!isParcel)
                                 }
 
                                 if (hasSeatLayout && _selectedSeats.isEmpty) {
@@ -789,7 +870,7 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
                                 if (_savePassengers) {
                                   for (final form in _passengerForms) {
                                     final ageText = form.ageController.text.trim();
-                                    final age = ageText.isEmpty ? 18 : int.parse(ageText);
+                                    final age = ageText.isEmpty ? 18 : (int.tryParse(ageText) ?? 18);
                                     await PassengerRepository.instance.savePassenger(
                                       Passenger(
                                         id: DateTime.now().millisecondsSinceEpoch
@@ -815,8 +896,9 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
 
                                 final ages = _passengerForms
                                     .map((f) {
+                                      if (isParcel) return 0; // not applicable for parcel
                                       final ageText = f.ageController.text.trim();
-                                      return ageText.isEmpty ? 18 : int.parse(ageText);
+                                      return ageText.isEmpty ? 18 : (int.tryParse(ageText) ?? 18);
                                     })
                                     .toList(growable: false);
 

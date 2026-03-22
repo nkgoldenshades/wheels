@@ -104,16 +104,15 @@ class _ReviewDialogState extends State<ReviewDialog> {
               mainAxisAlignment: MainAxisAlignment.center,
               children: List.generate(5, (index) {
                 final starValue = index + 1.0;
-                return IconButton(
-                  iconSize: 40,
-                  onPressed: () {
-                    setState(() {
-                      _rating = starValue;
-                    });
-                  },
-                  icon: Icon(
-                    starValue <= _rating ? Icons.star : Icons.star_border,
-                    color: Colors.amber,
+                return GestureDetector(
+                  onTap: () => setState(() => _rating = starValue),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 6),
+                    child: Icon(
+                      starValue <= _rating ? Icons.star : Icons.star_border,
+                      color: Colors.amber,
+                      size: 40,
+                    ),
                   ),
                 );
               }),

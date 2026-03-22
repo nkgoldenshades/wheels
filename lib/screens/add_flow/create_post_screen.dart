@@ -815,34 +815,29 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         ),
         const SizedBox(height: 8),
         if (_slotType == SlotType.fromTo) ...[
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          Column(
             children: [
-              Expanded(
-                child: LocationAutocompleteField(
-                  controller: _fromController,
-                  label: 'From',
-                  hint: 'Start',
-                  icon: Icons.location_on,
-                  onLocationSelected: (suggestion) {
-                    _fromSuggestion = suggestion;
-                  },
-                ),
+              LocationAutocompleteField(
+                controller: _fromController,
+                label: 'From',
+                hint: 'Start location',
+                icon: Icons.location_on,
+                onLocationSelected: (suggestion) {
+                  _fromSuggestion = suggestion;
+                },
               ),
-              Padding(
-                padding: const EdgeInsets.only(top: 16),
-                child: const Icon(Icons.arrow_forward, color: Colors.grey),
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 4),
+                child: Icon(Icons.arrow_downward, color: Colors.grey),
               ),
-              Expanded(
-                child: LocationAutocompleteField(
-                  controller: _toController,
-                  label: 'To',
-                  hint: 'Destination',
-                  icon: Icons.flag,
-                  onLocationSelected: (suggestion) {
-                    _toSuggestion = suggestion;
-                  },
-                ),
+              LocationAutocompleteField(
+                controller: _toController,
+                label: 'To',
+                hint: 'Destination',
+                icon: Icons.flag,
+                onLocationSelected: (suggestion) {
+                  _toSuggestion = suggestion;
+                },
               ),
             ],
           ),
