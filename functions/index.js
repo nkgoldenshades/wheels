@@ -9,10 +9,11 @@ require('dotenv').config();
 admin.initializeApp();
 
 // Initialize Stripe
-const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+const stripeSecretKey = process.env.STRIPE_SECRET_KEY || functions.config()?.stripe?.secret_key;
+const stripe = require('stripe')(stripeSecretKey);
 
-// Initialize Supabase for Stripe escrow functions
-const stripeEscrowSupabase = require('./stripe-escrow-supabase');
+// Initialize Firestore-based Stripe escrow functions
+const stripeEscrow = require('./stripe-escrow');
 
 // Get Razorpay keys from environment variables
 // For local testing, create a .env file in functions folder with:
@@ -263,13 +264,8 @@ exports.razorpayWebhook = functions.https.onRequest(async (req, res) => {
   }
 });
 
-// ============================================
-// STRIPE ESCROW FUNCTIONS (SUPABASE VERSION)
-// ============================================
-
-// Export Supabase-based Stripe escrow functions
-exports.createBooking = stripeEscrowSupabase.createBooking;
-exports.verifyOtp = stripeEscrowSupabase.verifyOtp;
-exports.autoRefundExpired = stripeEscrowSupabase.autoRefundExpired;
-exports.refundPayment = stripeEscrowSupabase.refundPayment;
-exports.releaseFunds = stripeEscrowSupabase.releaseFunds;
+exports.createBooking = stripeEscrow.createBooking;
+exports.verifyOtp = stripeEscrow.verifyOtp;
+exports.autoRefundExpired = stripeEscrow.autoRefundExpired;
+exports.refundPayment = stripeEscrow.refundPayment;
+exports.releaseFunds = stripeEscrow.releaseFunds;

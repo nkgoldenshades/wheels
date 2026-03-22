@@ -1,6 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'app_preferences.dart';
+import 'profile_name_registry.dart';
+import 'auth_repository.dart';
 
 class ProfileInfo {
   final String profileName;
@@ -147,6 +149,7 @@ class ProfileRepository {
   );
 
   Future<void> init() async {
+    await ProfileNameRegistry.instance.init();
     await _loadCore();
     final avatar = AppPreferences.instance.avatarBase64.value;
     if (avatar != null && avatar.trim().isNotEmpty) {
@@ -155,6 +158,15 @@ class ProfileRepository {
 
     // Load document images from SharedPreferences
     await _loadDocuments();
+    
+    // Register current profile name if user is logged in
+    final currentUser = AuthRepository.instance.currentUser;
+    if (currentUser != null && profile.value.profileName.isNotEmpty) {
+      await ProfileNameRegistry.instance.registerName(
+        currentUser.id,
+        profile.value.profileName,
+      );
+    }
   }
 
   Future<void> _loadCore() async {
@@ -329,6 +341,21 @@ class ProfileRepository {
     String? businessType,
     bool setBusinessTypeNull = false,
   }) async {
+    // If updating profile name, check uniqueness
+    if (profileName != null && profileName.trim().isNotEmpty) {
+      final currentUser = AuthRepository.instance.currentUser;
+      if (currentUser != null) {
+        final isAvailable = await ProfileNameRegistry.instance.updateName(
+          currentUser.id,
+          profileName.trim(),
+        );
+        
+        if (!isAvailable) {
+          throw Exception('Profile name already taken. Please choose a different name.');
+        }
+      }
+    }
+    
     profile.value = profile.value.copyWith(
       profileName: profileName,
       age: age,

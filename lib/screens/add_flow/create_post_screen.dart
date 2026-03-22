@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../vehicle/vehicle_list_screen.dart';
 import '../../models/service_type.dart';
 import '../../models/slot_type.dart';
@@ -182,10 +183,20 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     required LocationSuggestion? suggestion,
   }) {
     if (suggestion != null) {
-      final label = suggestion.type.toLowerCase() == 'current'
-          ? 'Current Location'
-          : _getShortName(suggestion.displayName);
-      return '$label|${suggestion.lat},${suggestion.lon}';
+      final label = _getShortName(suggestion.displayName);
+      final geo = suggestion.geo;
+      final coords = '${suggestion.lat},${suggestion.lon}';
+      if (geo != null) {
+        final keywords = [
+          geo.district ?? geo.stateDistrict,
+          geo.state,
+          geo.postcode,
+          geo.country,
+          geo.countryCode?.toUpperCase(),
+        ].whereType<String>().where((s) => s.isNotEmpty).join(',');
+        return '$label|$coords|$keywords';
+      }
+      return '$label|$coords';
     }
     return typedText;
   }
@@ -211,6 +222,16 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     return null;
   }
 
+  double _haversineKm(double lat1, double lon1, double lat2, double lon2) {
+    const r = 6371.0;
+    double toRad(double deg) => deg * (3.141592653589793 / 180.0);
+    final dLat = toRad(lat2 - lat1);
+    final dLon = toRad(lon2 - lon1);
+    final a = (dLat / 2) * (dLat / 2) +
+        toRad(lat1).abs() * toRad(lat2).abs() * (dLon / 2) * (dLon / 2);
+    return r * 2 * (a < 1 ? a : 1);
+  }
+
   bool _isControllerTextStillForSuggestion(
     String controllerText,
     LocationSuggestion suggestion,
@@ -219,7 +240,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     if (text.isEmpty) return false;
 
     if (suggestion.type.toLowerCase() == 'current') {
-      return text == 'Current Location';
+      return text == _getShortName(suggestion.displayName);
     }
 
     final dn = suggestion.displayName.trim();
@@ -228,6 +249,41 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     final lowerText = text.toLowerCase();
     final lowerDn = dn.toLowerCase();
     return lowerDn.contains(lowerText);
+  }
+
+  Uri? _buildMapsUri({
+    required String typedText,
+    required LocationSuggestion? suggestion,
+  }) {
+    if (suggestion != null && (suggestion.lat != 0 || suggestion.lon != 0)) {
+      return Uri.parse(
+        'https://www.google.com/maps/search/?api=1&query=${suggestion.lat},${suggestion.lon}',
+      );
+    }
+    final query = typedText.trim();
+    if (query.isEmpty) return null;
+    return Uri.parse(
+      'https://www.google.com/maps/search/?api=1&query=${Uri.encodeComponent(query)}',
+    );
+  }
+
+  Future<void> _openInMaps({
+    required String typedText,
+    required LocationSuggestion? suggestion,
+  }) async {
+    final uri = _buildMapsUri(typedText: typedText, suggestion: suggestion);
+    if (uri == null) {
+      _showError('Please enter a location first');
+      return;
+    }
+
+    final opened = await launchUrl(
+      uri,
+      mode: LaunchMode.externalApplication,
+    );
+    if (!opened && mounted) {
+      _showError('Unable to open maps');
+    }
   }
 
   Future<void> _selectDate({required bool isStart}) async {
@@ -759,29 +815,77 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         ),
         const SizedBox(height: 8),
         if (_slotType == SlotType.fromTo) ...[
-          LocationAutocompleteField(
-            controller: _fromController,
-            label: 'From',
-            hint: 'Starting location',
-            icon: Icons.location_on,
-            onLocationSelected: (suggestion) {
-              _fromSuggestion = suggestion;
-              debugPrint('From location selected: ${suggestion.displayName}');
-              debugPrint('Coordinates: ${suggestion.lat}, ${suggestion.lon}');
-            },
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: LocationAutocompleteField(
+                  controller: _fromController,
+                  label: 'From',
+                  hint: 'Start',
+                  icon: Icons.location_on,
+                  onLocationSelected: (suggestion) {
+                    _fromSuggestion = suggestion;
+                  },
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.only(top: 16),
+                child: const Icon(Icons.arrow_forward, color: Colors.grey),
+              ),
+              Expanded(
+                child: LocationAutocompleteField(
+                  controller: _toController,
+                  label: 'To',
+                  hint: 'Destination',
+                  icon: Icons.flag,
+                  onLocationSelected: (suggestion) {
+                    _toSuggestion = suggestion;
+                  },
+                ),
+              ),
+            ],
           ),
-          const SizedBox(height: 12),
-          LocationAutocompleteField(
-            controller: _toController,
-            label: 'To',
-            hint: 'Destination',
-            icon: Icons.flag,
-            onLocationSelected: (suggestion) {
-              _toSuggestion = suggestion;
-              debugPrint('To location selected: ${suggestion.displayName}');
-              debugPrint('Coordinates: ${suggestion.lat}, ${suggestion.lon}');
-            },
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              TextButton.icon(
+                onPressed: () => _openInMaps(
+                  typedText: _fromController.text,
+                  suggestion: _fromSuggestion,
+                ),
+                icon: const Icon(Icons.open_in_new, size: 14),
+                label: const Text('From in Maps', style: TextStyle(fontSize: 12)),
+              ),
+              TextButton.icon(
+                onPressed: () => _openInMaps(
+                  typedText: _toController.text,
+                  suggestion: _toSuggestion,
+                ),
+                icon: const Icon(Icons.open_in_new, size: 14),
+                label: const Text('To in Maps', style: TextStyle(fontSize: 12)),
+              ),
+            ],
           ),
+          if (_fromSuggestion != null && _toSuggestion != null) ...[
+            const SizedBox(height: 4),
+            Builder(builder: (context) {
+              final dist = _haversineKm(
+                _fromSuggestion!.lat, _fromSuggestion!.lon,
+                _toSuggestion!.lat, _toSuggestion!.lon,
+              );
+              return Row(
+                children: [
+                  const Icon(Icons.straighten, size: 14, color: Colors.blue),
+                  const SizedBox(width: 6),
+                  Text(
+                    '~${dist.toStringAsFixed(1)} km between locations',
+                    style: const TextStyle(fontSize: 12, color: Colors.blue),
+                  ),
+                ],
+              );
+            }),
+          ],
         ] else ...[
           LocationAutocompleteField(
             controller: _baseController,
@@ -793,6 +897,17 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
               debugPrint('Base location selected: ${suggestion.displayName}');
               debugPrint('Coordinates: ${suggestion.lat}, ${suggestion.lon}');
             },
+          ),
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton.icon(
+              onPressed: () => _openInMaps(
+                typedText: _baseController.text,
+                suggestion: _baseSuggestion,
+              ),
+              icon: const Icon(Icons.open_in_new, size: 16),
+              label: const Text('Open Base in Maps'),
+            ),
           ),
           const SizedBox(height: 12),
           Row(
@@ -902,6 +1017,34 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
             ),
           ],
         ),
+        if (_startTime != null && _endTime != null) ...[
+          const SizedBox(height: 8),
+          Builder(builder: (context) {
+            final diff = _endTime!.difference(_startTime!);
+            final hours = diff.inHours;
+            final minutes = diff.inMinutes % 60;
+            final isNegative = diff.isNegative;
+            return Row(
+              children: [
+                Icon(
+                  isNegative ? Icons.warning_amber : Icons.timer_outlined,
+                  size: 14,
+                  color: isNegative ? Colors.red : Colors.green,
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  isNegative
+                      ? 'End time is before start time'
+                      : 'Duration: ${hours > 0 ? '${hours}h ' : ''}${minutes}m',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: isNegative ? Colors.red : Colors.green,
+                  ),
+                ),
+              ],
+            );
+          }),
+        ],
       ],
     );
   }
@@ -934,7 +1077,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                 child: GestureDetector(
                   onTap: () => setState(() => _useSimpleSeating = true),
                   child: Container(
-                    padding: const EdgeInsets.all(12),
+                    constraints: const BoxConstraints(minHeight: 64),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                     decoration: BoxDecoration(
                       color: _useSimpleSeating
                           ? Colors.green.withValues(alpha: 0.1)
@@ -956,7 +1100,18 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                               _useSimpleSeating ? Colors.green : Colors.grey,
                         ),
                         const SizedBox(width: 8),
-                        const Text('Simple (price + capacity)'),
+                        const Expanded(
+                          child: Text(
+                            'Simple (price + capacity)',
+                            maxLines: 2,
+                            softWrap: true,
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              height: 1.2,
+                            ),
+                          ),
+                        ),
                       ],
                     ),
                   ),
@@ -967,7 +1122,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                 child: GestureDetector(
                   onTap: () => setState(() => _useSimpleSeating = false),
                   child: Container(
-                    padding: const EdgeInsets.all(12),
+                    constraints: const BoxConstraints(minHeight: 64),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                     decoration: BoxDecoration(
                       color: !_useSimpleSeating
                           ? Colors.blue.withValues(alpha: 0.1)
@@ -988,7 +1144,18 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                           color: !_useSimpleSeating ? Colors.blue : Colors.grey,
                         ),
                         const SizedBox(width: 8),
-                        const Text('Layout-based'),
+                        const Expanded(
+                          child: Text(
+                            'Layout-based',
+                            maxLines: 2,
+                            softWrap: true,
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              height: 1.2,
+                            ),
+                          ),
+                        ),
                       ],
                     ),
                   ),
@@ -1101,7 +1268,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
               child: GestureDetector(
                 onTap: () => setState(() => _workingMode = 'On-site'),
                 child: Container(
-                  padding: const EdgeInsets.all(12),
+                  constraints: const BoxConstraints(minHeight: 68),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                   decoration: BoxDecoration(
                     color: _workingMode == 'On-site'
                         ? Colors.purple.withValues(alpha: 0.1)
@@ -1323,7 +1491,18 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                             : Colors.grey,
                       ),
                       const SizedBox(width: 8),
-                      Text('🚶 Customer comes to pickup'),
+                      const Expanded(
+                        child: Text(
+                          'Customer comes to pickup',
+                          maxLines: 2,
+                          softWrap: true,
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            height: 1.2,
+                          ),
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -1335,7 +1514,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                 onTap: () =>
                     setState(() => _pickupMode = PickupMode.providerPickup),
                 child: Container(
-                  padding: const EdgeInsets.all(12),
+                  constraints: const BoxConstraints(minHeight: 68),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                   decoration: BoxDecoration(
                     color: _pickupMode == PickupMode.providerPickup
                         ? Colors.blue.withValues(alpha: 0.1)
@@ -1358,7 +1538,18 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                             : Colors.grey,
                       ),
                       const SizedBox(width: 8),
-                      Text('🚗 Provider comes to customer'),
+                      const Expanded(
+                        child: Text(
+                          'Provider comes to customer',
+                          maxLines: 2,
+                          softWrap: true,
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            height: 1.2,
+                          ),
+                        ),
+                      ),
                     ],
                   ),
                 ),

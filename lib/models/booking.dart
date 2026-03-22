@@ -22,6 +22,15 @@ class Booking {
   final String? otp;
   final bool otpVerified;
   final DateTime createdAt;
+  
+  // Escrow payment fields
+  final String? stripePaymentIntentId;
+  final String? stripeClientSecret;
+  final DateTime? countdownEndTime;
+  final bool paymentHeldInEscrow;
+
+  // Lease security deposit
+  final double? securityDeposit;
 
   Booking({
     required this.id,
@@ -43,6 +52,11 @@ class Booking {
     this.otp,
     this.otpVerified = false,
     required this.createdAt,
+    this.stripePaymentIntentId,
+    this.stripeClientSecret,
+    this.countdownEndTime,
+    this.paymentHeldInEscrow = false,
+    this.securityDeposit,
   });
 
   Booking copyWith({
@@ -58,6 +72,11 @@ class Booking {
     String? userPhone,
     String? userEmail,
     double? price,
+    String? stripePaymentIntentId,
+    String? stripeClientSecret,
+    DateTime? countdownEndTime,
+    bool? paymentHeldInEscrow,
+    double? securityDeposit,
   }) {
     return Booking(
       id: id,
@@ -79,6 +98,11 @@ class Booking {
       otp: otp ?? this.otp,
       otpVerified: otpVerified ?? this.otpVerified,
       createdAt: createdAt,
+      stripePaymentIntentId: stripePaymentIntentId ?? this.stripePaymentIntentId,
+      stripeClientSecret: stripeClientSecret ?? this.stripeClientSecret,
+      countdownEndTime: countdownEndTime ?? this.countdownEndTime,
+      paymentHeldInEscrow: paymentHeldInEscrow ?? this.paymentHeldInEscrow,
+      securityDeposit: securityDeposit ?? this.securityDeposit,
     );
   }
 
@@ -103,6 +127,11 @@ class Booking {
       'otp': otp,
       'otpVerified': otpVerified,
       'createdAt': createdAt.toIso8601String(),
+      'stripePaymentIntentId': stripePaymentIntentId,
+      'stripeClientSecret': stripeClientSecret,
+      'countdownEndTime': countdownEndTime?.toIso8601String(),
+      'paymentHeldInEscrow': paymentHeldInEscrow,
+      'securityDeposit': securityDeposit,
     };
   }
 
@@ -129,6 +158,13 @@ class Booking {
       otp: json['otp'],
       otpVerified: json['otpVerified'] ?? false,
       createdAt: DateTime.parse(json['createdAt']),
+      stripePaymentIntentId: json['stripePaymentIntentId'],
+      stripeClientSecret: json['stripeClientSecret'],
+      countdownEndTime: json['countdownEndTime'] != null 
+          ? DateTime.parse(json['countdownEndTime'])
+          : null,
+      paymentHeldInEscrow: json['paymentHeldInEscrow'] ?? false,
+      securityDeposit: (json['securityDeposit'] as num?)?.toDouble(),
     );
   }
 }

@@ -311,39 +311,61 @@ class _DocumentVerificationScreenState
 
   InputImage? _convertCameraImage(CameraImage image) {
     try {
-      final WriteBuffer allBytes = WriteBuffer();
-      for (final plane in image.planes) {
-        allBytes.putUint8List(plane.bytes);
-      }
-      final bytes = allBytes.done().buffer.asUint8List();
-
-      // Determine rotation based on camera lens direction
-      // Front camera typically needs 270deg rotation on Android
       final camera = _controller?.description;
-      InputImageRotation imageRotation = InputImageRotation.rotation0deg;
+      if (camera == null) return null;
 
-      if (camera != null) {
-        if (camera.lensDirection == CameraLensDirection.front) {
-          // Front camera - typically 270deg on Android
-          imageRotation = InputImageRotation.rotation270deg;
-        } else {
-          // Back camera - typically 90deg on Android
-          imageRotation = InputImageRotation.rotation90deg;
-        }
-      }
+      final nv21 = _yuv420ToNv21(image);
+
+      final rotation = InputImageRotationValue.fromRawValue(
+        camera.sensorOrientation,
+      );
+      if (rotation == null) return null;
 
       final inputImageData = InputImageMetadata(
         size: Size(image.width.toDouble(), image.height.toDouble()),
-        rotation: imageRotation,
-        format: InputImageFormat.yuv420,
-        bytesPerRow: image.planes[0].bytesPerRow,
+        rotation: rotation,
+        format: InputImageFormat.nv21,
+        bytesPerRow: image.width,
       );
 
-      return InputImage.fromBytes(bytes: bytes, metadata: inputImageData);
+      return InputImage.fromBytes(bytes: nv21, metadata: inputImageData);
     } catch (e) {
       debugPrint('Error converting camera image: $e');
       return null;
     }
+  }
+
+  Uint8List _yuv420ToNv21(CameraImage image) {
+    final int width = image.width;
+    final int height = image.height;
+
+    final yPlane = image.planes[0];
+    final uPlane = image.planes[1];
+    final vPlane = image.planes[2];
+
+    final Uint8List nv21 = Uint8List(width * height + (width * height ~/ 2));
+
+    int offset = 0;
+    for (int row = 0; row < height; row++) {
+      final int rowStart = row * yPlane.bytesPerRow;
+      nv21.setRange(offset, offset + width, yPlane.bytes, rowStart);
+      offset += width;
+    }
+
+    final int uvHeight = height ~/ 2;
+    final int uvWidth = width ~/ 2;
+    for (int row = 0; row < uvHeight; row++) {
+      for (int col = 0; col < uvWidth; col++) {
+        final int uBpp = uPlane.bytesPerPixel ?? 1;
+        final int vBpp = vPlane.bytesPerPixel ?? 1;
+        final int uvIndex = row * uPlane.bytesPerRow + col * uBpp;
+        final int vuIndex = row * vPlane.bytesPerRow + col * vBpp;
+        nv21[offset++] = vPlane.bytes[vuIndex];
+        nv21[offset++] = uPlane.bytes[uvIndex];
+      }
+    }
+
+    return nv21;
   }
 
   Future<void> _captureVerifiedPhoto() async {
@@ -355,6 +377,58 @@ class _DocumentVerificationScreenState
 
       final image = await _controller!.takePicture();
       final imageBytes = await XFile(image.path).readAsBytes();
+
+      if (!mounted) return;
+
+      // Show preview dialog with the captured document
+      final confirmed = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => AlertDialog(
+          title: Text('${_getDocumentName()} Captured'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: Image.memory(
+                  imageBytes,
+                  width: 300,
+                  height: 400,
+                  fit: BoxFit.contain,
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'Is the document clear and readable?',
+                style: TextStyle(fontSize: 14),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Retake'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Use This Photo'),
+            ),
+          ],
+        ),
+      );
+
+      if (confirmed != true) {
+        // User wants to retake - restart verification
+        if (!mounted) return;
+        setState(() {
+          _currentStep = VerificationStep.detectFace;
+          _stepProgress = 0;
+        });
+        _startFaceDetection();
+        return;
+      }
 
       // Perform face matching
       bool faceMatched = false;
@@ -435,6 +509,10 @@ class _DocumentVerificationScreenState
 
             if (retry == true) {
               // Restart verification
+              setState(() {
+                _currentStep = VerificationStep.detectFace;
+                _stepProgress = 0;
+              });
               _startFaceDetection();
               return;
             } else {
@@ -538,6 +616,10 @@ class _DocumentVerificationScreenState
 
               if (retry == true) {
                 // Restart verification
+                setState(() {
+                  _currentStep = VerificationStep.detectFace;
+                  _stepProgress = 0;
+                });
                 _startFaceDetection();
                 return;
               } else {
@@ -774,32 +856,38 @@ class _DocumentVerificationScreenState
 
   Widget _buildInstructionCard() {
     String instruction;
+    String subInstruction = '';
     IconData icon;
     Color color;
 
     switch (_currentStep) {
       case VerificationStep.detectFace:
         instruction = 'Show your face clearly';
+        subInstruction = 'Position your face in the center';
         icon = Icons.face;
         color = Colors.blue;
         break;
       case VerificationStep.turnLeft:
         instruction = 'Turn your head LEFT slowly';
+        subInstruction = 'Look to your left side';
         icon = Icons.arrow_back;
         color = Colors.orange;
         break;
       case VerificationStep.turnRight:
         instruction = 'Turn your head RIGHT slowly';
+        subInstruction = 'Look to your right side';
         icon = Icons.arrow_forward;
         color = Colors.orange;
         break;
       case VerificationStep.holdDocument:
         instruction = 'Hold your ${_getDocumentName()} next to your face';
+        subInstruction = 'Show both your face and the document clearly in camera';
         icon = Icons.description;
         color = Colors.purple;
         break;
       case VerificationStep.capturing:
         instruction = 'Capturing... Please wait';
+        subInstruction = 'Hold steady';
         icon = Icons.camera_alt;
         color = Colors.green;
         break;
@@ -820,19 +908,30 @@ class _DocumentVerificationScreenState
           Icon(
             _stepProgress > 0 ? Icons.check_circle : icon,
             color: _stepProgress > 0 ? Colors.green : color,
-            size: 32,
+            size: 40,
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 12),
           Text(
             instruction,
             style: const TextStyle(
               color: Colors.white,
-              fontSize: 16,
+              fontSize: 18,
               fontWeight: FontWeight.bold,
             ),
             textAlign: TextAlign.center,
           ),
-          const SizedBox(height: 8),
+          if (subInstruction.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text(
+              subInstruction,
+              style: const TextStyle(
+                color: Colors.white70,
+                fontSize: 14,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ],
+          const SizedBox(height: 12),
           // Step indicator
           Row(
             mainAxisAlignment: MainAxisAlignment.center,

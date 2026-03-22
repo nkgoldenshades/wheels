@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
+import '../../app_tab_controller.dart';
 import '../../services/user_post_repository.dart';
 import '../../services/user_post_acceptance_repository.dart';
 import '../../services/auth_repository.dart';
@@ -103,6 +105,32 @@ class _UserPostDetailScreenState extends State<UserPostDetailScreen> {
                 style: const TextStyle(fontWeight: FontWeight.bold),
               ),
               Text(widget.post.notes!),
+            ],
+            // Parcel dimensions
+            if (widget.post.serviceType == ServiceType.parcel) ...[
+              const SizedBox(height: 8),
+              const Divider(),
+              const Text(
+                'Parcel Dimensions',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 4),
+              if (widget.post.parcelWeight != null)
+                _buildDetailRow('Weight', '${widget.post.parcelWeight} kg'),
+              if (widget.post.parcelLength != null)
+                _buildDetailRow('Length', '${widget.post.parcelLength} cm'),
+              if (widget.post.parcelWidth != null)
+                _buildDetailRow('Width', '${widget.post.parcelWidth} cm'),
+              if (widget.post.parcelHeight != null)
+                _buildDetailRow('Height', '${widget.post.parcelHeight} cm'),
+              if (widget.post.parcelWeight == null &&
+                  widget.post.parcelLength == null &&
+                  widget.post.parcelWidth == null &&
+                  widget.post.parcelHeight == null)
+                const Text(
+                  'No dimensions specified',
+                  style: TextStyle(color: Colors.grey),
+                ),
             ],
           ],
         ),
@@ -370,6 +398,9 @@ class _UserPostDetailScreenState extends State<UserPostDetailScreen> {
             backgroundColor: Colors.green,
           ),
         );
+        // Go to Requests tab
+        mainTabIndex.value = 1;
+        Navigator.of(context).popUntil((route) => route.isFirst);
       }
     } catch (e) {
       if (mounted) {
@@ -407,6 +438,23 @@ class _UserPostDetailScreenState extends State<UserPostDetailScreen> {
 
       if (!verified) {
         throw Exception('Invalid or expired OTP');
+      }
+
+      // On web, skip Razorpay and mark as paid directly
+      if (kIsWeb) {
+        await _acceptanceRepo.updatePaymentDetails(
+          acceptanceId: acceptance.id,
+          razorpayOrderId: 'web_mock_${DateTime.now().millisecondsSinceEpoch}',
+          razorpayPaymentId: 'web_mock_pay_${DateTime.now().millisecondsSinceEpoch}',
+          status: AcceptanceStatus.paid,
+        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Payment completed!'), backgroundColor: Colors.green),
+          );
+          _otpController.clear();
+        }
+        return;
       }
 
       // Create Razorpay order

@@ -123,6 +123,7 @@ class _BookingMapScreenState extends State<BookingMapScreen> {
       _startVehicleUpdates(from, to);
     }
 
+    if (!mounted) return;
     setState(() => _loading = false);
 
     // Fit camera after map is (presumably) ready
@@ -221,6 +222,7 @@ class _BookingMapScreenState extends State<BookingMapScreen> {
       LatLng(from.latitude, from.longitude),
       LatLng(to.latitude, to.longitude),
     );
+    if (!mounted) return;
     setState(() {
       _totalDistance = distance / 1000;
     });
@@ -235,6 +237,7 @@ class _BookingMapScreenState extends State<BookingMapScreen> {
       final lng = from.longitude + (to.longitude - from.longitude) * fraction;
       points.add(LatLng(lat, lng));
     }
+    if (!mounted) return;
     setState(() {
       _routePoints = points;
     });

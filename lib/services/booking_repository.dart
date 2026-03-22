@@ -128,6 +128,24 @@ class BookingRepository {
     return getRemainingCapacity(slotId, defaultCapacity) > 0;
   }
 
+  /// Call this when a slot's capacity is edited.
+  /// Recalculates remaining = newCapacity - activeBookings for that slot.
+  Future<void> recalculateCapacity(String slotId, int newCapacity) async {
+    final activeBookings = bookings.value
+        .where((b) =>
+            b.slotId == slotId &&
+            b.status != BookingStatus.rejected)
+        .length;
+    final newRemaining = (newCapacity - activeBookings).clamp(0, newCapacity);
+    remainingCapacityBySlotId.value = {
+      ...remainingCapacityBySlotId.value,
+      slotId: newRemaining,
+    };
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+        _capacityKey, jsonEncode(remainingCapacityBySlotId.value));
+  }
+
   Future<Booking?> createBooking({
     required String slotId,
     required String providerId,
@@ -144,6 +162,11 @@ class BookingRepository {
     int? userAge,
     String? userPhone,
     String? userEmail,
+    String? stripePaymentIntentId,
+    String? stripeClientSecret,
+    DateTime? countdownEndTime,
+    String? otp,
+    double? securityDeposit,
   }) async {
     if (seatKey != null) {
       final exists = bookings.value.any(
@@ -181,10 +204,15 @@ class BookingRepository {
       userAge: userAge,
       userPhone: userPhone,
       userEmail: userEmail,
-      status: BookingStatus.accepted,
-      otp: _generateOtp(),
+      status: stripePaymentIntentId != null ? BookingStatus.pending : BookingStatus.accepted,
+      otp: otp ?? _generateOtp(),
       otpVerified: false,
       createdAt: DateTime.now(),
+      stripePaymentIntentId: stripePaymentIntentId,
+      stripeClientSecret: stripeClientSecret,
+      countdownEndTime: countdownEndTime,
+      paymentHeldInEscrow: stripePaymentIntentId != null,
+      securityDeposit: securityDeposit,
     );
 
     bookings.value = [booking, ...bookings.value];
@@ -247,6 +275,34 @@ class BookingRepository {
         .toList(growable: false);
     await _persist();
     return true;
+  }
+
+  /// Update booking after escrow payment is captured
+  Future<void> updateBookingAfterPayment({
+    required String bookingId,
+    required BookingStatus status,
+    bool? otpVerified,
+  }) async {
+    bookings.value = bookings.value
+        .map(
+          (b) => (b.id == bookingId)
+              ? b.copyWith(
+                  status: status,
+                  otpVerified: otpVerified ?? b.otpVerified,
+                )
+              : b,
+        )
+        .toList(growable: false);
+    await _persist();
+  }
+
+  /// Get booking by ID
+  Booking? getBookingById(String bookingId) {
+    try {
+      return bookings.value.firstWhere((b) => b.id == bookingId);
+    } catch (_) {
+      return null;
+    }
   }
 
   String _generateOtp() {

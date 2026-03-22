@@ -10,6 +10,8 @@ import '../models/slot_type.dart';
 import '../models/pickup_mode.dart';
 import '../services/booking_repository.dart';
 import '../services/app_preferences.dart';
+import '../services/review_repository.dart';
+import '../services/location_autocomplete_service.dart';
 
 class SlotCard extends StatelessWidget {
   final Slot slot;
@@ -21,6 +23,7 @@ class SlotCard extends StatelessWidget {
   final bool isUserPost; // true = user post (looking for service), false = provider post (offering service)
   final VoidCallback onTap;
   final VoidCallback onAction;
+  final VoidCallback? onRatingTap;
 
   const SlotCard({
     super.key,
@@ -33,6 +36,7 @@ class SlotCard extends StatelessWidget {
     required this.isUserPost,
     required this.onTap,
     required this.onAction,
+    this.onRatingTap,
   });
 
   @override
@@ -86,6 +90,14 @@ class SlotCard extends StatelessWidget {
               _buildPriceCapacityRow(),
               const SizedBox(height: 12),
               
+              // PARCEL DIMENSIONS (only for parcel slots with dimensions set)
+              if (slot.serviceType == ServiceType.parcel &&
+                  (slot.maxWeight != null || slot.maxLength != null ||
+                   slot.maxWidth != null || slot.maxHeight != null)) ...[
+                _buildParcelDimensionsRow(),
+                const SizedBox(height: 12),
+              ],
+              
               // OPTIONAL NOTES
               if (slot.notes != null && slot.notes!.isNotEmpty) ...[
                 _buildNotesRow(),
@@ -99,6 +111,25 @@ class SlotCard extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  bool _isInsuranceValidNow() {
+    if (!vehicle.insuranceVerified) return false;
+    final exp = vehicle.insuranceExpiryDate;
+    if (exp == null) return true;
+    return exp.isAfter(DateTime.now());
+  }
+
+  bool _isVerifiedOptionAProviderVehicle() {
+    return vehicle.rcVerified && _isInsuranceValidNow() && vehicle.dlVerified;
+  }
+
+  bool _isVerifiedOptionBUser() {
+    return vehicle.aadhaarVerified && vehicle.panVerified && vehicle.dlVerified;
+  }
+
+  bool _shouldShowGoldenTick() {
+    return isUserPost ? _isVerifiedOptionBUser() : _isVerifiedOptionAProviderVehicle();
   }
 
   Uint8List? _tryDecodePhoto(String? photo) {
@@ -156,6 +187,8 @@ class SlotCard extends StatelessWidget {
   }
 
   (double, double)? _tryResolveLocation(String s) {
+    final fromRaw = _coordsFromRaw(s);
+    if (fromRaw != null) return fromRaw;
     final parsed = _tryParseLatLng(s);
     if (parsed != null) return parsed;
     return _cityLatLng(s);
@@ -243,23 +276,78 @@ class SlotCard extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                providerName,
-                style: const TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 16,
-                ),
-                overflow: TextOverflow.ellipsis,
-              ),
               Row(
                 children: [
-                  const Icon(Icons.star, size: 14, color: Colors.amber),
-                  const SizedBox(width: 4),
-                  Text(
-                    providerRating.toStringAsFixed(1),
-                    style: const TextStyle(fontSize: 14),
+                  Expanded(
+                    child: Text(
+                      providerName,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
+                  if (_shouldShowGoldenTick()) ...[
+                    const SizedBox(width: 6),
+                    const Icon(
+                      Icons.verified,
+                      size: 18,
+                      color: Color(0xFFFFC107),
+                    ),
+                  ],
                 ],
+              ),
+              ValueListenableBuilder(
+                valueListenable: ReviewRepository.instance.reviews,
+                builder: (context, reviews, _) {
+                  final userReviews = reviews
+                      .where((r) => r.revieweeId == vehicle.userId)
+                      .toList();
+                  final avg = userReviews.isEmpty
+                      ? 0.0
+                      : userReviews.fold<double>(0, (s, r) => s + r.rating) /
+                          userReviews.length;
+                  return GestureDetector(
+                    onTap: onRatingTap,
+                    child: Row(
+                      children: [
+                        const Icon(Icons.star, size: 14, color: Colors.amber),
+                        const SizedBox(width: 4),
+                        Text(
+                          avg.toStringAsFixed(1),
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: onRatingTap != null
+                                ? Colors.blue
+                                : Colors.black87,
+                            decoration: onRatingTap != null
+                                ? TextDecoration.underline
+                                : null,
+                          ),
+                        ),
+                        if (userReviews.isNotEmpty) ...[
+                          const SizedBox(width: 4),
+                          Text(
+                            '(${userReviews.length})',
+                            style: const TextStyle(
+                                fontSize: 12, color: Colors.grey),
+                          ),
+                        ],
+                      ],
+                    ),
+                  );
+                },
+              ),
+              const SizedBox(height: 2),
+              Text(
+                [
+                  vehicle.name,
+                  vehicle.type,
+                  if (vehicle.year != null) '${vehicle.year}',
+                ].join(' · '),
+                style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                overflow: TextOverflow.ellipsis,
               ),
             ],
           ),
@@ -296,29 +384,170 @@ class SlotCard extends StatelessWidget {
     );
   }
 
+  /// Extract coords from "Name|lat,lon|keywords" or "Name|lat,lon"
+  (double, double)? _coordsFromRaw(String? raw) {
+    if (raw == null || !raw.contains('|')) return null;
+    final parts = raw.split('|');
+    if (parts.length < 2) return null;
+    return _tryParseLatLng(parts[1]);
+  }
+
+  /// Strip |lat,lon|keywords — return just the display name
+  String _cleanLocation(String? raw) {
+    if (raw == null || raw.isEmpty) return '';
+    final trimmed = raw.trim();
+    return trimmed.contains('|') ? trimmed.split('|').first.trim() : trimmed;
+  }
+
+  /// Extract geo keyword part (3rd segment after second |)
+  String _geoKeywords(String? raw) {
+    if (raw == null || raw.isEmpty) return '';
+    final parts = raw.split('|');
+    if (parts.length < 3) return '';
+    return parts[2].trim(); // "district,state,postcode,country,IN"
+  }
+
+  /// Convert ISO country_code to flag emoji
+  String _flagFromKeywords(String keywords) {
+    // last part is country code e.g. "IN"
+    final parts = keywords.split(',');
+    final code = parts.last.trim();
+    if (code.length != 2) return '';
+    final base = 0x1F1E6 - 0x41;
+    final chars = code.toUpperCase().codeUnits;
+    return String.fromCharCode(base + chars[0]) +
+        String.fromCharCode(base + chars[1]);
+  }
+
   Widget _buildLocationRow() {
+    if (slot.slotType == SlotType.fromTo) {
+      final from = _cleanLocation(slot.fromLocation);
+      final to = _cleanLocation(slot.toLocation);
+      final fromGeo = _geoKeywords(slot.fromLocation);
+      final toGeo = _geoKeywords(slot.toLocation);
+      final fromCoords = _coordsFromRaw(slot.fromLocation);
+      final toCoords = _coordsFromRaw(slot.toLocation);
+
+      return Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.route, color: Colors.blue[700], size: 20),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _locationLine(from, fromGeo, coords: fromCoords),
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 2),
+                  child: Icon(Icons.arrow_downward, size: 14, color: Colors.grey),
+                ),
+                _locationLine(to, toGeo, coords: toCoords),
+              ],
+            ),
+          ),
+        ],
+      );
+    }
+
+    final base = _cleanLocation(slot.baseLocation);
+    final baseGeo = _geoKeywords(slot.baseLocation);
+    final baseCoords = _coordsFromRaw(slot.baseLocation);
+
     return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Icon(
-          slot.slotType == SlotType.fromTo ? Icons.route : Icons.location_on,
-          color: Colors.blue[700],
-          size: 20,
-        ),
+        Icon(Icons.location_on, color: Colors.blue[700], size: 20),
         const SizedBox(width: 8),
         Expanded(
-          child: Text(
-            slot.slotType == SlotType.fromTo
-                ? '${slot.fromLocation} → ${slot.toLocation}'
-                : 'Based in ${slot.baseLocation} · ${slot.radius?.toInt()} km range',
-            style: const TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-              color: Colors.black87,
-            ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _locationLine('Based in $base', baseGeo, coords: baseCoords),
+              if (slot.radius != null)
+                Text(
+                  '${slot.radius!.toInt()} km range',
+                  style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+                ),
+            ],
           ),
         ),
       ],
     );
+  }
+
+  Widget _locationLine(String label, String geoKeywords, {(double, double)? coords}) {
+    final flag = geoKeywords.isNotEmpty ? _flagFromKeywords(geoKeywords) : '';
+    final parts = geoKeywords.isNotEmpty ? geoKeywords.split(',') : <String>[];
+    String geoLine = '';
+    if (parts.length >= 2) {
+      final code = parts.last;
+      final rest = parts.sublist(0, parts.length - 1).join(' · ');
+      geoLine = code.length == 2 ? '$rest ($code)' : geoKeywords;
+    } else if (parts.length == 1) {
+      geoLine = parts.first;
+    }
+
+    // If we have geo keywords already, render immediately
+    if (geoLine.isNotEmpty) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            flag.isNotEmpty ? '$flag  $label' : label,
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87),
+          ),
+          Text(geoLine, style: TextStyle(fontSize: 11, color: Colors.grey[500])),
+        ],
+      );
+    }
+
+    // Fallback: resolve from coords via reverse geocode (old slots without keywords)
+    if (coords != null) {
+      return FutureBuilder<GeoLocation?>(
+        future: LocationAutocompleteService.instance
+            .reverseGeocode(coords.$1, coords.$2),
+        builder: (context, snap) {
+          final geo = snap.data;
+          final resolvedFlag = _flagFromCode(geo?.countryCode);
+          final district = geo?.district ?? geo?.stateDistrict;
+          final fallbackParts = <String>[
+            if (district != null) district,
+            if (geo?.state != null) geo!.state!,
+            if (geo?.postcode != null) geo!.postcode!,
+            if (geo?.country != null)
+              geo!.countryCode != null
+                  ? '${geo.country!} (${geo.countryCode!.toUpperCase()})'
+                  : geo.country!,
+          ];
+          final fallbackLine = fallbackParts.join(' · ');
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                resolvedFlag.isNotEmpty ? '$resolvedFlag  $label' : label,
+                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87),
+              ),
+              if (fallbackLine.isNotEmpty)
+                Text(fallbackLine, style: TextStyle(fontSize: 11, color: Colors.grey[500])),
+            ],
+          );
+        },
+      );
+    }
+
+    return Text(
+      label,
+      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87),
+    );
+  }
+
+  String _flagFromCode(String? code) {
+    if (code == null || code.length != 2) return '';
+    final base = 0x1F1E6 - 0x41;
+    final chars = code.toUpperCase().codeUnits;
+    return String.fromCharCode(base + chars[0]) +
+        String.fromCharCode(base + chars[1]);
   }
 
   Widget _buildPickupModeRow() {
@@ -342,15 +571,30 @@ class SlotCard extends StatelessWidget {
   }
 
   Widget _buildTimeRow() {
+    final duration = slot.endTime.difference(slot.startTime);
+    final hours = duration.inHours;
+    final minutes = duration.inMinutes % 60;
+    final durationText = hours > 0 && minutes > 0
+        ? '${hours}h ${minutes}m'
+        : hours > 0
+            ? '${hours}h'
+            : '${minutes}m';
+    final isValid = slot.endTime.isAfter(slot.startTime);
+
     return Row(
       children: [
         const Icon(Icons.access_time, size: 16, color: Colors.grey),
         const SizedBox(width: 8),
         Text(
           '${_formatTime(slot.startTime)} – ${_formatTime(slot.endTime)}',
-          style: const TextStyle(
-            fontSize: 14,
-            color: Colors.black87,
+          style: const TextStyle(fontSize: 14, color: Colors.black87),
+        ),
+        const SizedBox(width: 8),
+        Text(
+          isValid ? '($durationText)' : '(invalid)',
+          style: TextStyle(
+            fontSize: 12,
+            color: isValid ? Colors.grey[500] : Colors.red,
           ),
         ),
       ],
@@ -424,6 +668,24 @@ class SlotCard extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildParcelDimensionsRow() {
+    final parts = <String>[];
+    if (slot.maxWeight != null) parts.add('${slot.maxWeight}kg');
+    if (slot.maxLength != null) parts.add('${slot.maxLength}L');
+    if (slot.maxWidth != null) parts.add('${slot.maxWidth}W');
+    if (slot.maxHeight != null) parts.add('${slot.maxHeight}H cm');
+    return Row(
+      children: [
+        Icon(Icons.straighten, size: 14, color: Colors.grey[600]),
+        const SizedBox(width: 6),
+        Text(
+          parts.join(' · '),
+          style: TextStyle(fontSize: 13, color: Colors.grey[700]),
+        ),
+      ],
     );
   }
 

@@ -1,104 +1,109 @@
+import 'dart:convert';
 import 'package:flutter/foundation.dart';
-
-class VehicleReview {
-  final String id;
-  final String vehicleId;
-  final String reviewerName;
-  final double rating;
-  final String? comment;
-  final DateTime createdAt;
-
-  const VehicleReview({
-    required this.id,
-    required this.vehicleId,
-    required this.reviewerName,
-    required this.rating,
-    this.comment,
-    required this.createdAt,
-  });
-}
-
-class BookingReview {
-  final String id;
-  final String bookingId;
-  final String providerId;
-  final String userId;
-  final double rating;
-  final String? comment;
-  final DateTime createdAt;
-
-  const BookingReview({
-    required this.id,
-    required this.bookingId,
-    required this.providerId,
-    required this.userId,
-    required this.rating,
-    this.comment,
-    required this.createdAt,
-  });
-}
+import 'package:shared_preferences/shared_preferences.dart';
+import '../models/review.dart';
 
 class ReviewRepository {
   ReviewRepository._();
-
   static final ReviewRepository instance = ReviewRepository._();
 
-  final ValueNotifier<List<VehicleReview>> _vehicleReviews =
-      ValueNotifier<List<VehicleReview>>(<VehicleReview>[]);
+  static const _storageKey = 'reviews_data';
 
-  final ValueNotifier<List<BookingReview>> _bookingReviews =
-      ValueNotifier<List<BookingReview>>(<BookingReview>[]);
+  final ValueNotifier<List<Review>> reviews = ValueNotifier<List<Review>>([]);
 
-  ValueListenable<List<VehicleReview>> get vehicleReviews => _vehicleReviews;
-  ValueListenable<List<BookingReview>> get bookingReviews => _bookingReviews;
-
-  List<VehicleReview> getReviewsForVehicle(String vehicleId) {
-    return _vehicleReviews.value.where((r) => r.vehicleId == vehicleId).toList();
+  Future<void> init() async {
+    await _load();
   }
 
-  List<BookingReview> getReviewsForProvider(String providerId) {
-    return _bookingReviews.value.where((r) => r.providerId == providerId).toList();
+  Future<void> _load() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final reviewsData = prefs.getString(_storageKey);
+      if (reviewsData != null) {
+        final List<dynamic> jsonList = jsonDecode(reviewsData);
+        reviews.value = jsonList
+            .map((e) => Review.fromJson(e as Map<String, dynamic>))
+            .toList();
+      }
+    } catch (e) {
+      debugPrint('Error loading reviews: $e');
+    }
   }
 
-  List<BookingReview> getReviewsForUser(String userId) {
-    return _bookingReviews.value.where((r) => r.userId == userId).toList();
+  Future<void> _persist() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final reviewsData = jsonEncode(
+        reviews.value.map((e) => e.toJson()).toList(),
+      );
+      await prefs.setString(_storageKey, reviewsData);
+    } catch (e) {
+      debugPrint('Error persisting reviews: $e');
+    }
   }
 
-  void addReview({
-    required String vehicleId,
-    required String reviewerName,
-    required double rating,
-    String? comment,
-  }) {
-    final newReview = VehicleReview(
-      id: DateTime.now().microsecondsSinceEpoch.toString(),
-      vehicleId: vehicleId,
-      reviewerName: reviewerName,
-      rating: rating,
-      comment: comment?.trim().isEmpty == true ? null : comment?.trim(),
-      createdAt: DateTime.now(),
-    );
-
-    _vehicleReviews.value = [newReview, ..._vehicleReviews.value];
-  }
-
-  void addBookingReview({
+  /// Add a new review
+  Future<Review> addReview({
     required String bookingId,
-    required String providerId,
-    required String userId,
+    required String reviewerId,
+    required String revieweeId,
+    required ReviewType type,
     required double rating,
     String? comment,
-  }) {
-    final newReview = BookingReview(
+  }) async {
+    final review = Review(
       id: DateTime.now().microsecondsSinceEpoch.toString(),
       bookingId: bookingId,
-      providerId: providerId,
-      userId: userId,
+      reviewerId: reviewerId,
+      revieweeId: revieweeId,
+      type: type,
       rating: rating,
-      comment: comment?.trim().isEmpty == true ? null : comment?.trim(),
+      comment: comment,
       createdAt: DateTime.now(),
     );
 
-    _bookingReviews.value = [newReview, ..._bookingReviews.value];
+    reviews.value = [review, ...reviews.value];
+    await _persist();
+    return review;
+  }
+
+  /// Check if user has already reviewed a booking
+  bool hasReviewed({required String bookingId, required String reviewerId}) {
+    return reviews.value.any(
+      (r) => r.bookingId == bookingId && r.reviewerId == reviewerId,
+    );
+  }
+
+  /// Get reviews for a specific user/provider
+  List<Review> getReviewsForUser(String userId) {
+    return reviews.value.where((r) => r.revieweeId == userId).toList();
+  }
+
+  /// Get reviews by a specific user
+  List<Review> getReviewsByUser(String userId) {
+    return reviews.value.where((r) => r.reviewerId == userId).toList();
+  }
+
+  /// Get average rating for a user
+  double getAverageRating(String userId) {
+    final userReviews = getReviewsForUser(userId);
+    if (userReviews.isEmpty) return 0.0;
+    
+    final sum = userReviews.fold<double>(0, (sum, r) => sum + r.rating);
+    return sum / userReviews.length;
+  }
+
+  /// Get review for a specific booking
+  Review? getReviewForBooking({
+    required String bookingId,
+    required String reviewerId,
+  }) {
+    try {
+      return reviews.value.firstWhere(
+        (r) => r.bookingId == bookingId && r.reviewerId == reviewerId,
+      );
+    } catch (_) {
+      return null;
+    }
   }
 }

@@ -78,21 +78,30 @@ class UserVehicleRepository {
 
   Future<void> addVehicle(Vehicle vehicle) async {
     try {
-      // Add to Supabase
-      final vehicleJson = vehicle.toJson();
-      vehicleJson['is_user_vehicle'] = true; // User vehicle
-
-      try {
-        await _supabase.from('vehicles').insert(vehicleJson);
-      } on PostgrestException catch (e) {
-        if (e.code == '42703') {
-          final fallbackJson = Map<String, dynamic>.from(vehicleJson);
-          fallbackJson.remove('is_user_vehicle');
-          await _supabase.from('vehicles').insert(fallbackJson);
-        } else {
-          rethrow;
-        }
+      // Add to Supabase (match the real public.vehicles schema)
+      final photos = <String>[];
+      if (vehicle.profileImage != null && vehicle.profileImage!.trim().isNotEmpty) {
+        photos.add(vehicle.profileImage!.trim());
       }
+      photos.addAll(vehicle.galleryImages.where((e) => e.trim().isNotEmpty));
+
+      final payload = <String, dynamic>{
+        'id': vehicle.id,
+        'user_id': vehicle.userId,
+        'name': vehicle.name,
+        'type': vehicle.type,
+        'year': vehicle.year,
+        'capabilities': vehicle.capabilities.map((e) => e.name).toList(),
+        'photos': photos,
+        'created_at': vehicle.createdAt.toIso8601String(),
+        'updated_at': DateTime.now().toIso8601String(),
+      };
+
+      debugPrint(
+        '🚗 Supabase vehicle insert payload (user): id=${payload['id']} user_id=${payload['user_id']}',
+      );
+
+      await _supabase.from('vehicles').insert(payload);
 
       // Update local state
       vehiclesListenable.value = [...vehiclesListenable.value, vehicle];
@@ -109,10 +118,31 @@ class UserVehicleRepository {
   Future<void> updateVehicle(Vehicle vehicle) async {
     try {
       // Update in Supabase
-      await _supabase
-          .from('vehicles')
-          .update(vehicle.toJson())
-          .eq('id', vehicle.id);
+      Map<String, dynamic> payload = Map<String, dynamic>.from(vehicle.toJson());
+      while (true) {
+        try {
+          await _supabase.from('vehicles').update(payload).eq('id', vehicle.id);
+          break;
+        } on PostgrestException catch (e) {
+          if (e.code == '42703') {
+            payload.remove('is_online');
+            payload.remove('is_user_vehicle');
+            continue;
+          }
+          if (e.code == 'PGRST204') {
+            final match = RegExp(r"Could not find the '([^']+)' column").firstMatch(
+              e.message,
+            );
+            final missingColumn = match?.group(1);
+            if (missingColumn == null || !payload.containsKey(missingColumn)) {
+              rethrow;
+            }
+            payload.remove(missingColumn);
+            continue;
+          }
+          rethrow;
+        }
+      }
 
       // Update local state
       vehiclesListenable.value = vehiclesListenable.value
@@ -180,13 +210,17 @@ class UserVehicleRepository {
   Future<void> setOnline(String vehicleId, bool isOnline) async {
     try {
       // Update in Supabase
-      await _supabase
-          .from('vehicles')
-          .update({
-            'is_online': isOnline,
-            'updated_at': DateTime.now().toIso8601String(),
-          })
-          .eq('id', vehicleId);
+      try {
+        await _supabase
+            .from('vehicles')
+            .update({
+              'is_online': isOnline,
+              'updated_at': DateTime.now().toIso8601String(),
+            })
+            .eq('id', vehicleId);
+      } on PostgrestException catch (e) {
+        if (e.code != '42703') rethrow;
+      }
 
       // Update local state
       final newStatus = Map<String, bool>.from(onlineStatusListenable.value);

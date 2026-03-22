@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../models/slot.dart';
 import '../../models/slot_entry.dart';
 import '../../models/service_type.dart';
+import '../../models/vehicle.dart';
 import '../../services/slot_repository.dart';
 import '../../services/vehicle_repository.dart';
 import '../vehicle/vehicle_list_screen.dart';
@@ -19,6 +20,17 @@ class _MyPostsUnifiedPageState extends State<MyPostsUnifiedPage>
     with SingleTickerProviderStateMixin {
   int _selectedTab = 0;
   late TabController _tabController;
+
+  bool _isInsuranceValidNow(Vehicle vehicle) {
+    if (!vehicle.insuranceVerified) return false;
+    final exp = vehicle.insuranceExpiryDate;
+    if (exp == null) return true;
+    return exp.isAfter(DateTime.now());
+  }
+
+  bool _isFullyVerified(Vehicle vehicle) {
+    return vehicle.rcVerified && _isInsuranceValidNow(vehicle) && vehicle.dlVerified;
+  }
 
   @override
   void initState() {
@@ -143,12 +155,26 @@ class _MyPostsUnifiedPageState extends State<MyPostsUnifiedPage>
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        vehicle.name,
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 16,
-                        ),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              vehicle.name,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
+                              ),
+                            ),
+                          ),
+                          if (_isFullyVerified(vehicle)) ...[
+                            const SizedBox(width: 6),
+                            const Icon(
+                              Icons.verified,
+                              size: 18,
+                              color: Color(0xFFFFC107),
+                            ),
+                          ],
+                        ],
                       ),
                       Text(
                         '${vehicle.type} • ${vehicle.year}',

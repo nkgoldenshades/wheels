@@ -47,5 +47,9 @@
 	<true/>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>This app needs access to your photo library to choose a profile picture.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>This app needs your location to show your current position on the map.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>This app needs your location to show your current position on the map.</string>
 </dict>
 </plist>

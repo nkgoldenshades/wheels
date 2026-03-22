@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
 import '../../services/stripe_service.dart';
+import '../../services/booking_repository.dart';
+import '../../models/booking.dart';
 
 class BookingDetailsScreen extends StatefulWidget {
   final String bookingId;
@@ -92,12 +94,22 @@ class _BookingDetailsScreenState extends State<BookingDetailsScreen> {
       if (!mounted) return;
 
       if (success) {
+        // Update local booking status
+        await BookingRepository.instance.updateBookingAfterPayment(
+          bookingId: widget.bookingId,
+          status: BookingStatus.completed,
+          otpVerified: true,
+        );
+
+        if (!mounted) return;
+
         setState(() {
           _status = 'completed';
         });
+        
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Payment released successfully!'),
+            content: Text('✅ Payment released to provider!'),
             backgroundColor: Colors.green,
           ),
         );

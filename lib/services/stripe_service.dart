@@ -2,6 +2,8 @@ import 'package:flutter_stripe/flutter_stripe.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
+import 'package:url_launcher/url_launcher.dart';
 import 'dart:convert';
 
 class StripeService {
@@ -17,6 +19,17 @@ class StripeService {
       'https://us-central1-quickohunt-app.cloudfunctions.net';
 
   bool _initialized = false;
+
+  Future<Map<String, String>> _authorizedJsonHeaders() async {
+    final headers = <String, String>{'Content-Type': 'application/json'};
+    final user = firebase_auth.FirebaseAuth.instance.currentUser;
+    if (user == null) return headers;
+    final token = await user.getIdToken(true);
+    if (token != null && token.isNotEmpty) {
+      headers['Authorization'] = 'Bearer $token';
+    }
+    return headers;
+  }
 
   Future<void> init() async {
     if (_initialized) return;
@@ -49,6 +62,11 @@ class StripeService {
 
   /// Present payment sheet to user
   Future<bool> presentPaymentSheet({required String clientSecret}) async {
+    if (kIsWeb) {
+      throw UnsupportedError(
+        'Web checkout is not configured for Stripe PaymentSheet.',
+      );
+    }
     try {
       await Stripe.instance.initPaymentSheet(
         paymentSheetParameters: SetupPaymentSheetParameters(
@@ -66,30 +84,122 @@ class StripeService {
   }
 
   /// Complete payment flow
-  Future<bool> processPayment({
+  Future<Map<String, dynamic>?> processPayment({
     required int amount,
     required String currency,
     required String providerId,
+    required String userId,
     required int applicationFee,
+    String? postId,
+    String? slotId,
   }) async {
     try {
+      // On web: create a Stripe Checkout session and redirect to hosted page
+      if (kIsWeb) {
+        return await _processWebCheckout(
+          amount: amount,
+          currency: currency,
+          providerId: providerId,
+          userId: userId,
+          applicationFee: applicationFee,
+          slotId: slotId,
+          postId: postId,
+        );
+      }
+
       final booking = await createBooking(
-        userId: 'unknown',
+        userId: userId,
         providerId: providerId,
-        postId: 'unknown',
+        postId: postId,
+        slotId: slotId,
         amount: amount,
         currency: currency,
         commissionAmount: applicationFee,
         countdownHours: 1,
       );
-      if (booking == null) return false;
+      if (booking == null) {
+        return {
+          'error': 'Unable to create booking. Please check login and try again.',
+        };
+      }
 
       final clientSecret = booking['client_secret'] as String?;
-      if (clientSecret == null || clientSecret.trim().isEmpty) return false;
+      if (clientSecret == null || clientSecret.trim().isEmpty) {
+        return {'error': 'Missing payment client secret from server.'};
+      }
 
-      return await presentPaymentSheet(clientSecret: clientSecret);
+      final success = await presentPaymentSheet(clientSecret: clientSecret);
+      if (!success) {
+        return {'error': 'Payment was cancelled or could not be completed.'};
+      }
+
+      // Return booking details for local storage
+      return booking;
     } catch (e) {
-      return false;
+      return {'error': e.toString()};
+    }
+  }
+
+  /// Web: create a Stripe Checkout session via backend and redirect browser to it.
+  Future<Map<String, dynamic>?> _processWebCheckout({
+    required int amount,
+    required String currency,
+    required String providerId,
+    required String userId,
+    required int applicationFee,
+    String? slotId,
+    String? postId,
+  }) async {
+    try {
+      final headers = await _authorizedJsonHeaders();
+      final response = await http.post(
+        Uri.parse('$backendUrl/createCheckoutSession'),
+        headers: headers,
+        body: json.encode({
+          'user_id': userId,
+          'provider_id': providerId,
+          if (slotId != null) 'slot_id': slotId,
+          if (postId != null) 'post_id': postId,
+          'amount': amount,
+          'currency': currency,
+          'commission_amount': applicationFee,
+          // success/cancel URLs — update to your actual domain
+          'success_url': 'https://quickohunt.web.app/#/payment-success',
+          'cancel_url': 'https://quickohunt.web.app/#/payment-cancel',
+        }),
+      );
+
+      if (response.statusCode != 200) {
+        return {'error': 'Could not create checkout session. Try again.'};
+      }
+
+      final data = json.decode(response.body) as Map<String, dynamic>;
+      final checkoutUrl = data['url'] as String?;
+
+      if (checkoutUrl == null || checkoutUrl.isEmpty) {
+        return {'error': 'No checkout URL returned from server.'};
+      }
+
+      final launched = await launchUrl(
+        Uri.parse(checkoutUrl),
+        mode: LaunchMode.externalApplication,
+      );
+
+      if (!launched) {
+        return {'error': 'Could not open Stripe checkout. Please try on mobile.'};
+      }
+
+      // Return pending — confirmed via Stripe webhook on backend
+      return {
+        'gateway': 'stripe_web',
+        'payment_intent_id': data['payment_intent'] as String?,
+        'client_secret': null,
+        'web_redirect': true,
+        'otp': data['otp'] as String?,
+        'countdown_end_time': data['countdown_end_time'] as String?,
+      };
+    } catch (e) {
+      return {'error': e.toString()};
     }
   }
 
@@ -109,9 +219,10 @@ class StripeService {
     required int commissionAmount,
   }) async {
     try {
+      final headers = await _authorizedJsonHeaders();
       final response = await http.post(
         Uri.parse('$backendUrl/releaseFunds'),
-        headers: {'Content-Type': 'application/json'},
+        headers: headers,
         body: json.encode({
           'payment_intent_id': paymentIntentId,
           'provider_id': providerId,
@@ -132,9 +243,10 @@ class StripeService {
     required int amount,
   }) async {
     try {
+      final headers = await _authorizedJsonHeaders();
       final response = await http.post(
         Uri.parse('$backendUrl/refundPayment'),
-        headers: {'Content-Type': 'application/json'},
+        headers: headers,
         body: json.encode({
           'payment_intent_id': paymentIntentId,
           'amount': amount,
@@ -151,20 +263,23 @@ class StripeService {
   Future<Map<String, dynamic>?> createBooking({
     required String userId,
     required String providerId,
-    required String postId,
+    String? postId,
+    String? slotId,
     required int amount,
     required String currency,
     required int commissionAmount,
     required int countdownHours,
   }) async {
     try {
+      final headers = await _authorizedJsonHeaders();
       final response = await http.post(
         Uri.parse('$backendUrl/createBooking'),
-        headers: {'Content-Type': 'application/json'},
+        headers: headers,
         body: json.encode({
           'user_id': userId,
           'provider_id': providerId,
-          'post_id': postId,
+          if (postId != null) 'post_id': postId,
+          if (slotId != null) 'slot_id': slotId,
           'amount': amount,
           'currency': currency,
           'commission_amount': commissionAmount,
@@ -173,6 +288,9 @@ class StripeService {
       );
 
       if (response.statusCode != 200) {
+        debugPrint(
+          'createBooking failed: ${response.statusCode} ${response.body}',
+        );
         return null;
       }
 
@@ -188,9 +306,10 @@ class StripeService {
     required String otp,
   }) async {
     try {
+      final headers = await _authorizedJsonHeaders();
       final response = await http.post(
         Uri.parse('$backendUrl/verifyOtp'),
-        headers: {'Content-Type': 'application/json'},
+        headers: headers,
         body: json.encode({'booking_id': bookingId, 'otp': otp}),
       );
 

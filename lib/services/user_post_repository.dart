@@ -20,9 +20,17 @@ class UserPost {
   final double budget;
   final int persons;
   final String? notes;
+  final bool requiresVerifiedVehicle;
+  final bool requiresExpertVehicle;
   final DateTime createdAt;
   final UserPostStatus status;
   final bool isOnline;
+
+  // Parcel-specific fields
+  final double? parcelWeight; // kg
+  final double? parcelLength; // cm
+  final double? parcelWidth;  // cm
+  final double? parcelHeight; // cm
 
   static const Object _unset = Object();
 
@@ -40,9 +48,15 @@ class UserPost {
     required this.budget,
     required this.persons,
     this.notes,
+    this.requiresVerifiedVehicle = false,
+    this.requiresExpertVehicle = false,
     required this.createdAt,
     required this.status,
     this.isOnline = true,
+    this.parcelWeight,
+    this.parcelLength,
+    this.parcelWidth,
+    this.parcelHeight,
   });
 
   UserPost copyWith({
@@ -59,9 +73,15 @@ class UserPost {
     double? budget,
     int? persons,
     Object? notes = _unset,
+    bool? requiresVerifiedVehicle,
+    bool? requiresExpertVehicle,
     DateTime? createdAt,
     UserPostStatus? status,
     bool? isOnline,
+    Object? parcelWeight = _unset,
+    Object? parcelLength = _unset,
+    Object? parcelWidth = _unset,
+    Object? parcelHeight = _unset,
   }) {
     return UserPost(
       id: id ?? this.id,
@@ -83,9 +103,16 @@ class UserPost {
       budget: budget ?? this.budget,
       persons: persons ?? this.persons,
       notes: identical(notes, _unset) ? this.notes : notes as String?,
+      requiresVerifiedVehicle:
+          requiresVerifiedVehicle ?? this.requiresVerifiedVehicle,
+      requiresExpertVehicle: requiresExpertVehicle ?? this.requiresExpertVehicle,
       createdAt: createdAt ?? this.createdAt,
       status: status ?? this.status,
       isOnline: isOnline ?? this.isOnline,
+      parcelWeight: identical(parcelWeight, _unset) ? this.parcelWeight : parcelWeight as double?,
+      parcelLength: identical(parcelLength, _unset) ? this.parcelLength : parcelLength as double?,
+      parcelWidth: identical(parcelWidth, _unset) ? this.parcelWidth : parcelWidth as double?,
+      parcelHeight: identical(parcelHeight, _unset) ? this.parcelHeight : parcelHeight as double?,
     );
   }
 
@@ -104,8 +131,14 @@ class UserPost {
       'budget': budget,
       'persons': persons,
       'notes': notes,
+      'requires_verified_vehicle': requiresVerifiedVehicle,
+      'requires_expert_vehicle': requiresExpertVehicle,
       'status': status.name,
       'is_online': isOnline,
+      'parcel_weight': parcelWeight,
+      'parcel_length': parcelLength,
+      'parcel_width': parcelWidth,
+      'parcel_height': parcelHeight,
     };
   }
 
@@ -129,12 +162,19 @@ class UserPost {
       budget: (json['budget'] as num).toDouble(),
       persons: json['persons'] as int,
       notes: json['notes'] as String?,
+      requiresVerifiedVehicle:
+          json['requires_verified_vehicle'] as bool? ?? false,
+      requiresExpertVehicle: json['requires_expert_vehicle'] as bool? ?? false,
       createdAt: DateTime.parse(json['created_at'] as String),
       status: UserPostStatus.values.firstWhere(
         (e) => e.name == json['status'],
         orElse: () => UserPostStatus.active,
       ),
       isOnline: json['is_online'] as bool? ?? false,
+      parcelWeight: (json['parcel_weight'] as num?)?.toDouble(),
+      parcelLength: (json['parcel_length'] as num?)?.toDouble(),
+      parcelWidth: (json['parcel_width'] as num?)?.toDouble(),
+      parcelHeight: (json['parcel_height'] as num?)?.toDouble(),
     );
   }
 }

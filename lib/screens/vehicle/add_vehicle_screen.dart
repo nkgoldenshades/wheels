@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'dart:convert';
 import 'dart:typed_data';
+import 'dart:math';
 
 import '../../models/service_type.dart';
 import '../../models/vehicle.dart';
@@ -21,15 +22,32 @@ class _AddVehicleScreenState extends State<AddVehicleScreen> {
   final _nameController = TextEditingController();
   final _customTypeController = TextEditingController();
   final _yearController = TextEditingController();
+
+  String _uuidV4() {
+    final rnd = Random.secure();
+    final bytes = List<int>.generate(16, (_) => rnd.nextInt(256));
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    String hex(int v) => v.toRadixString(16).padLeft(2, '0');
+    final b = bytes;
+    return '${hex(b[0])}${hex(b[1])}${hex(b[2])}${hex(b[3])}'
+        '-${hex(b[4])}${hex(b[5])}'
+        '-${hex(b[6])}${hex(b[7])}'
+        '-${hex(b[8])}${hex(b[9])}'
+        '-${hex(b[10])}${hex(b[11])}${hex(b[12])}${hex(b[13])}${hex(b[14])}${hex(b[15])}';
+  }
   String? _selectedVehicleType;
   final List<String> _vehicleTypes = [
     'Car',
     'Bike',
     'Truck',
     'Bus',
+    'Van',
+    'Ship',
+    'Boat',
+    'Rocket',
     'Train',
     'Flight',
-    'Rocket',
     'Other',
   ];
 
@@ -730,18 +748,20 @@ class _AddVehicleScreenState extends State<AddVehicleScreen> {
       return;
     }
 
+    final name = _nameController.text.trim();
+    final type = (_selectedVehicleType == 'Other'
+            ? _customTypeController.text.trim()
+            : (_selectedVehicleType ?? ''))
+        .trim();
     final yearText = _yearController.text.trim();
     final int? year = yearText.isEmpty ? null : int.tryParse(yearText);
 
     final vehicle = Vehicle(
-      id: DateTime.now().millisecondsSinceEpoch.toString(),
+      id: _uuidV4(),
       userId: AuthRepository.instance.currentUser?.id ?? '',
-      userName:
-          AuthRepository.instance.currentUser?.profileName ?? 'Unknown User',
-      name: _nameController.text.trim(),
-      type: _selectedVehicleType == 'Other'
-          ? _customTypeController.text.trim()
-          : _selectedVehicleType!,
+      userName: AuthRepository.instance.currentUser?.profileName ?? 'Unknown User',
+      name: name,
+      type: type,
       year: year,
       capabilities: caps,
       profileImage: _profileImageBase64,

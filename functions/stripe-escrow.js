@@ -1,5 +1,6 @@
 const functions = require('firebase-functions');
 const admin = require('firebase-admin');
+const { createClient } = require('@supabase/supabase-js');
 
 const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
 if (!stripeSecretKey) {
@@ -7,8 +8,29 @@ if (!stripeSecretKey) {
 }
 const stripe = require('stripe')(stripeSecretKey);
 
-// Get Firestore instance (admin is already initialized in index.js)
-const db = admin.firestore();
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+if (!supabaseUrl) {
+  throw new Error('Missing SUPABASE_URL environment variable');
+}
+if (!supabaseServiceRoleKey) {
+  throw new Error('Missing SUPABASE_SERVICE_ROLE_KEY environment variable');
+}
+
+const supabase = createClient(supabaseUrl, supabaseServiceRoleKey, {
+  auth: { persistSession: false },
+});
+
+async function _getAuthUid(req) {
+  const header = req.headers?.authorization || req.headers?.Authorization;
+  if (!header || typeof header !== 'string') return null;
+  const m = header.match(/^Bearer\s+(.+)$/i);
+  if (!m) return null;
+  const token = m[1];
+  if (!token) return null;
+  const decoded = await admin.auth().verifyIdToken(token);
+  return decoded?.uid ?? null;
+}
 
 /**
  * Generate a 6-digit OTP
@@ -38,7 +60,7 @@ exports.createBooking = functions.https.onRequest(async (req, res) => {
   res.set('Access-Control-Allow-Origin', '*');
   if (req.method === 'OPTIONS') {
     res.set('Access-Control-Allow-Methods', 'POST');
-    res.set('Access-Control-Allow-Headers', 'Content-Type');
+    res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
     return res.status(204).send('');
   }
 
@@ -46,11 +68,22 @@ exports.createBooking = functions.https.onRequest(async (req, res) => {
     user_id,
     provider_id,
     post_id,
+    slot_id,
     amount,
     currency,
     commission_amount,
     countdown_hours,
   } = req.body;
+
+  let callerUid = null;
+  try {
+    callerUid = await _getAuthUid(req);
+  } catch (e) {
+    return res.status(401).json({ error: 'Invalid auth token' });
+  }
+  if (!callerUid) {
+    return res.status(401).json({ error: 'Missing auth token' });
+  }
 
   const parsedAmount = _toInt(amount);
   const parsedCommission = _toInt(commission_amount) ?? 0;
@@ -60,8 +93,11 @@ exports.createBooking = functions.https.onRequest(async (req, res) => {
       ? currency.trim().toLowerCase()
       : 'inr';
 
-  if (!user_id || !provider_id || !post_id) {
+  if (!user_id || !provider_id || (!post_id && !slot_id)) {
     return res.status(400).json({ error: 'Missing required fields' });
+  }
+  if (callerUid !== user_id) {
+    return res.status(403).json({ error: 'Forbidden' });
   }
   if (parsedAmount === null || parsedAmount <= 0) {
     return res.status(400).json({ error: 'Invalid amount' });
@@ -74,19 +110,21 @@ exports.createBooking = functions.https.onRequest(async (req, res) => {
   }
 
   try {
+    const referenceId = slot_id || post_id;
     const paymentIntent = await stripe.paymentIntents.create(
       {
         amount: parsedAmount,
         currency: normalizedCurrency,
         capture_method: 'manual',
-      metadata: {
-        user_id: user_id,
-        provider_id: provider_id,
-        post_id: post_id,
-      },
+        metadata: {
+          user_id: user_id,
+          provider_id: provider_id,
+          ...(post_id ? { post_id: post_id } : {}),
+          ...(slot_id ? { slot_id: slot_id } : {}),
+        },
       },
       {
-        idempotencyKey: `pi:${user_id}:${provider_id}:${post_id}:${parsedAmount}:${normalizedCurrency}`,
+        idempotencyKey: `pi:${user_id}:${provider_id}:${referenceId}:${parsedAmount}:${normalizedCurrency}`,
       },
     );
 
@@ -97,28 +135,49 @@ exports.createBooking = functions.https.onRequest(async (req, res) => {
     const countdownEndTime = new Date();
     countdownEndTime.setHours(countdownEndTime.getHours() + parsedCountdownHours);
 
-    // 4. Create booking in Firestore
-    const bookingRef = await db.collection('bookings').add({
+    // 4. Create booking in Supabase
+    const countdownIso = countdownEndTime.toISOString();
+    const createdIso = new Date().toISOString();
+    const insertPayload = {
       user_id: user_id,
       provider_id: provider_id,
-      post_id: post_id,
+      ...(post_id ? { post_id: post_id } : {}),
+      ...(slot_id ? { slot_id: slot_id } : {}),
       stripe_payment_intent_id: paymentIntent.id,
       amount: parsedAmount,
       currency: normalizedCurrency,
       commission_amount: parsedCommission,
       otp: otp,
-      countdown_end_time: admin.firestore.Timestamp.fromDate(countdownEndTime),
+      otp_verified: false,
+      countdown_end_time: countdownIso,
       status: 'pending',
-      created_at: admin.firestore.FieldValue.serverTimestamp(),
-    });
+      created_at: createdIso,
+    };
+
+    const { data: insertedBooking, error: insertError } = await supabase
+      .from('bookings')
+      .insert(insertPayload)
+      .select('id')
+      .single();
+
+    if (insertError) {
+      console.error('Supabase insert booking error:', insertError);
+      throw new Error('Failed to create booking');
+    }
+
+    const bookingId = insertedBooking?.id;
+    if (!bookingId) {
+      throw new Error('Failed to create booking');
+    }
 
     // 5. Send OTP to provider (via notification/SMS)
     // TODO: Implement notification service
-    console.log(`OTP for booking ${bookingRef.id}: ${otp}`);
+    console.log(`OTP for booking ${bookingId}: ${otp}`);
 
     res.json({
       success: true,
-      booking_id: bookingRef.id,
+      booking_id: bookingId,
+      payment_intent_id: paymentIntent.id,
       client_secret: paymentIntent.client_secret,
       otp: otp, // Remove this in production! Only for testing
       countdown_end_time: countdownEndTime.toISOString(),
@@ -137,7 +196,7 @@ exports.verifyOtp = functions.https.onRequest(async (req, res) => {
   res.set('Access-Control-Allow-Origin', '*');
   if (req.method === 'OPTIONS') {
     res.set('Access-Control-Allow-Methods', 'POST');
-    res.set('Access-Control-Allow-Headers', 'Content-Type');
+    res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
     return res.status(204).send('');
   }
 
@@ -147,48 +206,87 @@ exports.verifyOtp = functions.https.onRequest(async (req, res) => {
     return res.status(400).json({ error: 'Missing booking_id or otp' });
   }
 
+  let callerUid = null;
   try {
-    const bookingRef = db.collection('bookings').doc(booking_id);
+    callerUid = await _getAuthUid(req);
+  } catch (e) {
+    return res.status(401).json({ error: 'Invalid auth token' });
+  }
+  if (!callerUid) {
+    return res.status(401).json({ error: 'Missing auth token' });
+  }
 
-    const booking = await db.runTransaction(async (tx) => {
-      const bookingDoc = await tx.get(bookingRef);
-      if (!bookingDoc.exists) {
-        throw Object.assign(new Error('Booking not found'), { code: 404 });
-      }
+  try {
+    const nowIso = new Date().toISOString();
 
-      const b = bookingDoc.data();
-      if (b.status !== 'pending') {
+    // Load booking first to check provider ownership (auth)
+    const { data: existingBooking, error: bookingGetError } = await supabase
+      .from('bookings')
+      .select('*')
+      .eq('id', booking_id)
+      .maybeSingle();
+
+    if (bookingGetError) {
+      console.error('Supabase get booking error:', bookingGetError);
+      throw Object.assign(new Error('Booking not found'), { code: 404 });
+    }
+    if (!existingBooking) {
+      throw Object.assign(new Error('Booking not found'), { code: 404 });
+    }
+    if (existingBooking.provider_id !== callerUid) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    // Atomic-ish lock: only move pending -> processing if OTP matches and not expired
+    const { data: lockedBooking, error: lockError } = await supabase
+      .from('bookings')
+      .update({
+        status: 'processing',
+        processing_at: nowIso,
+      })
+      .eq('id', booking_id)
+      .eq('status', 'pending')
+      .eq('otp', otp)
+      .gt('countdown_end_time', nowIso)
+      .select('*')
+      .maybeSingle();
+
+    if (lockError) {
+      console.error('Supabase lock booking error:', lockError);
+      throw Object.assign(new Error('Failed to process booking'), { code: 500 });
+    }
+    if (!lockedBooking) {
+      if (existingBooking.status !== 'pending') {
         throw Object.assign(new Error('Booking already processed'), { code: 400 });
       }
-
-      const endTime = b.countdown_end_time.toDate();
+      const endTime = new Date(existingBooking.countdown_end_time);
       if (new Date() > endTime) {
         throw Object.assign(new Error('Booking expired'), { code: 400 });
       }
+      throw Object.assign(new Error('Invalid OTP'), { code: 400 });
+    }
 
-      if (b.otp !== otp) {
-        throw Object.assign(new Error('Invalid OTP'), { code: 400 });
-      }
+    const booking = lockedBooking;
 
-      tx.update(bookingRef, {
-        status: 'processing',
-        processing_at: admin.firestore.FieldValue.serverTimestamp(),
-      });
+    const { data: providerRow, error: providerError } = await supabase
+      .from('users')
+      .select('stripe_account_id')
+      .eq('id', booking.provider_id)
+      .maybeSingle();
 
-      return b;
-    });
-
-    const providerDoc = await db
-      .collection('users')
-      .doc(booking.provider_id)
-      .get();
-    const providerStripeAccountId = providerDoc.data()?.stripe_account_id;
+    if (providerError) {
+      console.error('Supabase get provider error:', providerError);
+    }
+    const providerStripeAccountId = providerRow?.stripe_account_id;
 
     if (!providerStripeAccountId) {
-      await bookingRef.update({
-        status: 'payout_missing',
-        payout_error: 'Provider has not set up payout account',
-      });
+      await supabase
+        .from('bookings')
+        .update({
+          status: 'payout_missing',
+          payout_error: 'Provider has not set up payout account',
+        })
+        .eq('id', booking_id);
       return res
         .status(400)
         .json({ error: 'Provider has not set up payout account' });
@@ -199,10 +297,13 @@ exports.verifyOtp = functions.https.onRequest(async (req, res) => {
     );
 
     if (paymentIntent.status !== 'requires_capture') {
-      await bookingRef.update({
-        status: 'capture_invalid_state',
-        capture_error: `PaymentIntent status: ${paymentIntent.status}`,
-      });
+      await supabase
+        .from('bookings')
+        .update({
+          status: 'capture_invalid_state',
+          capture_error: `PaymentIntent status: ${paymentIntent.status}`,
+        })
+        .eq('id', booking_id);
       return res.status(400).json({
         error: `Payment not in capturable state: ${paymentIntent.status}`,
       });
@@ -219,10 +320,13 @@ exports.verifyOtp = functions.https.onRequest(async (req, res) => {
     );
 
     if (captured.status !== 'succeeded') {
-      await bookingRef.update({
-        status: 'capture_failed',
-        capture_error: `Captured status: ${captured.status}`,
-      });
+      await supabase
+        .from('bookings')
+        .update({
+          status: 'capture_failed',
+          capture_error: `Captured status: ${captured.status}`,
+        })
+        .eq('id', booking_id);
       return res
         .status(500)
         .json({ error: `Capture failed: ${captured.status}` });
@@ -230,11 +334,15 @@ exports.verifyOtp = functions.https.onRequest(async (req, res) => {
 
     const transferAmount = booking.amount - (booking.commission_amount ?? 0);
     if (transferAmount <= 0) {
-      await bookingRef.update({
-        status: 'completed',
-        completed_at: admin.firestore.FieldValue.serverTimestamp(),
-        stripe_capture_payment_intent_status: captured.status,
-      });
+      await supabase
+        .from('bookings')
+        .update({
+          status: 'completed',
+          otp_verified: true,
+          completed_at: new Date().toISOString(),
+          stripe_capture_payment_intent_status: captured.status,
+        })
+        .eq('id', booking_id);
       return res.json({
         success: true,
         message: 'Payment captured (no provider payout)',
@@ -253,12 +361,16 @@ exports.verifyOtp = functions.https.onRequest(async (req, res) => {
       },
     );
 
-    await bookingRef.update({
-      status: 'completed',
-      stripe_transfer_id: transfer.id,
-      stripe_payment_intent_status: captured.status,
-      completed_at: admin.firestore.FieldValue.serverTimestamp(),
-    });
+    await supabase
+      .from('bookings')
+      .update({
+        status: 'completed',
+        otp_verified: true,
+        stripe_transfer_id: transfer.id,
+        stripe_payment_intent_status: captured.status,
+        completed_at: new Date().toISOString(),
+      })
+      .eq('id', booking_id);
 
     res.json({
       success: true,
@@ -282,22 +394,27 @@ exports.verifyOtp = functions.https.onRequest(async (req, res) => {
 exports.autoRefundExpired = functions.pubsub
   .schedule('every 1 minutes')
   .onRun(async (context) => {
-    const now = admin.firestore.Timestamp.now();
+    const nowIso = new Date().toISOString();
 
     try {
       // Find all pending bookings where countdown expired
-      const expiredBookings = await db
-        .collection('bookings')
-        .where('status', '==', 'pending')
-        .where('countdown_end_time', '<=', now)
-        .get();
+      const { data: expiredRows, error: expiredError } = await supabase
+        .from('bookings')
+        .select('*')
+        .eq('status', 'pending')
+        .lte('countdown_end_time', nowIso);
 
-      console.log(`Found ${expiredBookings.size} expired bookings`);
+      if (expiredError) {
+        console.error('Supabase expired bookings query error:', expiredError);
+        return;
+      }
+
+      const expiredBookings = expiredRows ?? [];
+      console.log(`Found ${expiredBookings.length} expired bookings`);
 
       // Process each expired booking
-      const refundPromises = expiredBookings.docs.map(async (doc) => {
-        const booking = doc.data();
-        const bookingId = doc.id;
+      const refundPromises = expiredBookings.map(async (booking) => {
+        const bookingId = booking.id;
 
         try {
           const paymentIntent = await stripe.paymentIntents.retrieve(
@@ -312,11 +429,14 @@ exports.autoRefundExpired = functions.pubsub
               },
             );
 
-            await doc.ref.update({
-              status: 'cancelled',
-              stripe_payment_intent_status: cancelled.status,
-              cancelled_at: admin.firestore.FieldValue.serverTimestamp(),
-            });
+            await supabase
+              .from('bookings')
+              .update({
+                status: 'cancelled',
+                stripe_payment_intent_status: cancelled.status,
+                cancelled_at: new Date().toISOString(),
+              })
+              .eq('id', bookingId);
             console.log(`Cancelled booking ${bookingId}`);
             return;
           }
@@ -327,28 +447,37 @@ exports.autoRefundExpired = functions.pubsub
               amount: booking.amount,
             });
 
-            await doc.ref.update({
-              status: 'refunded',
-              stripe_refund_id: refund.id,
-              refunded_at: admin.firestore.FieldValue.serverTimestamp(),
-            });
+            await supabase
+              .from('bookings')
+              .update({
+                status: 'refunded',
+                stripe_refund_id: refund.id,
+                refunded_at: new Date().toISOString(),
+              })
+              .eq('id', bookingId);
 
             console.log(`Refunded booking ${bookingId}`);
             return;
           }
 
-          await doc.ref.update({
-            status: 'expired_unhandled',
-            stripe_payment_intent_status: paymentIntent.status,
-          });
+          await supabase
+            .from('bookings')
+            .update({
+              status: 'expired_unhandled',
+              stripe_payment_intent_status: paymentIntent.status,
+            })
+            .eq('id', bookingId);
 
         } catch (error) {
           console.error(`Failed to refund booking ${bookingId}:`, error);
           // Mark as failed for manual review
-          await doc.ref.update({
-            status: 'refund_failed',
-            refund_error: error.message,
-          });
+          await supabase
+            .from('bookings')
+            .update({
+              status: 'refund_failed',
+              refund_error: error.message,
+            })
+            .eq('id', bookingId);
         }
       });
 
@@ -366,7 +495,7 @@ exports.refundPayment = functions.https.onRequest(async (req, res) => {
   res.set('Access-Control-Allow-Origin', '*');
   if (req.method === 'OPTIONS') {
     res.set('Access-Control-Allow-Methods', 'POST');
-    res.set('Access-Control-Allow-Headers', 'Content-Type');
+    res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
     return res.status(204).send('');
   }
 
@@ -395,7 +524,7 @@ exports.releaseFunds = functions.https.onRequest(async (req, res) => {
   res.set('Access-Control-Allow-Origin', '*');
   if (req.method === 'OPTIONS') {
     res.set('Access-Control-Allow-Methods', 'POST');
-    res.set('Access-Control-Allow-Headers', 'Content-Type');
+    res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
     return res.status(204).send('');
   }
 

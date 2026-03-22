@@ -8,9 +8,10 @@ import '../models/passenger.dart';
 import '../services/app_preferences.dart';
 import '../services/booking_repository.dart';
 import '../services/seat_layout_repository.dart';
+import '../app_tab_controller.dart';
 import '../services/passenger_repository.dart';
 import '../services/profile_repository.dart';
-import '../services/razorpay_service.dart';
+import '../services/stripe_service.dart';
 import '../services/payment_service.dart';
 import '../services/auth_repository.dart';
 
@@ -39,31 +40,33 @@ class PassengerFormData {
 }
 
 class BookingConfirmResult {
-  final String? seatKey;
-  final SeatGender userGender;
-  final String userName;
-  final int userAge;
-  final String? userPhone;
-  final String? userEmail;
+  final List<String?> seatKeys;
+  final List<SeatGender> userGenders;
+  final List<String> userNames;
+  final List<int> userAges;
+  final List<String?> userPhones;
+  final List<String?> userEmails;
 
   const BookingConfirmResult({
-    required this.seatKey,
-    required this.userGender,
-    required this.userName,
-    required this.userAge,
-    required this.userPhone,
-    required this.userEmail,
+    required this.seatKeys,
+    required this.userGenders,
+    required this.userNames,
+    required this.userAges,
+    required this.userPhones,
+    required this.userEmails,
   });
 }
 
 class BookingConfirmSheet extends StatefulWidget {
   final Slot slot;
   final bool isOffer;
+  final String providerId;
 
   const BookingConfirmSheet({
     super.key,
     required this.slot,
-    required this.isOffer,
+    this.isOffer = true,
+    required this.providerId,
   });
 
   @override
@@ -72,6 +75,11 @@ class BookingConfirmSheet extends StatefulWidget {
 
 class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
   Set<String> _selectedSeats = {};
+
+  int _quantity = 1;
+
+  bool _orderLoadingDialogShown = false;
+  bool _isProcessing = false;
   
   // Multiple passenger forms - one per seat
   List<PassengerFormData> _passengerForms = [];
@@ -80,17 +88,20 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
 
   static const double _cellSize = 56;
 
+  bool _syncScheduled = false;
+
   @override
   void initState() {
     super.initState();
     _selectedSeats = {};
     _passengerForms = [];
+    _quantity = 1;
     
-    // Initialize Razorpay
+    // Initialize Stripe (no-op for Razorpay/India path)
     try {
-      RazorpayService.instance.initialize();
+      StripeService.instance.init();
     } catch (e) {
-      debugPrint('Failed to initialize Razorpay: $e');
+      debugPrint('Failed to initialize Stripe: $e');
     }
     
     // Pre-fill first form with profile data (safely)
@@ -124,10 +135,32 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
       );
     });
   }
+
+  void _scheduleSyncPassengerFormsCount() {
+    if (_syncScheduled) return;
+    _syncScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _syncScheduled = false;
+      if (!mounted) return;
+
+      final desired = _selectedSeats.isEmpty ? _quantity : _selectedSeats.length;
+      if (desired <= 0) return;
+      if (_passengerForms.length == desired) return;
+
+      setState(() {
+        while (_passengerForms.length < desired) {
+          _passengerForms.add(PassengerFormData());
+        }
+        while (_passengerForms.length > desired) {
+          _passengerForms.removeLast().dispose();
+        }
+      });
+    });
+  }
   
   void _updatePassengerFormsCount() {
-    final seatsCount = _selectedSeats.length;
-    if (seatsCount == 0) return;
+    final seatsCount = _selectedSeats.isEmpty ? _quantity : _selectedSeats.length;
+    if (seatsCount <= 0) return;
     
     setState(() {
       // Add or remove forms to match seat count
@@ -148,6 +181,26 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
       form.ageController.text = p.age.toString();
       form.gender = p.gender;
     });
+  }
+
+  void _showOrderLoadingDialog() {
+    if (!mounted) return;
+    _orderLoadingDialogShown = true;
+    showDialog(
+      context: context,
+      useRootNavigator: true,
+      barrierDismissible: false,
+      builder: (context) => const Center(
+        child: CircularProgressIndicator(),
+      ),
+    );
+  }
+
+  void _closeOrderLoadingDialogIfAny() {
+    if (!_orderLoadingDialogShown) return;
+    _orderLoadingDialogShown = false;
+    if (!mounted) return;
+    Navigator.of(context, rootNavigator: true).pop();
   }
   
   void _showPassengerFormSelector(Passenger p) {
@@ -192,6 +245,26 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
     final SeatLayout? layout = layoutOwnerId == null
         ? null
         : SeatLayoutRepository.instance.getLayout(layoutOwnerId);
+
+    final hasSeatLayout = layout != null;
+
+    final remainingCapacity = BookingRepository.instance.getRemainingCapacity(
+      slot.id,
+      slot.capacity,
+    );
+
+    if (!hasSeatLayout) {
+      if (_quantity < 1) {
+        _quantity = 1;
+      }
+      if (remainingCapacity > 0 && _quantity > remainingCapacity) {
+        _quantity = remainingCapacity;
+      }
+      if (_passengerForms.isEmpty) {
+        _passengerForms.add(PassengerFormData());
+      }
+      _scheduleSyncPassengerFormsCount();
+    }
 
     final bookedSeatKeys = BookingRepository.instance.bookings.value
         .where(
@@ -259,6 +332,29 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
                     return const _Row(
                       icon: Icons.payments,
                       text: 'Select seat(s) to see price',
+                    );
+                  }
+                  final isLease = slot.serviceType.name == 'lease';
+                  final deposit = isLease ? (slot.securityDeposit ?? 0.0) : 0.0;
+                  if (isLease && deposit > 0) {
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _Row(
+                          icon: Icons.payments,
+                          text: 'Lease: ${AppPreferences.instance.formatMoney(totalPrice)}',
+                        ),
+                        const SizedBox(height: 4),
+                        _Row(
+                          icon: Icons.security,
+                          text: 'Security deposit: ${AppPreferences.instance.formatMoney(deposit.toInt())} (refundable on handover)',
+                        ),
+                        const SizedBox(height: 4),
+                        _Row(
+                          icon: Icons.receipt_long,
+                          text: 'Total: ${AppPreferences.instance.formatMoney((totalPrice + deposit).toInt())}',
+                        ),
+                      ],
                     );
                   }
                   return _Row(
@@ -333,6 +429,9 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
                               if (isSelected) {
                                 _selectedSeats.remove(key);
                               } else {
+                                if (_selectedSeats.length >= remainingCapacity) {
+                                  return;
+                                }
                                 _selectedSeats.add(key);
                               }
                               _updatePassengerFormsCount();
@@ -468,7 +567,7 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
                 },
               ),
               // Multiple passenger forms
-              if (_passengerForms.isNotEmpty && _selectedSeats.isNotEmpty)
+              if (_passengerForms.isNotEmpty && (hasSeatLayout ? _selectedSeats.isNotEmpty : true))
                 ...List.generate(_passengerForms.length, (index) {
                   final form = _passengerForms[index];
                   final seatsList = _selectedSeats.toList();
@@ -480,7 +579,9 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
                     children: [
                       if (index > 0) const Divider(height: 24),
                       Text(
-                        'Passenger ${index + 1} - Seat: ${cell?.seatName ?? seatKey}',
+                        hasSeatLayout
+                            ? 'Passenger ${index + 1} - Seat: ${cell?.seatName ?? seatKey}'
+                            : 'Passenger ${index + 1}',
                         style: const TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.bold,
@@ -562,6 +663,41 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
                 contentPadding: EdgeInsets.zero,
                 controlAffinity: ListTileControlAffinity.leading,
               ),
+              if (!hasSeatLayout) ...[
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    const Text(
+                      'Quantity',
+                      style: TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                    const Spacer(),
+                    IconButton(
+                      onPressed: remainingCapacity <= 0 || _quantity <= 1
+                          ? null
+                          : () {
+                              setState(() {
+                                _quantity -= 1;
+                                _updatePassengerFormsCount();
+                              });
+                            },
+                      icon: const Icon(Icons.remove_circle_outline),
+                    ),
+                    Text('$_quantity'),
+                    IconButton(
+                      onPressed: remainingCapacity <= 0 || _quantity >= remainingCapacity
+                          ? null
+                          : () {
+                              setState(() {
+                                _quantity += 1;
+                                _updatePassengerFormsCount();
+                              });
+                            },
+                      icon: const Icon(Icons.add_circle_outline),
+                    ),
+                  ],
+                ),
+              ],
               const SizedBox(height: 16),
               Row(
                 children: [
@@ -574,234 +710,312 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
                   const SizedBox(width: 12),
                   Expanded(
                     child: ElevatedButton(
-                      onPressed: () async {
-                        // Validate all passenger forms
-                        for (int i = 0; i < _passengerForms.length; i++) {
-                          final form = _passengerForms[i];
-                          final name = form.nameController.text.trim();
-                          
-                          if (name.isEmpty) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text('Please enter name for Passenger ${i + 1}'),
-                              ),
-                            );
-                            return;
-                          }
+                      onPressed: _isProcessing
+                          ? null
+                          : () async {
+                              if (_isProcessing) return;
+                              setState(() {
+                                _isProcessing = true;
+                              });
 
-                          final phone = form.phoneController.text.trim();
-                          if (phone.isNotEmpty && phone.length < 8) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text('Invalid phone for Passenger ${i + 1}'),
-                              ),
-                            );
-                            return;
-                          }
+                              bool shouldResetProcessing = true;
 
-                          final email = form.emailController.text.trim();
-                          if (email.isNotEmpty && !email.contains('@')) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text('Invalid email for Passenger ${i + 1}'),
-                              ),
-                            );
-                            return;
-                          }
-
-                          final ageText = form.ageController.text.trim();
-                          final age = int.tryParse(ageText);
-                          if (age == null || age <= 0 || age > 120) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text('Invalid age for Passenger ${i + 1} (1-120)'),
-                              ),
-                            );
-                            return;
-                          }
-                        }
-
-                        if (layout != null && _selectedSeats.isEmpty) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Please select at least one seat'),
-                            ),
-                          );
-                          return;
-                        }
-
-                        // Save all passengers if requested
-                        if (_savePassengers) {
-                          for (final form in _passengerForms) {
-                            final age = int.parse(form.ageController.text.trim());
-                            await PassengerRepository.instance.savePassenger(
-                              Passenger(
-                                id: DateTime.now().millisecondsSinceEpoch
-                                    .toString(),
-                                name: form.nameController.text.trim(),
-                                age: age,
-                                gender: form.gender,
-                              ),
-                            );
-                          }
-                        }
-
-                        if (!context.mounted) return;
-
-                        // Return first passenger data and first seat for now
-                        if (_passengerForms.isEmpty) {
-                          Navigator.pop(context);
-                          return;
-                        }
-                        
-                        final firstForm = _passengerForms.first;
-                        final age = int.parse(firstForm.ageController.text.trim());
-                        final phone = firstForm.phoneController.text.trim();
-                        final email = firstForm.emailController.text.trim();
-                        
-                        // Calculate total amount
-                        final totalAmount = _calculateTotalPrice();
-                        final amountInPaise = (totalAmount * 100).toInt();
-                        
-                        final currentUser = AuthRepository.instance.currentUser;
-                        
-                        if (currentUser == null) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Please login to continue')),
-                          );
-                          return;
-                        }
-                        
-                        // Show loading while creating order
-                        showDialog(
-                          context: context,
-                          barrierDismissible: false,
-                          builder: (context) => const Center(
-                            child: CircularProgressIndicator(),
-                          ),
-                        );
-                        
-                        try {
-                          // SECURE: Create order on server
-                          final order = await PaymentService.instance.createOrder(
-                            amount: amountInPaise,
-                            receipt: 'booking_${DateTime.now().millisecondsSinceEpoch}',
-                            notes: {
-                              'slot_id': widget.slot.id,
-                              'user_id': currentUser.id,
-                              'seat_keys': _selectedSeats.join(','),
-                            },
-                          );
-                          
-                          if (!context.mounted) return;
-                          Navigator.pop(context); // Close loading
-                          
-                          // Open Razorpay with server-generated order ID
-                          RazorpayService.instance.openCheckout(
-                            amount: order['amount'],
-                            orderId: order['orderId'], // Real Razorpay order ID
-                            name: firstForm.nameController.text.trim(),
-                            description: 'Booking for ${widget.slot.fromLocation ?? widget.slot.baseLocation}',
-                            email: email.isNotEmpty ? email : 'user@quickohunt.com',
-                            contact: phone.isNotEmpty ? phone : '9999999999',
-                            onSuccess: (response) async {
-                              if (!context.mounted) return;
-                              
-                              // Show verifying dialog
-                              showDialog(
-                                context: context,
-                                barrierDismissible: false,
-                                builder: (context) => const AlertDialog(
-                                  content: Row(
-                                    children: [
-                                      CircularProgressIndicator(),
-                                      SizedBox(width: 16),
-                                      Text('Verifying payment...'),
-                                    ],
-                                  ),
-                                ),
-                              );
-                              
                               try {
-                                // SECURE: Verify payment on server
-                                final verified = await PaymentService.instance.verifyPayment(
-                                  razorpayOrderId: response.orderId!,
-                                  razorpayPaymentId: response.paymentId!,
-                                  razorpaySignature: response.signature!,
-                                );
-                                
+                                // Validate all passenger forms
+                                for (int i = 0; i < _passengerForms.length; i++) {
+                                  final form = _passengerForms[i];
+                                  final name = form.nameController.text.trim();
+                                  
+                                  if (name.isEmpty) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text('Please enter name for Passenger ${i + 1}'),
+                                      ),
+                                    );
+                                    return;
+                                  }
+
+                                  final phone = form.phoneController.text.trim();
+                                  if (phone.isNotEmpty && phone.length < 8) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text('Invalid phone for Passenger ${i + 1}'),
+                                      ),
+                                    );
+                                    return;
+                                  }
+
+                                  final email = form.emailController.text.trim();
+                                  if (email.isNotEmpty && !email.contains('@')) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text('Invalid email for Passenger ${i + 1}'),
+                                      ),
+                                    );
+                                    return;
+                                  }
+
+                                  final ageText = form.ageController.text.trim();
+                                  final age = ageText.isEmpty ? 18 : int.tryParse(ageText);
+                                  if (age == null || age <= 0 || age > 120) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text('Invalid age for Passenger ${i + 1} (1-120)'),
+                                      ),
+                                    );
+                                    return;
+                                  }
+                                }
+
+                                if (hasSeatLayout && _selectedSeats.isEmpty) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text('Please select at least one seat'),
+                                    ),
+                                  );
+                                  return;
+                                }
+
+                                if (!hasSeatLayout && remainingCapacity <= 0) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text('No capacity remaining'),
+                                    ),
+                                  );
+                                  return;
+                                }
+
+                                // Save all passengers if requested
+                                if (_savePassengers) {
+                                  for (final form in _passengerForms) {
+                                    final ageText = form.ageController.text.trim();
+                                    final age = ageText.isEmpty ? 18 : int.parse(ageText);
+                                    await PassengerRepository.instance.savePassenger(
+                                      Passenger(
+                                        id: DateTime.now().millisecondsSinceEpoch
+                                            .toString(),
+                                        name: form.nameController.text.trim(),
+                                        age: age,
+                                        gender: form.gender,
+                                      ),
+                                    );
+                                  }
+                                }
+
                                 if (!context.mounted) return;
-                                Navigator.pop(context); // Close verifying dialog
+
+                                if (_passengerForms.isEmpty) {
+                                  Navigator.pop(context);
+                                  return;
+                                }
+
+                                final seatKeysOrdered = hasSeatLayout
+                                    ? _selectedSeats.toList(growable: false)
+                                    : List<String?>.filled(_quantity, null, growable: false);
+
+                                final ages = _passengerForms
+                                    .map((f) {
+                                      final ageText = f.ageController.text.trim();
+                                      return ageText.isEmpty ? 18 : int.parse(ageText);
+                                    })
+                                    .toList(growable: false);
+
+                                final phones = _passengerForms
+                                    .map((f) {
+                                      final t = f.phoneController.text.trim();
+                                      return t.isEmpty ? null : t;
+                                    })
+                                    .toList(growable: false);
+
+                                final emails = _passengerForms
+                                    .map((f) {
+                                      final t = f.emailController.text.trim();
+                                      return t.isEmpty ? null : t;
+                                    })
+                                    .toList(growable: false);
+
+                                final names = _passengerForms
+                                    .map((f) => f.nameController.text.trim())
+                                    .toList(growable: false);
+
+                                final genders = _passengerForms
+                                    .map((f) => f.gender)
+                                    .toList(growable: false);
                                 
-                                if (verified['verified'] == true) {
-                                  // Payment verified - NOW confirm booking
+                                // Calculate total amount
+                                final isLease = widget.slot.serviceType.name == 'lease';
+                                final deposit = isLease ? (widget.slot.securityDeposit ?? 0.0) : 0.0;
+                                final basePrice = _calculateTotalPrice() - deposit;
+                                final totalAmount = _calculateTotalPrice();
+                                final amountInPaise = (totalAmount * 100).toInt();
+
+                                if (amountInPaise < 100) {
+                                  // Free booking or amount < 1 INR (Razorpay minimum is ₹1)
                                   Navigator.pop(
                                     context,
                                     BookingConfirmResult(
-                                      seatKey: _selectedSeats.isEmpty ? null : _selectedSeats.first,
-                                      userGender: firstForm.gender,
-                                      userName: firstForm.nameController.text.trim(),
-                                      userAge: age,
-                                      userPhone: phone.isEmpty ? null : phone,
-                                      userEmail: email.isEmpty ? null : email,
+                                      seatKeys: seatKeysOrdered,
+                                      userGenders: genders,
+                                      userNames: names,
+                                      userAges: ages,
+                                      userPhones: phones,
+                                      userEmails: emails,
                                     ),
                                   );
-                                  
                                   ScaffoldMessenger.of(context).showSnackBar(
                                     const SnackBar(
-                                      content: Text('✅ Payment verified! Booking confirmed.'),
+                                      content: Text('✅ Booking confirmed (Free/Coupon applied).'),
                                       backgroundColor: Colors.green,
                                     ),
                                   );
-                                } else {
-                                  // Verification failed
+                                  return;
+                                }
+                                
+                                final currentUser = AuthRepository.instance.currentUser;
+                                
+                                if (currentUser == null) {
                                   ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(
-                                      content: Text('❌ Payment verification failed. Contact support.'),
-                                      backgroundColor: Colors.red,
-                                      duration: Duration(seconds: 10),
-                                    ),
+                                    const SnackBar(content: Text('Please login to continue')),
+                                  );
+                                  return;
+                                }
+
+                                _showOrderLoadingDialog();
+                                
+                                try {
+                                  // Calculate application fee (10% commission)
+                                  final commissionAmount = (amountInPaise * 0.1).toInt();
+
+                                  // Detect country from slot location to route payment gateway
+                                  final slotLocation = (widget.slot.fromLocation?.isNotEmpty ?? false)
+                                      ? widget.slot.fromLocation
+                                      : widget.slot.baseLocation;
+                                  final countryCode = PaymentService.countryCodeFromLocation(slotLocation);
+                                  final currency = (countryCode == 'IN') ? 'inr' : 'usd';
+
+                                  // Route to Razorpay (India) or Stripe (international)
+                                  final profile = ProfileRepository.instance.profile.value;
+                                  final bookingResult = await PaymentService.instance.processPayment(
+                                    amountInPaise: amountInPaise,
+                                    currency: currency,
+                                    countryCode: countryCode,
+                                    providerId: widget.providerId,
+                                    slotId: widget.slot.id,
+                                    userName: names.isNotEmpty ? names.first : 'User',
+                                    userEmail: emails.isNotEmpty && emails.first != null
+                                        ? emails.first!
+                                        : '',
+                                    userPhone: phones.isNotEmpty && phones.first != null
+                                        ? phones.first!
+                                        : (profile.phone ?? ''),
+                                    description: 'Booking: ${(widget.slot.fromLocation?.isNotEmpty ?? false) ? widget.slot.fromLocation! : (widget.slot.baseLocation ?? '')}',
+                                    commissionAmount: commissionAmount,
+                                  );
+
+                                  if (!context.mounted) return;
+                                  _closeOrderLoadingDialogIfAny();
+
+                                  if (bookingResult != null && bookingResult['error'] == null) {
+                                    // Extract booking details (works for both Razorpay and Stripe)
+                                    final paymentIntentId = bookingResult['payment_intent_id'] as String?;
+                                    final clientSecret = bookingResult['client_secret'] as String?;
+                                    final otp = bookingResult['otp'] as String?;
+                                    final countdownEndStr = bookingResult['countdown_end_time'] as String?;
+                                    final gateway = bookingResult['gateway'] as String? ?? 'stripe';
+                                    final isWebRedirect = bookingResult['web_redirect'] == true;
+
+                                    // Web redirect: payment is pending, user was sent to checkout
+                                    if (isWebRedirect) {
+                                      Navigator.pop(context);
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(
+                                          content: Text(
+                                            '🔗 Redirected to ${gateway.contains('razorpay') ? 'Razorpay' : 'Stripe'} checkout. '
+                                            'Complete payment there — your booking will be confirmed automatically.',
+                                          ),
+                                          backgroundColor: Colors.blue,
+                                          duration: const Duration(seconds: 8),
+                                        ),
+                                      );
+                                      return;
+                                    }
+                                    
+                                    DateTime? countdownEnd;
+                                    if (countdownEndStr != null) {
+                                      try {
+                                        countdownEnd = DateTime.parse(countdownEndStr);
+                                      } catch (_) {}
+                                    }
+
+                                    // Create local booking with payment details
+                                    final localBooking = await BookingRepository.instance.createBooking(
+                                      slotId: widget.slot.id,
+                                      providerId: widget.providerId,
+                                      userId: currentUser.id,
+                                      defaultCapacity: widget.slot.capacity,
+                                      price: basePrice,
+                                      seatKey: _selectedSeats.isNotEmpty ? _selectedSeats.first : null,
+                                      userName: names.isNotEmpty ? names.first : null,
+                                      userAge: ages.isNotEmpty ? ages.first : null,
+                                      userPhone: phones.isNotEmpty ? phones.first : null,
+                                      userEmail: emails.isNotEmpty ? emails.first : null,
+                                      userGender: genders.isNotEmpty ? genders.first : null,
+                                      stripePaymentIntentId: paymentIntentId,
+                                      stripeClientSecret: clientSecret,
+                                      countdownEndTime: countdownEnd,
+                                      otp: otp,
+                                      securityDeposit: deposit > 0 ? deposit : null,
+                                    );
+
+                                    if (localBooking != null && context.mounted) {
+                                      Navigator.pop(context);
+                                      
+                                      // Go to Requests tab
+                                      mainTabIndex.value = 1;
+                                      Navigator.of(context).popUntil((route) => route.isFirst);
+
+                                      final gatewayLabel = gateway == 'razorpay' ? 'Razorpay' : 'Stripe';
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(
+                                          content: Text(
+                                            '✅ Booking confirmed via $gatewayLabel! OTP: ${otp ?? "Check Requests"}',
+                                          ),
+                                          backgroundColor: Colors.green,
+                                          duration: const Duration(seconds: 5),
+                                        ),
+                                      );
+                                    }
+                                  } else {
+                                    final reason = bookingResult?['error'] as String?;
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text(reason ?? 'Payment cancelled.'),
+                                        backgroundColor: Colors.black54,
+                                      ),
+                                    );
+                                  }
+                                } catch (e) {
+                                  if (!context.mounted) return;
+                                  _closeOrderLoadingDialogIfAny();
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
                                   );
                                 }
-                              } catch (e) {
-                                // Network error during verification
-                                if (!context.mounted) return;
-                                Navigator.pop(context); // Close verifying dialog
-                                
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content: Text('Verification error: $e\nPlease contact support with payment ID: ${response.paymentId}'),
-                                    backgroundColor: Colors.orange,
-                                    duration: const Duration(seconds: 10),
-                                  ),
-                                );
+                              } finally {
+                                if (mounted && shouldResetProcessing) {
+                                  setState(() {
+                                    _isProcessing = false;
+                                  });
+                                }
                               }
                             },
-                            onFailure: (response) {
-                              if (!context.mounted) return;
-                              
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text('Payment failed: ${response.message}'),
-                                  backgroundColor: Colors.red,
-                                ),
-                              );
-                            },
-                          );
-                        } catch (e) {
-                          // Error creating order
-                          if (!context.mounted) return;
-                          Navigator.pop(context); // Close loading
-                          
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text('Failed to create order: $e'),
-                              backgroundColor: Colors.red,
-                            ),
-                          );
-                        }
-                      },
-                      child: const Text('Pay & Confirm'),
+                      child: _isProcessing 
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                            )
+                          : const Text('Pay & Confirm'),
                     ),
                   ),
                 ],
@@ -814,25 +1028,32 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
   }
   
   double _calculateTotalPrice() {
+    double basePrice;
     if (_selectedSeats.isEmpty) {
-      return widget.slot.price;
-    }
-    
-    final layout = SeatLayoutRepository.instance.getLayout(
-      widget.slot.seatLayoutOwnerId ?? '',
-    );
-    
-    if (layout == null) return widget.slot.price;
-    
-    double total = 0.0;
-    for (final seatKey in _selectedSeats) {
-      final cell = layout.cells[seatKey];
-      if (cell != null && cell.price != null) {
-        total += cell.price!;
+      basePrice = widget.slot.price;
+    } else {
+      final layout = SeatLayoutRepository.instance.getLayout(
+        widget.slot.seatLayoutOwnerId ?? '',
+      );
+
+      if (layout == null) {
+        basePrice = widget.slot.price;
+      } else {
+        double total = 0.0;
+        for (final seatKey in _selectedSeats) {
+          final cell = layout.cells[seatKey];
+          if (cell != null && cell.price != null) {
+            total += cell.price!;
+          }
+        }
+        basePrice = total > 0 ? total : widget.slot.price;
       }
     }
-    
-    return total > 0 ? total : widget.slot.price;
+
+    // Add security deposit for lease slots
+    final isLease = widget.slot.serviceType.name == 'lease';
+    final deposit = isLease ? (widget.slot.securityDeposit ?? 0.0) : 0.0;
+    return basePrice + deposit;
   }
 
   static String _formatTime(DateTime time) {

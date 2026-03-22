@@ -7,6 +7,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import '../../models/booking.dart';
+import '../../models/review.dart';
 import '../../models/service_type.dart';
 import '../../models/slot_entry.dart';
 import '../../models/vehicle.dart';
@@ -16,10 +17,13 @@ import '../../services/slot_repository.dart';
 import '../../services/vehicle_repository.dart';
 import '../../services/user_vehicle_repository.dart';
 import '../../services/user_slot_repository.dart';
+import '../reviews_screen.dart';
 import '../slot_detail_screen.dart';
 import '../add_flow/create_post_screen.dart';
 import '../verification/document_verification_screen.dart';
 import '../../widgets/slot_card.dart';
+import '../../services/location_autocomplete_service.dart';
+import '../../services/app_preferences.dart';
 
 class VehicleActionsScreen extends StatefulWidget {
   final String vehicleId;
@@ -43,6 +47,68 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
   final _manualLatController = TextEditingController();
   final _manualLngController = TextEditingController();
   String? _lastSyncedVehicleId; // Track which vehicle we last synced
+
+  bool _isVehicleComplianceDoc(DocumentType documentType) {
+    return documentType == DocumentType.rc ||
+        documentType == DocumentType.insurance;
+  }
+
+  Widget _buildVehicleTagsCard(BuildContext context, Vehicle vehicle) {
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 4),
+      child: Padding(
+        padding: const EdgeInsets.all(12.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Vehicle tags',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 8),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              value: vehicle.isVerifiedToggle,
+              onChanged: (v) async {
+                final updated = vehicle.copyWith(isVerifiedToggle: v);
+                await _saveVehicle(context, updated);
+              },
+              title: const Text('Verified vehicle'),
+            ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              value: vehicle.isExpertToggle,
+              onChanged: (v) async {
+                final updated = vehicle.copyWith(isExpertToggle: v);
+                await _saveVehicle(context, updated);
+              },
+              title: const Text('Expert vehicle'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _saveVehicle(BuildContext context, Vehicle updated) async {
+    try {
+      if (widget.isUserMode) {
+        await UserVehicleRepository.instance.updateVehicle(updated);
+      } else {
+        await widget.vehicleRepository!.updateVehicle(updated);
+      }
+
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Vehicle updated')),
+      );
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not save: $e')),
+      );
+    }
+  }
 
   dynamic get _vehicleRepo => widget.isUserMode 
       ? UserVehicleRepository.instance
@@ -106,6 +172,8 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                   _buildVehicleImagesSection(vehicle),
                   const SizedBox(height: 12),
                   _buildVehicleStatsCard(vehicle, entries.length),
+                  const SizedBox(height: 4),
+                  _buildVehicleCountryRow(vehicle),
                   const SizedBox(height: 12),
                   if (entries.isEmpty)
                     const Padding(
@@ -121,7 +189,11 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                   const SizedBox(height: 12),
                   _buildGpsSettingsCard(vehicle),
                   const SizedBox(height: 12),
-                  _buildDocumentVerificationCard(vehicle),
+                  _buildVehicleTagsCard(context, vehicle),
+                  if (!widget.isUserMode) ...[
+                    const SizedBox(height: 12),
+                    _buildDocumentVerificationCard(vehicle),
+                  ],
                   const SizedBox(height: 12),
                   _buildHistorySection(entries),
                   const SizedBox(height: 12),
@@ -289,50 +361,60 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
   Future<void> _openAddSheet(BuildContext context, Vehicle vehicle) async {
     await showModalBottomSheet<void>(
       context: context,
+      isScrollControlled: true,
       showDragHandle: true,
       builder: (context) {
-        return SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    'Add',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+        return Container(
+          height: MediaQuery.of(context).size.height * 0.9,
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          child: SafeArea(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      'Add',
+                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                    ),
                   ),
                 ),
-              ),
-              ListTile(
-                leading: const Icon(Icons.photo_library_outlined),
-                title: const Text('Vehicle images'),
-                subtitle: const Text('Add images to your vehicle'),
-                onTap: () async {
-                  try {
-                    final picker = ImagePicker();
-                    final files = await picker.pickMultiImage(
-                      maxWidth: 1024,
-                      maxHeight: 1024,
-                      imageQuality: 80,
-                    );
-                    if (!context.mounted) return;
-                    Navigator.pop(context);
-                    if (files.isEmpty) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('No images selected')),
-                      );
-                      return;
-                    }
+                Expanded(
+                  child: ListView(
+                    children: [
+                      ListTile(
+                        leading: const Icon(Icons.photo_library_outlined),
+                        title: const Text('Vehicle images'),
+                        subtitle: const Text('Add images to your vehicle'),
+                        onTap: () async {
+                          try{
+                            final picker = ImagePicker();
+                            final files = await picker.pickMultiImage(
+                              maxWidth: 1024,
+                              maxHeight: 1024,
+                              imageQuality: 80,
+                            );
+                            if (!context.mounted) return;
+                            Navigator.pop(context);
+                            if (files.isEmpty) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('No images selected')),
+                              );
+                              return;
+                            }
 
-                    debugPrint(
-                      'VehicleImages: picked ${files.length} file(s) for vehicle ${vehicle.id}',
-                    );
+                            debugPrint(
+                              'VehicleImages: picked ${files.length} file(s) for vehicle ${vehicle.id}',
+                            );
 
-                    final encoded = <String>[];
-                    for (final f in files) {
-                      final bytes = await f.readAsBytes();
+                            final encoded = <String>[];
+                            for (final f in files) {
+                              final bytes = await f.readAsBytes();
                       encoded.add(base64Encode(bytes));
                     }
 
@@ -473,10 +555,13 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                   },
                 ),
               ],
-              const SizedBox(height: 8),
             ],
           ),
-        );
+        ),
+      ],
+    ),
+  ),
+);
       },
     );
   }
@@ -491,8 +576,12 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
       'Tax ID': vehicle.panVerified,
     };
 
-    return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 4),
+    return ValueListenableBuilder<SubscriptionPlan>(
+      valueListenable: AppPreferences.instance.subscriptionPlan,
+      builder: (context, plan, _) {
+        final canVerify = plan == SubscriptionPlan.premium || plan == SubscriptionPlan.expert;
+        return Card(
+          margin: const EdgeInsets.symmetric(horizontal: 4),
       child: Padding(
         padding: const EdgeInsets.all(12.0),
         child: Column(
@@ -531,6 +620,7 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
               verificationStatus['RC Book']!,
               DocumentType.rc,
               isMandatory: true,
+              canVerify: canVerify,
             ),
             const Divider(height: 1),
             _buildDocumentItemWithExpiry(
@@ -540,6 +630,7 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
               DocumentType.insurance,
               expiryDate: vehicle.insuranceExpiryDate,
               isMandatory: true,
+              canVerify: canVerify,
             ),
             
             const SizedBox(height: 16),
@@ -566,6 +657,7 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
               verificationStatus['Driving License']!,
               DocumentType.dl,
               isMandatory: false,
+              canVerify: canVerify,
             ),
             const Divider(height: 1),
             _buildDocumentItem(
@@ -574,6 +666,7 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
               verificationStatus['National ID']!,
               DocumentType.aadhaar,
               isMandatory: false,
+              canVerify: canVerify,
             ),
             const Divider(height: 1),
             _buildDocumentItem(
@@ -582,10 +675,26 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
               verificationStatus['Tax ID']!,
               DocumentType.pan,
               isMandatory: false,
+              canVerify: canVerify,
             ),
+            if (!canVerify) ...[
+              const SizedBox(height: 12),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.lock_outline, color: Colors.orange),
+                title: const Text('Verification locked'),
+                subtitle: const Text('Upgrade to Premium or Expert plan to verify documents'),
+                trailing: TextButton(
+                  onPressed: () => Navigator.pushNamed(context, '/plans'),
+                  child: const Text('Upgrade'),
+                ),
+              ),
+            ],
           ],
         ),
       ),
+    );
+      },
     );
   }
 
@@ -595,6 +704,7 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
     bool isVerified,
     DocumentType documentType, {
     bool isMandatory = false,
+    bool canVerify = true,
   }) {
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(vertical: 4),
@@ -638,15 +748,17 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
       ),
       trailing: isVerified
           ? null
-          : OutlinedButton(
-              onPressed: () => _startDocumentVerification(documentType),
-              style: OutlinedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                foregroundColor: isMandatory ? Colors.red : null,
-                side: isMandatory ? const BorderSide(color: Colors.red, width: 2) : null,
-              ),
-              child: const Text('Verify'),
-            ),
+          : canVerify
+              ? OutlinedButton(
+                  onPressed: () => _startDocumentVerification(documentType),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    foregroundColor: isMandatory ? Colors.red : null,
+                    side: isMandatory ? const BorderSide(color: Colors.red, width: 2) : null,
+                  ),
+                  child: const Text('Verify'),
+                )
+              : const Icon(Icons.lock_outline, color: Colors.orange),
     );
   }
 
@@ -657,12 +769,16 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
     DocumentType documentType, {
     DateTime? expiryDate,
     bool isMandatory = false,
+    bool canVerify = true,
   }) {
     final isExpired = expiryDate != null && expiryDate.isBefore(DateTime.now());
     final isExpiringSoon = expiryDate != null && 
         expiryDate.isAfter(DateTime.now()) && 
         expiryDate.isBefore(DateTime.now().add(const Duration(days: 30)));
     
+    final isBlockedForUserMode = widget.isUserMode &&
+        _isVehicleComplianceDoc(documentType);
+
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(vertical: 4),
       leading: Icon(
@@ -733,25 +849,139 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
       ),
       trailing: isVerified && !isExpired
           ? null
-          : OutlinedButton(
-              onPressed: () => _startDocumentVerification(documentType),
-              style: OutlinedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                foregroundColor: isMandatory || isExpired ? Colors.red : null,
-                side: isMandatory || isExpired 
-                    ? const BorderSide(color: Colors.red, width: 2) 
-                    : null,
-              ),
-              child: Text(isExpired ? 'Renew' : 'Verify'),
-            ),
+          : !canVerify
+              ? const Icon(Icons.lock_outline, color: Colors.orange)
+              : OutlinedButton(
+                  onPressed: isBlockedForUserMode
+                      ? null
+                      : () => _startDocumentVerification(documentType),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    foregroundColor: isMandatory || isExpired ? Colors.red : null,
+                    side: isMandatory || isExpired
+                        ? const BorderSide(color: Colors.red, width: 2)
+                        : null,
+                  ),
+                  child: Text(
+                    isBlockedForUserMode
+                        ? 'Not allowed'
+                        : (isExpired ? 'Renew' : 'Verify'),
+                  ),
+                ),
     );
   }
 
   Future<void> _startDocumentVerification(DocumentType documentType) async {
+    if (widget.isUserMode && _isVehicleComplianceDoc(documentType)) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'RC/Insurance verification is only available for the vehicle owner/provider.',
+          ),
+        ),
+      );
+      return;
+    }
+
     final vehicle = _vehicleRepo.getById(widget.vehicleId);
     if (vehicle == null) return;
 
-    // If insurance, ask for expiry date first
+    // Step 1: Ask user to upload document photo first
+    final uploadChoice = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Upload ${_getDocumentName(documentType)}'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.upload_file, size: 64, color: Colors.blue),
+            const SizedBox(height: 16),
+            Text(
+              'First, upload a clear photo of your ${_getDocumentName(documentType)}',
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 16),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Make sure all text is visible and readable',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.pop(context, 'upload'),
+            icon: const Icon(Icons.photo_library),
+            label: const Text('Choose Photo'),
+          ),
+        ],
+      ),
+    );
+
+    if (uploadChoice != 'upload' || !mounted) return;
+
+    // Pick document image from gallery
+    final picker = ImagePicker();
+    final documentFile = await picker.pickImage(
+      source: ImageSource.gallery,
+      maxWidth: 2048,
+      maxHeight: 2048,
+      imageQuality: 90,
+    );
+
+    if (documentFile == null || !mounted) return;
+
+    final documentBytes = await documentFile.readAsBytes();
+
+    if (!mounted) return;
+
+    // Show preview of uploaded document
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('${_getDocumentName(documentType)} Preview'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: Image.memory(
+                documentBytes,
+                width: 300,
+                height: 400,
+                fit: BoxFit.contain,
+              ),
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'Is the document clear and all text readable?',
+              style: TextStyle(fontSize: 14),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Choose Another'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Continue'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    // If insurance, ask for expiry date
     DateTime? expiryDate;
     if (documentType == DocumentType.insurance) {
       expiryDate = await showDatePicker(
@@ -765,13 +995,67 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
       if (expiryDate == null || !mounted) return; // User cancelled
     }
 
-    if (!mounted) return;
+    // Step 2: Show instructions before opening camera
+    final proceedToCamera = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Live Verification'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.camera_alt, size: 64, color: Colors.green),
+            const SizedBox(height: 16),
+            const Text(
+              'Next, we\'ll verify you with the document',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.blue.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '📸 You\'ll need to:',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  SizedBox(height: 8),
+                  Text('1. Show your face clearly'),
+                  Text('2. Turn your head left'),
+                  Text('3. Turn your head right'),
+                  Text('4. Hold the physical document next to your face'),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Start Verification'),
+          ),
+        ],
+      ),
+    );
 
+    if (proceedToCamera != true || !mounted) return;
+
+    // Step 3: Open camera with document reference
     final result = await Navigator.push<Map<String, dynamic>>(
       context,
       MaterialPageRoute(
         builder: (context) => DocumentVerificationScreen(
           documentType: documentType,
+          referenceDocumentBytes: documentBytes,
         ),
       ),
     );
@@ -1180,16 +1464,148 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 const Text(
-                  'Reviews',
+                  'Provider Reviews',
                   style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
                 ),
                 TextButton.icon(
-                  onPressed: () => _showAddReviewSheet(context, vehicle),
-                  icon: const Icon(Icons.add_comment_outlined),
-                  label: const Text('Add'),
+                  onPressed: () {
+                    // Navigate to provider's reviews screen
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => ReviewsScreen(
+                          userId: vehicle.userId,
+                          userName: vehicle.userName,
+                        ),
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.arrow_forward, size: 18),
+                  label: const Text('View All'),
                 ),
               ],
             ),
+            const SizedBox(height: 8),
+            ValueListenableBuilder<List<Review>>(
+              valueListenable: ReviewRepository.instance.reviews,
+              builder: (context, reviews, _) {
+                // Get reviews for this provider (vehicle owner)
+                final providerReviews = reviews
+                    .where((r) => r.revieweeId == vehicle.userId)
+                    .toList();
+
+                if (providerReviews.isEmpty) {
+                  return const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 8.0),
+                    child: Text(
+                      'No reviews yet',
+                      style: TextStyle(color: Colors.grey),
+                    ),
+                  );
+                }
+
+                // Calculate average rating
+                final avgRating = providerReviews.fold<double>(
+                  0,
+                  (sum, r) => sum + r.rating,
+                ) / providerReviews.length;
+
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.star, color: Colors.amber, size: 20),
+                        const SizedBox(width: 4),
+                        Text(
+                          avgRating.toStringAsFixed(1),
+                          style: const TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          '(${providerReviews.length} ${providerReviews.length == 1 ? 'review' : 'reviews'})',
+                          style: const TextStyle(color: Colors.grey),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    // Show latest 2 reviews
+                    ...providerReviews.take(2).map((review) {
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: Colors.grey.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  ...List.generate(
+                                    5,
+                                    (index) => Icon(
+                                      index < review.rating
+                                          ? Icons.star
+                                          : Icons.star_border,
+                                      size: 14,
+                                      color: Colors.amber,
+                                    ),
+                                  ),
+                                  const Spacer(),
+                                  Text(
+                                    _formatReviewDate(review.createdAt),
+                                    style: const TextStyle(
+                                      fontSize: 11,
+                                      color: Colors.grey,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              if (review.comment != null &&
+                                  review.comment!.isNotEmpty) ...[
+                                const SizedBox(height: 4),
+                                Text(
+                                  review.comment!,
+                                  style: const TextStyle(fontSize: 13),
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                      );
+                    }),
+                    if (providerReviews.length > 2)
+                      Center(
+                        child: TextButton(
+                          onPressed: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => ReviewsScreen(
+                                  userId: vehicle.userId,
+                                  userName: vehicle.userName,
+                                ),
+                              ),
+                            );
+                          },
+                          child: Text(
+                            'View all ${providerReviews.length} reviews',
+                          ),
+                        ),
+                      ),
+                  ],
+                );
+              },
+            ),
+            /* Vehicle reviews section - temporarily disabled
             ValueListenableBuilder<List<VehicleReview>>(
               valueListenable: ReviewRepository.instance.vehicleReviews,
               builder: (context, reviews, _) {
@@ -1239,12 +1655,14 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                 );
               },
             ),
+            */
           ],
         ),
       ),
     );
   }
 
+  /* Vehicle review sheet - temporarily disabled
   void _showAddReviewSheet(BuildContext context, Vehicle vehicle) {
     final nameController = TextEditingController(text: 'User');
     final commentController = TextEditingController();
@@ -1326,6 +1744,7 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
       },
     );
   }
+  */
 
   String _statusLabel(Booking booking) {
     switch (booking.status) {
@@ -1344,6 +1763,95 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
     return '${d.day}/${d.month}/${d.year}';
   }
 
+  String _getDocumentName(DocumentType documentType) {
+    switch (documentType) {
+      case DocumentType.rc:
+        return 'RC Book';
+      case DocumentType.insurance:
+        return 'Insurance Certificate';
+      case DocumentType.dl:
+        return 'Driving License';
+      case DocumentType.aadhaar:
+        return 'National ID';
+      case DocumentType.pan:
+        return 'Tax ID';
+    }
+  }
+
+  Widget _buildVehicleCountryRow(Vehicle vehicle) {
+    // Resolve lat/lon to country via reverse geocode
+    final double? lat;
+    final double? lon;
+    switch (vehicle.gpsMode) {
+      case VehicleGpsMode.manual:
+        lat = vehicle.manualLat;
+        lon = vehicle.manualLng;
+        break;
+      case VehicleGpsMode.externalLink:
+      case VehicleGpsMode.deviceLive:
+        lat = vehicle.lastKnownLat;
+        lon = vehicle.lastKnownLng;
+        break;
+    }
+
+    if (lat == null || lon == null) return const SizedBox.shrink();
+
+    return FutureBuilder<GeoLocation?>(
+      future: LocationAutocompleteService.instance.reverseGeocode(lat, lon),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData || snapshot.data == null) {
+          return const SizedBox.shrink();
+        }
+        final geo = snapshot.data!;
+        final district = geo.district ?? geo.stateDistrict;
+        final postcode = geo.postcode;
+        final country = geo.country;
+        final countryCode = geo.countryCode?.toUpperCase();
+
+        return Card(
+          margin: const EdgeInsets.symmetric(horizontal: 4),
+          color: Colors.grey[50],
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            child: Row(
+              children: [
+                const Icon(Icons.location_on, size: 16, color: Colors.blueGrey),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Wrap(
+                    spacing: 12,
+                    runSpacing: 4,
+                    children: [
+                      if (district != null) _geoChip(Icons.map, district),
+                      if (geo.state != null) _geoChip(Icons.account_balance, geo.state!),
+                      if (postcode != null) _geoChip(Icons.markunread_mailbox, postcode),
+                      if (country != null)
+                        _geoChip(
+                          Icons.public,
+                          countryCode != null ? '$country ($countryCode)' : country,
+                        ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _geoChip(IconData icon, String label) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 12, color: Colors.grey[600]),
+        const SizedBox(width: 3),
+        Text(label, style: TextStyle(fontSize: 12, color: Colors.grey[700])),
+      ],
+    );
+  }
+
   Widget _buildVehicleStatsCard(Vehicle vehicle, int activePostsCount) {
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 4),
@@ -1352,47 +1860,69 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceAround,
           children: [
-            Column(
-              children: [
-                Row(
-                  mainAxisSize: MainAxisSize.min,
+            ValueListenableBuilder<List<Review>>(
+              valueListenable: ReviewRepository.instance.reviews,
+              builder: (context, allReviews, _) {
+                final userReviews = allReviews
+                    .where((r) => r.revieweeId == vehicle.userId)
+                    .toList();
+                final avgRating = userReviews.isEmpty
+                    ? 0.0
+                    : userReviews.fold<double>(0, (s, r) => s + r.rating) /
+                        userReviews.length;
+                return Column(
                   children: [
-                    const Icon(Icons.star, size: 20, color: Colors.amber),
-                    const SizedBox(width: 4),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.star, size: 20, color: Colors.amber),
+                        const SizedBox(width: 4),
+                        Text(
+                          avgRating.toStringAsFixed(1),
+                          style: const TextStyle(
+                              fontSize: 18, fontWeight: FontWeight.bold),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
                     Text(
-                      vehicle.averageRating > 0 
-                          ? vehicle.averageRating.toStringAsFixed(1)
-                          : '0.0',
-                      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                      '${userReviews.length} ratings',
+                      style: const TextStyle(fontSize: 12, color: Colors.grey),
                     ),
                   ],
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  '${vehicle.totalRatings} ratings',
-                  style: const TextStyle(fontSize: 12, color: Colors.grey),
-                ),
-              ],
+                );
+              },
             ),
-            Column(
-              children: [
-                Row(
-                  mainAxisSize: MainAxisSize.min,
+            ValueListenableBuilder<List<Booking>>(
+              valueListenable: BookingRepository.instance.bookings,
+              builder: (context, allBookings, _) {
+                final totalTrips = allBookings
+                    .where((b) =>
+                        b.providerId == vehicle.userId &&
+                        b.status == BookingStatus.completed)
+                    .length;
+                return Column(
                   children: [
-                    const Icon(Icons.history, size: 20, color: Colors.blue),
-                    const SizedBox(width: 4),
-                    Text(
-                      '${vehicle.totalBookings}',
-                      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.history, size: 20, color: Colors.blue),
+                        const SizedBox(width: 4),
+                        Text(
+                          '$totalTrips',
+                          style: const TextStyle(
+                              fontSize: 18, fontWeight: FontWeight.bold),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    const Text(
+                      'total trips',
+                      style: TextStyle(fontSize: 12, color: Colors.grey),
                     ),
                   ],
-                ),
-                const SizedBox(height: 4),
-                const Text(
-                  'total trips',
-                  style: TextStyle(fontSize: 12, color: Colors.grey),
-                ),
-              ],
+                );
+              },
             ),
             Column(
               children: [
@@ -1418,5 +1948,25 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
         ),
       ),
     );
+  }
+
+  String _formatReviewDate(DateTime date) {
+    final now = DateTime.now();
+    final difference = now.difference(date);
+
+    if (difference.inDays == 0) {
+      if (difference.inHours == 0) {
+        return '${difference.inMinutes}m ago';
+      }
+      return '${difference.inHours}h ago';
+    } else if (difference.inDays < 7) {
+      return '${difference.inDays}d ago';
+    } else if (difference.inDays < 30) {
+      return '${(difference.inDays / 7).floor()}w ago';
+    } else if (difference.inDays < 365) {
+      return '${(difference.inDays / 30).floor()}mo ago';
+    } else {
+      return '${(difference.inDays / 365).floor()}y ago';
+    }
   }
 }

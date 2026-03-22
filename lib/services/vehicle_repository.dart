@@ -58,7 +58,6 @@ class VehicleRepository {
           response = await _supabase
               .from('vehicles')
               .select()
-              .eq('is_online', true)
               .order('created_at', ascending: false);
         } else {
           rethrow;
@@ -145,11 +144,30 @@ class VehicleRepository {
 
   Future<void> addVehicle(Vehicle vehicle) async {
     try {
-      // Add to Supabase
-      final vehicleJson = vehicle.toJson();
-      vehicleJson['is_user_vehicle'] = false; // Provider vehicle
+      // Add to Supabase (match the real public.vehicles schema)
+      final photos = <String>[];
+      if (vehicle.profileImage != null && vehicle.profileImage!.trim().isNotEmpty) {
+        photos.add(vehicle.profileImage!.trim());
+      }
+      photos.addAll(vehicle.galleryImages.where((e) => e.trim().isNotEmpty));
 
-      await _supabase.from('vehicles').insert(vehicleJson);
+      final payload = <String, dynamic>{
+        'id': vehicle.id,
+        'user_id': vehicle.userId,
+        'name': vehicle.name,
+        'type': vehicle.type,
+        'year': vehicle.year,
+        'capabilities': vehicle.capabilities.map((e) => e.name).toList(),
+        'photos': photos,
+        'created_at': vehicle.createdAt.toIso8601String(),
+        'updated_at': DateTime.now().toIso8601String(),
+      };
+
+      debugPrint(
+        '🚗 Supabase vehicle insert payload (provider): id=${payload['id']} user_id=${payload['user_id']}',
+      );
+
+      await _supabase.from('vehicles').insert(payload);
 
       // Update local state
       _vehicles.value = [vehicle, ..._vehicles.value];
@@ -157,7 +175,13 @@ class VehicleRepository {
 
       debugPrint('✅ Vehicle created in Supabase: ${vehicle.id}');
     } catch (e) {
-      debugPrint('❌ Failed to create vehicle in Supabase: $e');
+      if (e is PostgrestException) {
+        debugPrint(
+          '❌ Failed to create vehicle in Supabase (provider): code=${e.code} message=${e.message} details=${e.details} hint=${e.hint} id=${vehicle.id} user_id=${vehicle.userId}',
+        );
+      } else {
+        debugPrint('❌ Failed to create vehicle in Supabase: $e');
+      }
       // Fallback to local only
       _vehicles.value = [vehicle, ..._vehicles.value];
       await _saveVehicles();
@@ -168,10 +192,31 @@ class VehicleRepository {
   Future<void> updateVehicle(Vehicle vehicle) async {
     try {
       // Update in Supabase
-      await _supabase
-          .from('vehicles')
-          .update(vehicle.toJson())
-          .eq('id', vehicle.id);
+      Map<String, dynamic> payload = Map<String, dynamic>.from(vehicle.toJson());
+      while (true) {
+        try {
+          await _supabase.from('vehicles').update(payload).eq('id', vehicle.id);
+          break;
+        } on PostgrestException catch (e) {
+          if (e.code == '42703') {
+            payload.remove('is_online');
+            payload.remove('is_user_vehicle');
+            continue;
+          }
+          if (e.code == 'PGRST204') {
+            final match = RegExp(r"Could not find the '([^']+)' column").firstMatch(
+              e.message,
+            );
+            final missingColumn = match?.group(1);
+            if (missingColumn == null || !payload.containsKey(missingColumn)) {
+              rethrow;
+            }
+            payload.remove(missingColumn);
+            continue;
+          }
+          rethrow;
+        }
+      }
 
       // Update local state
       final index = _vehicles.value.indexWhere((v) => v.id == vehicle.id);
@@ -223,13 +268,17 @@ class VehicleRepository {
   Future<void> setOnlineStatus(String vehicleId, bool isOnline) async {
     try {
       // Update in Supabase
-      await _supabase
-          .from('vehicles')
-          .update({
-            'is_online': isOnline,
-            'updated_at': DateTime.now().toIso8601String(),
-          })
-          .eq('id', vehicleId);
+      try {
+        await _supabase
+            .from('vehicles')
+            .update({
+              'is_online': isOnline,
+              'updated_at': DateTime.now().toIso8601String(),
+            })
+            .eq('id', vehicleId);
+      } on PostgrestException catch (e) {
+        if (e.code != '42703') rethrow;
+      }
 
       // Update local state
       final updated = Map<String, bool>.from(_onlineStatus.value);

@@ -20,6 +20,9 @@ class Vehicle {
   final double? manualLng;
   final double? lastKnownLat;
   final double? lastKnownLng;
+
+  final bool isVerifiedToggle;
+  final bool isExpertToggle;
   
   // Rating and statistics
   final double averageRating;
@@ -58,6 +61,8 @@ class Vehicle {
     this.manualLng,
     this.lastKnownLat,
     this.lastKnownLng,
+    this.isVerifiedToggle = false,
+    this.isExpertToggle = false,
     this.averageRating = 0.0,
     this.totalRatings = 0,
     this.totalBookings = 0,
@@ -93,6 +98,8 @@ class Vehicle {
     double? manualLng,
     double? lastKnownLat,
     double? lastKnownLng,
+    bool? isVerifiedToggle,
+    bool? isExpertToggle,
     double? averageRating,
     int? totalRatings,
     int? totalBookings,
@@ -127,6 +134,8 @@ class Vehicle {
       manualLng: manualLng ?? this.manualLng,
       lastKnownLat: lastKnownLat ?? this.lastKnownLat,
       lastKnownLng: lastKnownLng ?? this.lastKnownLng,
+      isVerifiedToggle: isVerifiedToggle ?? this.isVerifiedToggle,
+      isExpertToggle: isExpertToggle ?? this.isExpertToggle,
       averageRating: averageRating ?? this.averageRating,
       totalRatings: totalRatings ?? this.totalRatings,
       totalBookings: totalBookings ?? this.totalBookings,
@@ -164,6 +173,8 @@ class Vehicle {
       'manual_lng': manualLng,
       'last_known_lat': lastKnownLat,
       'last_known_lng': lastKnownLng,
+      'is_verified_toggle': isVerifiedToggle,
+      'is_expert_toggle': isExpertToggle,
       'average_rating': averageRating,
       'total_ratings': totalRatings,
       'total_bookings': totalBookings,
@@ -212,6 +223,8 @@ class Vehicle {
       manualLng: (json['manual_lng'] ?? json['manualLng'] as num?)?.toDouble(),
       lastKnownLat: (json['last_known_lat'] ?? json['lastKnownLat'] as num?)?.toDouble(),
       lastKnownLng: (json['last_known_lng'] ?? json['lastKnownLng'] as num?)?.toDouble(),
+      isVerifiedToggle: json['is_verified_toggle'] ?? json['isVerifiedToggle'] ?? false,
+      isExpertToggle: json['is_expert_toggle'] ?? json['isExpertToggle'] ?? false,
       averageRating: (json['average_rating'] ?? json['averageRating'] as num?)?.toDouble() ?? 0.0,
       totalRatings: json['total_ratings'] ?? json['totalRatings'] ?? 0,
       totalBookings: json['total_bookings'] ?? json['totalBookings'] ?? 0,

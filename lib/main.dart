@@ -1,3 +1,5 @@
+ 
+import 'dart:async';
 import 'dart:math' as math;
 import 'dart:convert';
 
@@ -13,14 +15,16 @@ import 'package:geolocator/geolocator.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:image_picker/image_picker.dart';
 import 'firebase_options.dart';
-import 'config/supabase_config.dart';
-import 'models/booking.dart';
+import 'models/seat_layout.dart';
 import 'models/service_type.dart';
 import 'models/slot.dart';
 import 'models/slot_entry.dart';
 import 'models/slot_type.dart';
 import 'models/vehicle.dart';
 import 'models/pickup_mode.dart';
+import 'models/booking.dart';
+import 'models/review.dart';
+import 'config/supabase_config.dart';
 import 'screens/slot_detail_screen.dart';
 import 'screens/vehicle/vehicle_list_screen.dart';
 import 'services/booking_repository.dart';
@@ -34,20 +38,34 @@ import 'services/seat_layout_repository.dart';
 import 'services/user_vehicle_repository.dart';
 import 'services/user_slot_repository.dart';
 import 'services/user_post_repository.dart';
+import 'services/user_post_acceptance_repository.dart';
+import 'models/user_post_acceptance.dart';
+import 'services/review_repository.dart';
 import 'widgets/slot_card.dart';
 import 'widgets/booking_confirm_sheet.dart';
+import 'widgets/review_dialog.dart';
 import 'services/profile_repository.dart';
+import 'services/profile_name_registry.dart';
 import 'services/app_preferences.dart';
 import 'services/passenger_repository.dart';
 import 'services/stripe_service.dart';
 import 'screens/booking_map_screen.dart';
+import 'services/location_autocomplete_service.dart';
 import 'screens/auth/splash_screen.dart';
 import 'screens/auth/login_screen.dart';
 import 'screens/auth/register_screen.dart';
+import 'screens/reviews_screen.dart';
 import 'app_tab_controller.dart';
 
 // Global Supabase client
 final supabase = Supabase.instance.client;
+
+/// Strip |lat,lon|keywords from stored location string — returns display name only
+String _cleanLoc(String? raw) {
+  if (raw == null || raw.isEmpty) return '';
+  final t = raw.trim();
+  return t.contains('|') ? t.split('|').first.trim() : t;
+}
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -98,12 +116,16 @@ void main() async {
     await UserVehicleRepository.instance.init();
     await UserSlotRepository.instance.init();
     await UserPostRepository.instance.init();
+    await UserPostAcceptanceRepository.instance.init();
     await SeatLayoutRepository.instance.init();
     await BookingRepository.instance.init();
     await PassengerRepository.instance.init();
 
     // Initialize Stripe for payments
     await StripeService.instance.init();
+    
+    // Initialize Review system
+    await ReviewRepository.instance.init();
   } catch (e) {
     startupError = 'App init failed: $e';
   }
@@ -134,6 +156,9 @@ class _EditUserPostPageState extends State<EditUserPostPage> {
   DateTime? _startTime;
   DateTime? _endTime;
 
+  bool _requiresVerifiedVehicle = false;
+  bool _requiresExpertVehicle = false;
+
   @override
   void initState() {
     super.initState();
@@ -151,6 +176,8 @@ class _EditUserPostPageState extends State<EditUserPostPage> {
     _persons = p.persons;
     _startTime = p.startTime;
     _endTime = p.endTime;
+    _requiresVerifiedVehicle = p.requiresVerifiedVehicle;
+    _requiresExpertVehicle = p.requiresExpertVehicle;
   }
 
   @override
@@ -194,7 +221,7 @@ class _EditUserPostPageState extends State<EditUserPostPage> {
     });
   }
 
-  void _save() {
+  Future<void> _save() async {
     if (_slotType == SlotType.fromTo) {
       if (_fromController.text.trim().isEmpty ||
           _toController.text.trim().isEmpty) {
@@ -238,13 +265,21 @@ class _EditUserPostPageState extends State<EditUserPostPage> {
       notes: _notesController.text.trim().isEmpty
           ? null
           : _notesController.text.trim(),
+      requiresVerifiedVehicle: _requiresVerifiedVehicle,
+      requiresExpertVehicle: _requiresExpertVehicle,
     );
 
-    UserPostRepository.instance.update(updated);
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('Post updated')));
-    Navigator.pop(context);
+    try {
+      await UserPostRepository.instance.update(updated);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Post updated')),
+      );
+      Navigator.pop(context);
+    } catch (e) {
+      if (!mounted) return;
+      _showError('Failed to update post: $e');
+    }
   }
 
   @override
@@ -367,6 +402,23 @@ class _EditUserPostPageState extends State<EditUserPostPage> {
                 icon: const Icon(Icons.add_circle_outline),
               ),
             ],
+          ),
+          const SizedBox(height: 12),
+          const Text(
+            'Needed vehicle tags',
+            style: TextStyle(fontWeight: FontWeight.bold),
+          ),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            value: _requiresVerifiedVehicle,
+            onChanged: (v) => setState(() => _requiresVerifiedVehicle = v),
+            title: const Text('Verified vehicle required'),
+          ),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            value: _requiresExpertVehicle,
+            onChanged: (v) => setState(() => _requiresExpertVehicle = v),
+            title: const Text('Expert vehicle required'),
           ),
           const SizedBox(height: 12),
           TextField(
@@ -735,7 +787,64 @@ Widget _buildDocumentUploadCard(
   required String subtitle,
   required IconData icon,
   required String documentType,
+  String? frontBase64,
+  String? backBase64,
 }) {
+  Uint8List? tryDecode(String? s) {
+    if (s == null) return null;
+    try {
+      final normalized = s.contains(',') ? s.split(',').last : s;
+      if (normalized.trim().isEmpty) return null;
+      return base64Decode(normalized);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> openPreview(Uint8List bytes, String sideLabel) async {
+    await showDialog<void>(
+      context: context,
+      builder: (context) => Dialog(
+        child: InteractiveViewer(
+          minScale: 0.5,
+          maxScale: 4,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(12),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        '$title ($sideLabel)',
+                        style: const TextStyle(fontWeight: FontWeight.w700),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: () => Navigator.pop(context),
+                      icon: const Icon(Icons.close),
+                    ),
+                  ],
+                ),
+              ),
+              Flexible(
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Image.memory(bytes, fit: BoxFit.contain),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  final frontBytes = tryDecode(frontBase64);
+  final backBytes = tryDecode(backBase64);
+
   return Card(
     child: Padding(
       padding: const EdgeInsets.all(12),
@@ -790,6 +899,50 @@ Widget _buildDocumentUploadCard(
               ],
             ],
           ),
+          if (frontBytes != null || backBytes != null) ...[
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                if (frontBytes != null) ...[
+                  Expanded(
+                    child: InkWell(
+                      onTap: () => openPreview(frontBytes, 'front'),
+                      borderRadius: BorderRadius.circular(10),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(10),
+                        child: AspectRatio(
+                          aspectRatio: 3 / 2,
+                          child: Image.memory(frontBytes, fit: BoxFit.cover),
+                        ),
+                      ),
+                    ),
+                  ),
+                ] else ...[
+                  const Expanded(child: SizedBox()),
+                ],
+                if (documentType == 'aadhaar' || documentType == 'dl') ...[
+                  const SizedBox(width: 8),
+                  if (backBytes != null) ...[
+                    Expanded(
+                      child: InkWell(
+                        onTap: () => openPreview(backBytes, 'back'),
+                        borderRadius: BorderRadius.circular(10),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(10),
+                          child: AspectRatio(
+                            aspectRatio: 3 / 2,
+                            child: Image.memory(backBytes, fit: BoxFit.cover),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ] else ...[
+                    const Expanded(child: SizedBox()),
+                  ],
+                ],
+              ],
+            ),
+          ],
         ],
       ),
     ),
@@ -1414,6 +1567,15 @@ class _CreateUserPostPageState extends State<CreateUserPostPage> {
   int _persons = 1;
   final _notesController = TextEditingController();
 
+  // Parcel dimension controllers
+  final _parcelWeightController = TextEditingController();
+  final _parcelLengthController = TextEditingController();
+  final _parcelWidthController = TextEditingController();
+  final _parcelHeightController = TextEditingController();
+
+  bool _requiresVerifiedVehicle = false;
+  bool _requiresExpertVehicle = false;
+
   DateTime? _startTime;
   DateTime? _endTime;
 
@@ -1433,6 +1595,10 @@ class _CreateUserPostPageState extends State<CreateUserPostPage> {
     _radiusController.dispose();
     _budgetController.dispose();
     _notesController.dispose();
+    _parcelWeightController.dispose();
+    _parcelLengthController.dispose();
+    _parcelWidthController.dispose();
+    _parcelHeightController.dispose();
     super.dispose();
   }
 
@@ -1466,7 +1632,7 @@ class _CreateUserPostPageState extends State<CreateUserPostPage> {
     });
   }
 
-  void _create() {
+  Future<void> _create() async {
     if (_slotType == SlotType.fromTo) {
       if (_fromController.text.trim().isEmpty ||
           _toController.text.trim().isEmpty) {
@@ -1515,16 +1681,36 @@ class _CreateUserPostPageState extends State<CreateUserPostPage> {
       notes: _notesController.text.trim().isEmpty
           ? null
           : _notesController.text.trim(),
+      requiresVerifiedVehicle: _requiresVerifiedVehicle,
+      requiresExpertVehicle: _requiresExpertVehicle,
       createdAt: DateTime.now(),
       status: UserPostStatus.active,
       isOnline: true,
+      parcelWeight: _serviceType == ServiceType.parcel
+          ? double.tryParse(_parcelWeightController.text.trim())
+          : null,
+      parcelLength: _serviceType == ServiceType.parcel
+          ? double.tryParse(_parcelLengthController.text.trim())
+          : null,
+      parcelWidth: _serviceType == ServiceType.parcel
+          ? double.tryParse(_parcelWidthController.text.trim())
+          : null,
+      parcelHeight: _serviceType == ServiceType.parcel
+          ? double.tryParse(_parcelHeightController.text.trim())
+          : null,
     );
 
-    UserPostRepository.instance.add(post);
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('Posted ')));
-    Navigator.pop(context);
+    try {
+      await UserPostRepository.instance.add(post);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Posted ')),
+      );
+      Navigator.pop(context);
+    } catch (e) {
+      if (!mounted) return;
+      _showError('Failed to post: $e');
+    }
   }
 
   @override
@@ -1658,6 +1844,83 @@ class _CreateUserPostPageState extends State<CreateUserPostPage> {
               border: OutlineInputBorder(),
             ),
           ),
+          // Parcel dimensions — only shown for parcel service type
+          if (_serviceType == ServiceType.parcel) ...[
+            const SizedBox(height: 16),
+            const Text(
+              'Parcel Dimensions',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _parcelWeightController,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    decoration: const InputDecoration(
+                      labelText: 'Weight (kg)',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: TextField(
+                    controller: _parcelLengthController,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    decoration: const InputDecoration(
+                      labelText: 'Length (cm)',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _parcelWidthController,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    decoration: const InputDecoration(
+                      labelText: 'Width (cm)',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: TextField(
+                    controller: _parcelHeightController,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    decoration: const InputDecoration(
+                      labelText: 'Height (cm)',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+          const SizedBox(height: 12),
+          const Text(
+            'Needed vehicle tags',
+            style: TextStyle(fontWeight: FontWeight.bold),
+          ),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            value: _requiresVerifiedVehicle,
+            onChanged: (v) => setState(() => _requiresVerifiedVehicle = v),
+            title: const Text('Verified vehicle required'),
+          ),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            value: _requiresExpertVehicle,
+            onChanged: (v) => setState(() => _requiresExpertVehicle = v),
+            title: const Text('Expert vehicle required'),
+          ),
           const SizedBox(height: 16),
           FilledButton(onPressed: _create, child: const Text('Post')),
         ],
@@ -1722,6 +1985,25 @@ class UserMyPostsPage extends StatelessWidget {
                       Text(_userPostTime(p)),
                       const SizedBox(height: 4),
                       Text('Budget: ()'),
+                      if (p.requiresVerifiedVehicle || p.requiresExpertVehicle) ...[
+                        const SizedBox(height: 6),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 6,
+                          children: [
+                            if (p.requiresVerifiedVehicle)
+                              const Chip(
+                                label: Text('Verified only'),
+                                visualDensity: VisualDensity.compact,
+                              ),
+                            if (p.requiresExpertVehicle)
+                              const Chip(
+                                label: Text('Expert only'),
+                                visualDensity: VisualDensity.compact,
+                              ),
+                          ],
+                        ),
+                      ],
                       if (p.notes?.isNotEmpty == true)
                         Text(
                           p.notes!,
@@ -1740,19 +2022,31 @@ class UserMyPostsPage extends StatelessWidget {
                           scale: 0.85,
                           child: Switch(
                             value: p.isOnline,
-                            onChanged: (v) {
-                              UserPostRepository.instance.update(
-                                p.copyWith(isOnline: v),
-                              );
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text(
-                                    v
-                                        ? 'Post is now online'
-                                        : 'Post is now offline',
+                            onChanged: (v) async {
+                              try {
+                                await UserPostRepository.instance.update(
+                                  p.copyWith(isOnline: v),
+                                );
+                                if (!context.mounted) return;
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text(
+                                      v
+                                          ? 'Post is now online'
+                                          : 'Post is now offline',
+                                    ),
                                   ),
-                                ),
-                              );
+                                );
+                              } catch (e) {
+                                if (!context.mounted) return;
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text(
+                                      'Failed to update: $e',
+                                    ),
+                                  ),
+                                );
+                              }
                             },
                           ),
                         ),
@@ -1841,9 +2135,9 @@ class UserMyPostsPage extends StatelessWidget {
 
   String _userPostTitle(UserPost p) {
     if (p.fromLocation != null && p.toLocation != null) {
-      return '${p.fromLocation} ${p.toLocation}';
+      return '${_cleanLoc(p.fromLocation)} → ${_cleanLoc(p.toLocation)}';
     }
-    if (p.baseLocation != null) return p.baseLocation!;
+    if (p.baseLocation != null) return _cleanLoc(p.baseLocation);
     return 'Post';
   }
 
@@ -1923,9 +2217,9 @@ class UserPostHistoryPage extends StatelessWidget {
 
   String _userPostTitle(UserPost p) {
     if (p.fromLocation != null && p.toLocation != null) {
-      return '${p.fromLocation} ${p.toLocation}';
+      return '${_cleanLoc(p.fromLocation)} → ${_cleanLoc(p.toLocation)}';
     }
-    if (p.baseLocation != null) return p.baseLocation!;
+    if (p.baseLocation != null) return _cleanLoc(p.baseLocation);
     return 'Post';
   }
 }
@@ -2028,9 +2322,9 @@ class MyPostsPage extends StatelessWidget {
 
   String _slotTitle(Slot slot) {
     if (slot.fromLocation != null && slot.toLocation != null) {
-      return '${slot.fromLocation} ${slot.toLocation}';
+      return '${_cleanLoc(slot.fromLocation)} → ${_cleanLoc(slot.toLocation)}';
     }
-    if (slot.baseLocation != null) return slot.baseLocation!;
+    if (slot.baseLocation != null) return _cleanLoc(slot.baseLocation);
     return 'Posted ride';
   }
 
@@ -2413,6 +2707,24 @@ class SettingsPage extends StatelessWidget {
                       );
                     },
                   ),
+                  _ProfileSection(
+                    title: 'My Reviews',
+                    icon: Icons.star,
+                    onTap: () {
+                      final currentUser = AuthRepository.instance.currentUser;
+                      if (currentUser == null) return;
+                      
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => ReviewsScreen(
+                            userId: currentUser.id,
+                            userName: info.profileName,
+                          ),
+                        ),
+                      );
+                    },
+                  ),
                   const SizedBox(height: 24),
                   _ProfileSection(
                     title: 'Plans',
@@ -2427,12 +2739,60 @@ class SettingsPage extends StatelessWidget {
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
                   const SizedBox(height: 12),
-                  TextField(
-                    controller: nameController,
-                    decoration: const InputDecoration(
-                      labelText: 'Name',
-                      border: OutlineInputBorder(),
-                    ),
+                  StatefulBuilder(
+                    builder: (context, setState) {
+                      String? nameError;
+                      
+                      return TextField(
+                        controller: nameController,
+                        decoration: InputDecoration(
+                          labelText: 'Name',
+                          border: const OutlineInputBorder(),
+                          errorText: nameError,
+                          suffixIcon: nameController.text.trim().isEmpty
+                              ? null
+                              : FutureBuilder<bool>(
+                                  future: () async {
+                                    final currentUser = AuthRepository.instance.currentUser;
+                                    if (currentUser == null) return true;
+                                    
+                                    await ProfileNameRegistry.instance.init();
+                                    return ProfileNameRegistry.instance.isNameAvailable(
+                                      nameController.text.trim(),
+                                      currentUserId: currentUser.id,
+                                    );
+                                  }(),
+                                  builder: (context, snapshot) {
+                                    if (!snapshot.hasData) {
+                                      return const Padding(
+                                        padding: EdgeInsets.all(12.0),
+                                        child: SizedBox(
+                                          width: 16,
+                                          height: 16,
+                                          child: CircularProgressIndicator(strokeWidth: 2),
+                                        ),
+                                      );
+                                    }
+                                    
+                                    final isAvailable = snapshot.data!;
+                                    return Icon(
+                                      isAvailable ? Icons.check_circle : Icons.error,
+                                      color: isAvailable ? Colors.green : Colors.red,
+                                    );
+                                  },
+                                ),
+                        ),
+                        onChanged: (value) {
+                          setState(() {
+                            if (value.trim().isEmpty) {
+                              nameError = 'Name cannot be empty';
+                            } else {
+                              nameError = null;
+                            }
+                          });
+                        },
+                      );
+                    },
                   ),
                   const SizedBox(height: 12),
                   TextField(
@@ -2482,6 +2842,8 @@ class SettingsPage extends StatelessWidget {
                       subtitle: 'Upload front and back',
                       icon: Icons.credit_card,
                       documentType: 'aadhaar',
+                      frontBase64: info.aadhaarFrontImage,
+                      backBase64: info.aadhaarBackImage,
                     ),
                     const SizedBox(height: 12),
                     TextField(
@@ -2499,6 +2861,7 @@ class SettingsPage extends StatelessWidget {
                       subtitle: 'Upload tax identification',
                       icon: Icons.badge,
                       documentType: 'pan',
+                      frontBase64: info.panFrontImage,
                     ),
                     const SizedBox(height: 12),
                     _buildDocumentUploadCard(
@@ -2507,6 +2870,8 @@ class SettingsPage extends StatelessWidget {
                       subtitle: 'Upload front and back',
                       icon: Icons.drive_eta,
                       documentType: 'dl',
+                      frontBase64: info.dlFrontImage,
+                      backBase64: info.dlBackImage,
                     ),
                     const SizedBox(height: 12),
                   ] else ...[
@@ -2697,24 +3062,38 @@ class SettingsPage extends StatelessWidget {
                     width: double.infinity,
                     child: ElevatedButton(
                       onPressed: () async {
-                        await ProfileRepository.instance.update(
-                          profileName: nameController.text.trim().isEmpty
-                              ? info.profileName
-                              : nameController.text.trim(),
-                          phone: phoneController.text.trim().isEmpty
-                              ? null
-                              : phoneController.text.trim(),
-                          aadhaar: aadhaarController.text.trim().isEmpty
-                              ? null
-                              : aadhaarController.text.trim(),
-                          pan: panController.text.trim().isEmpty
-                              ? null
-                              : panController.text.trim(),
-                        );
-                        if (!context.mounted) return;
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Profile updated')),
-                        );
+                        try {
+                          await ProfileRepository.instance.update(
+                            profileName: nameController.text.trim().isEmpty
+                                ? info.profileName
+                                : nameController.text.trim(),
+                            phone: phoneController.text.trim().isEmpty
+                                ? null
+                                : phoneController.text.trim(),
+                            aadhaar: aadhaarController.text.trim().isEmpty
+                                ? null
+                                : aadhaarController.text.trim(),
+                            pan: panController.text.trim().isEmpty
+                                ? null
+                                : panController.text.trim(),
+                          );
+                          if (!context.mounted) return;
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Profile updated'),
+                              backgroundColor: Colors.green,
+                            ),
+                          );
+                        } catch (e) {
+                          if (!context.mounted) return;
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(e.toString().replaceAll('Exception: ', '')),
+                              backgroundColor: Colors.red,
+                              duration: const Duration(seconds: 4),
+                            ),
+                          );
+                        }
                       },
                       child: const Text('Save'),
                     ),
@@ -2848,11 +3227,31 @@ class _PostsPageState extends State<PostsPage> {
   ServiceType?
   _selectedServiceType; // null = show all, otherwise filter by service type
 
+  // Route filter
+  SlotType?
+  _selectedSlotType; // null = both, otherwise filter by slot type
+
+  // Pickup mode filter
+  PickupMode?
+  _selectedPickupMode; // null = both, otherwise filter by pickup mode
+
+  // Location filters (based on route type)
+  String? _filterFromLocation;
+  String? _filterToLocation;
+  String? _filterBaseLocation;
+
   // Operator filter (only for Lease)
   bool?
   _withOperator; // null = both, true = with operator, false = without operator
 
+  // Security deposit filter (only for Lease)
+  double? _minSecurityDeposit;
+  double? _maxSecurityDeposit;
+
   final TextEditingController _searchController = TextEditingController();
+  final TextEditingController _fromSearchController = TextEditingController();
+  final TextEditingController _toSearchController = TextEditingController();
+  final TextEditingController _baseSearchController = TextEditingController();
   bool _nearestEnabled = false;
   bool _showUserPosts = false; // Toggle between provider and user posts
 
@@ -2860,6 +3259,10 @@ class _PostsPageState extends State<PostsPage> {
   double? _maxPrice;
   DateTime? _fromDateTime;
   DateTime? _toDateTime;
+  double? _maxDistanceKm;
+
+  // Resolved coordinates for base location radius search
+  (double, double)? _filterBaseLatLon;
 
   final VehicleRepository _vehicleRepository = VehicleRepository.instance;
 
@@ -2871,6 +3274,9 @@ class _PostsPageState extends State<PostsPage> {
   @override
   void dispose() {
     _searchController.dispose();
+    _fromSearchController.dispose();
+    _toSearchController.dispose();
+    _baseSearchController.dispose();
     super.dispose();
   }
 
@@ -2937,28 +3343,132 @@ class _PostsPageState extends State<PostsPage> {
                 child: Row(
                   children: [
                     Expanded(
-                      child: TextField(
-                        controller: _searchController,
-                        decoration: InputDecoration(
-                          hintText: _showUserPosts
-                              ? 'Search user requests'
-                              : 'Search by location',
-                          prefixIcon: const Icon(Icons.search),
-                          suffixIcon: _searchController.text.isEmpty
-                              ? null
-                              : IconButton(
-                                  onPressed: () {
-                                    setState(() {
-                                      _searchController.clear();
-                                    });
-                                  },
-                                  icon: const Icon(Icons.clear),
+                      child: _selectedSlotType == SlotType.fromTo
+                          ? Row(
+                              children: [
+                                Expanded(
+                                  child: TextField(
+                                    controller: _fromSearchController,
+                                    decoration: InputDecoration(
+                                      hintText: 'From',
+                                      prefixIcon: const Icon(Icons.my_location),
+                                      suffixIcon: _fromSearchController.text.isEmpty
+                                          ? null
+                                          : IconButton(
+                                              onPressed: () {
+                                                setState(() {
+                                                  _fromSearchController.clear();
+                                                  _filterFromLocation = null;
+                                                });
+                                              },
+                                              icon: const Icon(Icons.clear),
+                                            ),
+                                      border: const OutlineInputBorder(),
+                                      isDense: true,
+                                    ),
+                                    onChanged: (v) {
+                                      setState(() {
+                                        final t = v.trim();
+                                        _filterFromLocation = t.isEmpty ? null : t;
+                                      });
+                                    },
+                                  ),
                                 ),
-                          border: const OutlineInputBorder(),
-                          isDense: true,
-                        ),
-                        onChanged: (_) => setState(() {}),
-                      ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: TextField(
+                                    controller: _toSearchController,
+                                    decoration: InputDecoration(
+                                      hintText: 'To',
+                                      prefixIcon: const Icon(Icons.place),
+                                      suffixIcon: _toSearchController.text.isEmpty
+                                          ? null
+                                          : IconButton(
+                                              onPressed: () {
+                                                setState(() {
+                                                  _toSearchController.clear();
+                                                  _filterToLocation = null;
+                                                });
+                                              },
+                                              icon: const Icon(Icons.clear),
+                                            ),
+                                      border: const OutlineInputBorder(),
+                                      isDense: true,
+                                    ),
+                                    onChanged: (v) {
+                                      setState(() {
+                                        final t = v.trim();
+                                        _filterToLocation = t.isEmpty ? null : t;
+                                      });
+                                    },
+                                  ),
+                                ),
+                              ],
+                            )
+                          : _selectedSlotType == SlotType.fromRange
+                              ? TextField(
+                                  controller: _baseSearchController,
+                                  decoration: InputDecoration(
+                                    hintText: 'Base location',
+                                    prefixIcon: const Icon(Icons.location_on),
+                                    suffixIcon: _baseSearchController.text.isEmpty
+                                        ? null
+                                        : IconButton(
+                                            onPressed: () {
+                                              setState(() {
+                                                _baseSearchController.clear();
+                                                _filterBaseLocation = null;
+                                              });
+                                            },
+                                            icon: const Icon(Icons.clear),
+                                          ),
+                                    border: const OutlineInputBorder(),
+                                    isDense: true,
+                                  ),
+                                  onChanged: (v) {
+                                    final t = v.trim();
+                                    setState(() {
+                                      _filterBaseLocation = t.isEmpty ? null : t;
+                                      _filterBaseLatLon = null; // reset until resolved
+                                    });
+                                    if (t.length >= 3) {
+                                      LocationAutocompleteService.instance
+                                          .searchLocations(t)
+                                          .then((results) {
+                                        if (results.isNotEmpty && mounted) {
+                                          setState(() {
+                                            _filterBaseLatLon = (
+                                              results.first.lat,
+                                              results.first.lon,
+                                            );
+                                          });
+                                        }
+                                      });
+                                    }
+                                  },
+                                )
+                              : TextField(
+                                  controller: _searchController,
+                                  decoration: InputDecoration(
+                                    hintText: _showUserPosts
+                                        ? 'Search user requests'
+                                        : 'Search by location',
+                                    prefixIcon: const Icon(Icons.search),
+                                    suffixIcon: _searchController.text.isEmpty
+                                        ? null
+                                        : IconButton(
+                                            onPressed: () {
+                                              setState(() {
+                                                _searchController.clear();
+                                              });
+                                            },
+                                            icon: const Icon(Icons.clear),
+                                          ),
+                                    border: const OutlineInputBorder(),
+                                    isDense: true,
+                                  ),
+                                  onChanged: (_) => setState(() {}),
+                                ),
                     ),
                     const SizedBox(width: 12),
                     OutlinedButton.icon(
@@ -3066,6 +3576,8 @@ class _PostsPageState extends State<PostsPage> {
                                       ? null
                                       : service;
                                   _withOperator = null; // Reset operator filter
+                                  _minSecurityDeposit = null;
+                                  _maxSecurityDeposit = null;
                                 });
                               },
                             ),
@@ -3182,6 +3694,17 @@ class _PostsPageState extends State<PostsPage> {
                 providerRating: item.providerRating,
                 isOffer: item.isOffer,
                 isUserPost: item.isUserPost,
+                onRatingTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => ReviewsScreen(
+                        userId: item.vehicle.userId,
+                        userName: item.providerName,
+                      ),
+                    ),
+                  );
+                },
                 onTap: () {
                   Navigator.push(
                     context,
@@ -3288,7 +3811,7 @@ class _PostsPageState extends State<PostsPage> {
                     ),
                   );
                 },
-                onAction: () {
+                onAction: () async {
                   final currentUser = AuthRepository.instance.currentUser;
                   if (currentUser == null) {
                     ScaffoldMessenger.of(context).showSnackBar(
@@ -3297,12 +3820,35 @@ class _PostsPageState extends State<PostsPage> {
                     return;
                   }
 
-                  // Provider can respond to user's request
+                  final profile = ProfileRepository.instance.profile.value;
+
+                  final booking = await BookingRepository.instance.createBooking(
+                    slotId: item.slot.id,
+                    providerId: currentUser.id,
+                    providerName: profile.profileName,
+                    providerPhone: profile.phone,
+                    userId: item.vehicle.userId,
+                    defaultCapacity: item.slot.capacity,
+                    price: item.slot.price,
+                    userName: ProfileNameRegistry.instance.getNameForUser(item.vehicle.userId) ?? 'User',
+                  );
+
+                  if (!context.mounted) return;
+
+                  if (booking == null) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Failed to accept request')),
+                    );
+                    return;
+                  }
+
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
-                      content: Text('Contact user to provide service'),
+                      content: Text('Request accepted!'),
+                      backgroundColor: Colors.green,
                     ),
                   );
+                  mainTabIndex.value = 1;
                 },
               ),
             ),
@@ -3325,6 +3871,7 @@ class _PostsPageState extends State<PostsPage> {
         return 'Lease';
     }
   }
+
 
   List<SlotFeedItem> _filteredSlotItems() {
     final currentUser = AuthRepository.instance.currentUser;
@@ -3351,7 +3898,7 @@ class _PostsPageState extends State<PostsPage> {
               providerName: currentUserName, // Use current profile name
               providerAvatar: '',
               providerRating: 5.0,
-              isOffer: true,
+              isOffer: false,
               isUserPost: true,
             ),
           )
@@ -3386,9 +3933,8 @@ class _PostsPageState extends State<PostsPage> {
     }
 
     final query = _searchController.text.trim().toLowerCase();
-    final searched = query.isEmpty
+    final searched = (_selectedSlotType == null && query.isNotEmpty)
         ? repoItems
-        : repoItems
               .where((e) {
                 final from = (e.slot.fromLocation ?? '').toLowerCase();
                 final to = (e.slot.toLocation ?? '').toLowerCase();
@@ -3397,7 +3943,8 @@ class _PostsPageState extends State<PostsPage> {
                     to.contains(query) ||
                     base.contains(query);
               })
-              .toList(growable: false);
+              .toList(growable: false)
+        : repoItems;
     debugPrint('📊 After search filter: ${searched.length}');
 
     final dateTimeFiltered = searched
@@ -3442,9 +3989,125 @@ class _PostsPageState extends State<PostsPage> {
               .where((e) => e.slot.withOperator == _withOperator)
               .toList();
 
-    if (!_nearestEnabled) return operatorFiltered;
+    // Apply security deposit filter (Lease only)
+    final depositFiltered = (_minSecurityDeposit == null &&
+            _maxSecurityDeposit == null)
+        ? operatorFiltered
+        : operatorFiltered
+            .where((e) {
+              if (e.slot.serviceType != ServiceType.lease) return true;
+              final d = e.slot.securityDeposit;
+              if (d == null) return false;
+              if (_minSecurityDeposit != null && d < _minSecurityDeposit!) {
+                return false;
+              }
+              if (_maxSecurityDeposit != null && d > _maxSecurityDeposit!) {
+                return false;
+              }
+              return true;
+            })
+            .toList(growable: false);
 
-    return _sortByDistance(operatorFiltered);
+    // Apply route type filter
+    final routeFiltered = _selectedSlotType == null
+        ? depositFiltered
+        : depositFiltered
+            .where((e) => e.slot.slotType == _selectedSlotType)
+            .toList(growable: false);
+
+    // Apply pickup mode filter
+    final pickupFiltered = _selectedPickupMode == null
+        ? routeFiltered
+        : routeFiltered
+            .where((e) => e.slot.pickupOption == _selectedPickupMode)
+            .toList(growable: false);
+
+    // Apply location filters
+    final locationFiltered = (_filterFromLocation == null ||
+                _filterFromLocation!.trim().isEmpty) &&
+            (_filterToLocation == null || _filterToLocation!.trim().isEmpty) &&
+            (_filterBaseLocation == null ||
+                _filterBaseLocation!.trim().isEmpty)
+        ? pickupFiltered
+        : pickupFiltered
+            .where((e) {
+              final slot = e.slot;
+              final fromNeedle = (_filterFromLocation ?? '').trim().toLowerCase();
+              final toNeedle = (_filterToLocation ?? '').trim().toLowerCase();
+              final baseNeedle = (_filterBaseLocation ?? '').trim().toLowerCase();
+
+              final fromHay = (slot.fromLocation ?? '').toLowerCase();
+              final toHay = (slot.toLocation ?? '').toLowerCase();
+
+              if (fromNeedle.isNotEmpty && !fromHay.contains(fromNeedle)) {
+                return false;
+              }
+              if (toNeedle.isNotEmpty && !toHay.contains(toNeedle)) {
+                return false;
+              }
+
+              // Base location: use radius-based filtering for fromRange slots
+              if (baseNeedle.isNotEmpty) {
+                final rawBase = slot.baseLocation ?? '';
+                // baseLocation format: "Name|lat,lon"
+                final parts = rawBase.split('|');
+                final coordStr = parts.length == 2 ? parts[1] : null;
+                final coords = coordStr?.split(',');
+                final baseLat = coords != null && coords.length == 2
+                    ? double.tryParse(coords[0])
+                    : null;
+                final baseLon = coords != null && coords.length == 2
+                    ? double.tryParse(coords[1])
+                    : null;
+
+                final searchLatLon = _filterBaseLatLon;
+                final slotRadius = slot.radius;
+
+                if (baseLat != null &&
+                    baseLon != null &&
+                    searchLatLon != null &&
+                    slotRadius != null &&
+                    slotRadius > 0) {
+                  // Radius-based: show slot if searched location is within slot's radius
+                  final dist = _haversineKm(
+                    searchLatLon.$1,
+                    searchLatLon.$2,
+                    baseLat,
+                    baseLon,
+                  );
+                  if (dist > slotRadius) return false;
+                } else {
+                  // Fallback: text contains match
+                  final baseHay = rawBase.toLowerCase();
+                  if (!baseHay.contains(baseNeedle)) return false;
+                }
+              }
+
+              return true;
+            })
+            .toList(growable: false);
+
+    final distanceFiltered = _maxDistanceKm == null
+        ? locationFiltered
+        : locationFiltered
+            .where((e) {
+              final userPos = _currentUserPosition;
+              if (userPos == null) return true;
+              final vehiclePos = _vehicleResolvedLatLng(e.vehicle);
+              if (vehiclePos == null) return false;
+              final distance = _haversineKm(
+                userPos.$1,
+                userPos.$2,
+                vehiclePos.$1,
+                vehiclePos.$2,
+              );
+              return distance <= (_maxDistanceKm ?? double.infinity);
+            })
+            .toList(growable: false);
+
+    if (!_nearestEnabled) return distanceFiltered;
+
+    return _sortByDistance(distanceFiltered);
   }
 
   List<SlotFeedItem> _sortByDistance(List<SlotFeedItem> items) {
@@ -3494,31 +4157,48 @@ class _PostsPageState extends State<PostsPage> {
 
   double _toRad(double deg) => deg * (3.14159265359 / 180.0);
 
-  Future<void> _requestUserLocation() async {
+  Future<bool> _requestUserLocation() async {
     final status = await Permission.locationWhenInUse.request();
     if (status != PermissionStatus.granted) {
-      if (!mounted) return;
+      if (!mounted) return false;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Location permission denied')),
       );
-      return;
+      return false;
     }
 
     try {
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        if (!mounted) return false;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Location services are disabled')),
+        );
+        return false;
+      }
       final pos = await Geolocator.getCurrentPosition(
         desiredAccuracy: LocationAccuracy.medium,
-      );
+      ).timeout(const Duration(seconds: 12));
       if (mounted) {
         setState(() {
           _currentUserPosition = (pos.latitude, pos.longitude);
         });
       }
+      return true;
+    } on TimeoutException {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Location request timed out')),
+        );
+      }
+      return false;
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(const SnackBar(content: Text('Could not get location')));
       }
+      return false;
     }
   }
 
@@ -3529,15 +4209,45 @@ class _PostsPageState extends State<PostsPage> {
     final maxPriceController = TextEditingController(
       text: _maxPrice?.toInt().toString() ?? '',
     );
+    final maxDistanceController = TextEditingController(
+      text: _maxDistanceKm?.toStringAsFixed(
+            _maxDistanceKm != null && _maxDistanceKm! % 1 == 0 ? 0 : 1,
+          ) ??
+          '',
+    );
+
+    final minSecurityDepositController = TextEditingController(
+      text: _minSecurityDeposit?.toInt().toString() ?? '',
+    );
+    final maxSecurityDepositController = TextEditingController(
+      text: _maxSecurityDeposit?.toInt().toString() ?? '',
+    );
+
+    final fromLocationController = TextEditingController(
+      text: _filterFromLocation ?? '',
+    );
+    final toLocationController = TextEditingController(
+      text: _filterToLocation ?? '',
+    );
+    final baseLocationController = TextEditingController(
+      text: _filterBaseLocation ?? '',
+    );
     DateTime? from = _fromDateTime;
     DateTime? to = _toDateTime;
     bool nearest = _nearestEnabled;
+    bool requestingLocation = false;
+
+    String? businessType = ProfileRepository.instance.profile.value.businessType;
+
+    SlotType? slotType = _selectedSlotType;
+    PickupMode? pickupMode = _selectedPickupMode;
 
     await showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
       isScrollControlled: true,
       builder: (context) {
+        final sheetMaxHeight = MediaQuery.of(context).size.height * 0.85;
         return Padding(
           padding: EdgeInsets.only(
             left: 16,
@@ -3545,12 +4255,15 @@ class _PostsPageState extends State<PostsPage> {
             top: 12,
             bottom: MediaQuery.of(context).viewInsets.bottom + 16,
           ),
-          child: StatefulBuilder(
-            builder: (context, setSheetState) {
-              return Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxHeight: sheetMaxHeight),
+            child: StatefulBuilder(
+              builder: (context, setSheetState) {
+                return SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
                   const Text(
                     'Filters',
                     style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
@@ -3559,41 +4272,28 @@ class _PostsPageState extends State<PostsPage> {
                   SwitchListTile(
                     value: nearest,
                     onChanged: (v) async {
-                      if (v && _currentUserPosition == null) {
-                        // Capture messenger before async gap
-                        final messenger = ScaffoldMessenger.of(context);
-
-                        // Close the sheet first to avoid freezing
-                        if (context.mounted) {
-                          Navigator.pop(context);
-                        }
-
-                        // Request location
-                        await _requestUserLocation();
-
-                        if (!mounted) return;
-
-                        if (_currentUserPosition != null) {
-                          // Location obtained, enable nearest filter
-                          setState(() {
-                            _nearestEnabled = true;
-                          });
-                          messenger.showSnackBar(
-                            const SnackBar(
-                              content: Text('Nearest first enabled'),
-                            ),
-                          );
-                        } else {
-                          // Location not obtained
-                          messenger.showSnackBar(
-                            const SnackBar(
-                              content: Text('Location permission required'),
-                            ),
-                          );
-                        }
+                      if (requestingLocation) return;
+                      if (!v) {
+                        setSheetState(() => nearest = false);
                         return;
                       }
-                      setSheetState(() => nearest = v);
+
+                      if (_currentUserPosition != null) {
+                        setSheetState(() => nearest = true);
+                        return;
+                      }
+
+                      setSheetState(() {
+                        requestingLocation = true;
+                      });
+
+                      final ok = await _requestUserLocation();
+                      if (!mounted) return;
+
+                      setSheetState(() {
+                        requestingLocation = false;
+                        nearest = ok && _currentUserPosition != null;
+                      });
                     },
                     title: const Text('Nearest first'),
                     subtitle: Text(
@@ -3601,6 +4301,142 @@ class _PostsPageState extends State<PostsPage> {
                           ? 'Requires location permission'
                           : 'Sort by distance from your location',
                     ),
+                    secondary: requestingLocation
+                        ? const SizedBox(
+                            height: 18,
+                            width: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : null,
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: maxDistanceController,
+                    decoration: const InputDecoration(
+                      labelText: 'Max distance (km)',
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.social_distance),
+                    ),
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'Branding type',
+                    style: TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 8),
+                  ValueListenableBuilder<ProfileInfo>(
+                    valueListenable: ProfileRepository.instance.profile,
+                    builder: (context, info, _) {
+                      final current = businessType ?? info.businessType;
+                      return Wrap(
+                        spacing: 8,
+                        children: [
+                          ChoiceChip(
+                            label: const Text('Solo'),
+                            selected: current == 'solo',
+                            onSelected: (_) async {
+                              setSheetState(() => businessType = 'solo');
+                              await ProfileRepository.instance.update(
+                                businessType: 'solo',
+                                setBusinessTypeNull: false,
+                              );
+                            },
+                          ),
+                          ChoiceChip(
+                            label: const Text('Pvt'),
+                            selected: current == 'private',
+                            onSelected: (_) async {
+                              setSheetState(() => businessType = 'private');
+                              await ProfileRepository.instance.update(
+                                businessType: 'private',
+                                setBusinessTypeNull: false,
+                              );
+                            },
+                          ),
+                          ChoiceChip(
+                            label: const Text('LLM'),
+                            selected: current == 'llc',
+                            onSelected: (_) async {
+                              setSheetState(() => businessType = 'llc');
+                              await ProfileRepository.instance.update(
+                                businessType: 'llc',
+                                setBusinessTypeNull: false,
+                              );
+                            },
+                          ),
+                        ],
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'Route type',
+                    style: TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    children: [
+                      ...SlotType.values.map(
+                        (t) => ChoiceChip(
+                          label: Text(t.displayName),
+                          selected: slotType == t,
+                          onSelected: (_) =>
+                              setSheetState(() => slotType = slotType == t ? null : t),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  if (slotType == SlotType.fromTo) ...[
+                    _locationAutocompleteField(
+                      controller: fromLocationController,
+                      label: 'From location',
+                      icon: Icons.my_location,
+                      suggestions: _allLocationNames(field: 'from'),
+                      onChanged: () => setSheetState(() {}),
+                    ),
+                    const SizedBox(height: 12),
+                    _locationAutocompleteField(
+                      controller: toLocationController,
+                      label: 'To location',
+                      icon: Icons.place,
+                      suggestions: _allLocationNames(field: 'to'),
+                      onChanged: () => setSheetState(() {}),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+                  if (slotType == SlotType.fromRange) ...[
+                    _locationAutocompleteField(
+                      controller: baseLocationController,
+                      label: 'Base location',
+                      icon: Icons.location_on,
+                      suggestions: _allLocationNames(field: 'base'),
+                      onChanged: () => setSheetState(() {}),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+                  const Text(
+                    'Pickup mode',
+                    style: TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    children: [
+                      ...PickupMode.values.map(
+                        (m) => ChoiceChip(
+                          label: Text(m.shortLabel),
+                          selected: pickupMode == m,
+                          onSelected: (_) => setSheetState(
+                            () => pickupMode = pickupMode == m ? null : m,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                   const SizedBox(height: 12),
                   Row(
@@ -3704,6 +4540,41 @@ class _PostsPageState extends State<PostsPage> {
                     ),
                   ),
                   const SizedBox(height: 12),
+                  if (_selectedServiceType == ServiceType.lease) ...[
+                    const Text(
+                      'Lease',
+                      style: TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: minSecurityDepositController,
+                            decoration: const InputDecoration(
+                              labelText: 'Min Security Deposit',
+                              border: OutlineInputBorder(),
+                              prefixIcon: Icon(Icons.currency_rupee),
+                            ),
+                            keyboardType: TextInputType.number,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: TextField(
+                            controller: maxSecurityDepositController,
+                            decoration: const InputDecoration(
+                              labelText: 'Max Security Deposit',
+                              border: OutlineInputBorder(),
+                              prefixIcon: Icon(Icons.currency_rupee),
+                            ),
+                            keyboardType: TextInputType.number,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                  ],
                   Row(
                     children: [
                       Expanded(
@@ -3715,6 +4586,20 @@ class _PostsPageState extends State<PostsPage> {
                               _fromDateTime = null;
                               _toDateTime = null;
                               _nearestEnabled = false;
+                              _maxDistanceKm = null;
+                              _minSecurityDeposit = null;
+                              _maxSecurityDeposit = null;
+                              _selectedSlotType = null;
+                              _selectedPickupMode = null;
+                              _filterFromLocation = null;
+                              _filterToLocation = null;
+                              _filterBaseLocation = null;
+                              _filterBaseLatLon = null;
+
+                              _searchController.clear();
+                              _fromSearchController.clear();
+                              _toSearchController.clear();
+                              _baseSearchController.clear();
                             });
                             Navigator.pop(context);
                           },
@@ -3724,7 +4609,33 @@ class _PostsPageState extends State<PostsPage> {
                       const SizedBox(width: 12),
                       Expanded(
                         child: FilledButton(
-                          onPressed: () {
+                          onPressed: () async {
+                            final messenger = ScaffoldMessenger.of(context);
+
+                            final parsedMaxDistance =
+                                double.tryParse(maxDistanceController.text.trim());
+                            final wantsDistance = parsedMaxDistance != null &&
+                                parsedMaxDistance.isFinite &&
+                                parsedMaxDistance > 0;
+
+                            if (wantsDistance && _currentUserPosition == null) {
+                              if (context.mounted) {
+                                Navigator.pop(context);
+                              }
+                              await _requestUserLocation();
+                              if (!mounted) return;
+                              if (_currentUserPosition == null) {
+                                messenger.showSnackBar(
+                                  const SnackBar(
+                                    content: Text(
+                                      'Location permission required for distance filter',
+                                    ),
+                                  ),
+                                );
+                                return;
+                              }
+                            }
+
                             setState(() {
                               _minPrice = double.tryParse(
                                 minPriceController.text,
@@ -3735,21 +4646,160 @@ class _PostsPageState extends State<PostsPage> {
                               _fromDateTime = from;
                               _toDateTime = to;
                               _nearestEnabled = nearest;
+                              _maxDistanceKm = wantsDistance ? parsedMaxDistance : null;
+                              _minSecurityDeposit =
+                                  double.tryParse(minSecurityDepositController.text);
+                              _maxSecurityDeposit =
+                                  double.tryParse(maxSecurityDepositController.text);
+                              _selectedSlotType = slotType;
+                              _selectedPickupMode = pickupMode;
+                              _filterFromLocation =
+                                  fromLocationController.text.trim().isEmpty
+                                      ? null
+                                      : fromLocationController.text.trim();
+                              _filterToLocation =
+                                  toLocationController.text.trim().isEmpty
+                                      ? null
+                                      : toLocationController.text.trim();
+                              _filterBaseLocation =
+                                  baseLocationController.text.trim().isEmpty
+                                      ? null
+                                      : baseLocationController.text.trim();
+
+                              _fromSearchController.text = _filterFromLocation ?? '';
+                              _toSearchController.text = _filterToLocation ?? '';
+                              _baseSearchController.text = _filterBaseLocation ?? '';
+                              // Reset resolved coords; will re-resolve below
+                              _filterBaseLatLon = null;
                             });
-                            Navigator.pop(context);
+
+                            // Resolve base location to coordinates for radius filtering
+                            final baseText = _filterBaseLocation;
+                            if (baseText != null && baseText.length >= 3) {
+                              final results = await LocationAutocompleteService
+                                  .instance
+                                  .searchLocations(baseText);
+                              if (results.isNotEmpty && mounted) {
+                                setState(() {
+                                  _filterBaseLatLon = (
+                                    results.first.lat,
+                                    results.first.lon,
+                                  );
+                                });
+                              }
+                            }
+
+                            if (context.mounted) {
+                              Navigator.pop(context);
+                            }
                           },
                           child: const Text('Apply'),
                         ),
                       ),
                     ],
                   ),
-                ],
-              );
-            },
+                    ],
+                  ),
+                );
+              },
+            ),
           ),
         );
       },
     );
+  }
+
+  /// Autocomplete text field backed by in-app slot location names
+  Widget _locationAutocompleteField({
+    required TextEditingController controller,
+    required String label,
+    required IconData icon,
+    required Set<String> suggestions,
+    required VoidCallback onChanged,
+  }) {
+    return Autocomplete<String>(
+      initialValue: TextEditingValue(text: controller.text),
+      optionsBuilder: (textEditingValue) {
+        final q = textEditingValue.text.trim().toLowerCase();
+        if (q.isEmpty) return suggestions;
+        return suggestions.where((s) => s.toLowerCase().contains(q));
+      },
+      onSelected: (value) {
+        controller.text = value;
+        onChanged();
+      },
+      fieldViewBuilder: (context, fieldController, focusNode, onSubmitted) {
+        // Keep our controller in sync
+        fieldController.text = controller.text;
+        fieldController.addListener(() => controller.text = fieldController.text);
+        return TextField(
+          controller: fieldController,
+          focusNode: focusNode,
+          onChanged: (_) => onChanged(),
+          decoration: InputDecoration(
+            labelText: label,
+            border: const OutlineInputBorder(),
+            prefixIcon: Icon(icon),
+            suffixIcon: fieldController.text.isNotEmpty
+                ? IconButton(
+                    icon: const Icon(Icons.clear),
+                    onPressed: () {
+                      fieldController.clear();
+                      controller.clear();
+                      onChanged();
+                    },
+                  )
+                : null,
+          ),
+        );
+      },
+      optionsViewBuilder: (context, onSelected, options) {
+        return Align(
+          alignment: Alignment.topLeft,
+          child: Material(
+            elevation: 4,
+            borderRadius: BorderRadius.circular(8),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 200),
+              child: ListView.builder(
+                padding: EdgeInsets.zero,
+                shrinkWrap: true,
+                itemCount: options.length,
+                itemBuilder: (context, index) {
+                  final option = options.elementAt(index);
+                  return ListTile(
+                    dense: true,
+                    leading: const Icon(Icons.location_on, size: 16),
+                    title: Text(option, style: const TextStyle(fontSize: 13)),
+                    onTap: () => onSelected(option),
+                  );
+                },
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  /// Extracts unique human-readable location names from all slots in the app.
+  /// Locations are stored as "Name|lat,lon" — we return just the Name part.
+  Set<String> _allLocationNames({required String field}) {
+    final allSlots = [
+      ...SlotRepository.instance.allSlots.map((e) => e.slot),
+      ...UserSlotRepository.instance.allSlots.map((e) => e.slot),
+    ];
+    final names = <String>{};
+    for (final slot in allSlots) {
+      String? raw;
+      if (field == 'from') raw = slot.fromLocation;
+      if (field == 'to') raw = slot.toLocation;
+      if (field == 'base') raw = slot.baseLocation;
+      if (raw == null || raw.isEmpty) continue;
+      final name = raw.contains('|') ? raw.split('|').first.trim() : raw.trim();
+      if (name.isNotEmpty) names.add(name);
+    }
+    return names;
   }
 
   String _fmtDateTime(DateTime d) {
@@ -3798,7 +4848,11 @@ class _PostsPageState extends State<PostsPage> {
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
-      builder: (context) => BookingConfirmSheet(slot: slot, isOffer: isOffer),
+      builder: (context) => BookingConfirmSheet(
+        slot: slot,
+        isOffer: isOffer,
+        providerId: vehicle.userId,
+      ),
     );
 
     if (result == null) {
@@ -3818,39 +4872,49 @@ class _PostsPageState extends State<PostsPage> {
     debugPrint('Provider ID for booking: ${vehicle.userId}');
     debugPrint('====================');
 
-    final booking = await BookingRepository.instance.createBooking(
-      slotId: slot.id,
-      providerId: vehicle.userId,
-      providerName: finalProviderName,
-      providerPhone: finalProviderPhone,
-      providerEmail: providerEmail,
-      providerAvatar: providerAvatar,
-      userId: AuthRepository.instance.currentUser?.id ?? 'guest',
-      defaultCapacity: slot.capacity,
-      price: (() {
-        final seatKey = result.seatKey;
-        final ownerId = slot.seatLayoutOwnerId;
-        if (seatKey == null || ownerId == null) return slot.price;
-        final p = SeatLayoutRepository.instance
-            .getLayout(ownerId)
-            ?.cells[seatKey]
-            ?.price;
-        return (p ?? slot.price.toInt()).toDouble();
-      })(),
-      seatKey: result.seatKey,
-      userName: result.userName,
-      userAge: result.userAge,
-      userGender: result.userGender,
-      userPhone: result.userPhone,
-      userEmail: result.userEmail,
-    );
+    final confirmedCount = result.seatKeys.length;
+    if (confirmedCount == 0) return;
 
-    if (booking == null) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Failed to book. Seat may be taken.')),
+    final SeatLayout? layout = slot.seatLayoutOwnerId == null
+        ? null
+        : SeatLayoutRepository.instance.getLayout(slot.seatLayoutOwnerId!);
+
+    final createdBookings = <Booking>[];
+    for (var i = 0; i < confirmedCount; i++) {
+      final seatKey = result.seatKeys[i];
+      final seatPrice = (layout != null && seatKey != null)
+          ? layout.cells[seatKey]?.price
+          : null;
+      final double bookingPrice = (seatPrice ?? slot.price.toInt()).toDouble();
+
+      final booking = await BookingRepository.instance.createBooking(
+        slotId: slot.id,
+        providerId: vehicle.userId,
+        providerName: finalProviderName,
+        providerPhone: finalProviderPhone,
+        providerEmail: providerEmail,
+        providerAvatar: providerAvatar,
+        userId: AuthRepository.instance.currentUser?.id ?? 'guest',
+        defaultCapacity: slot.capacity,
+        price: bookingPrice,
+        seatKey: seatKey,
+        userName: result.userNames[i],
+        userAge: result.userAges[i],
+        userGender: result.userGenders[i],
+        userPhone: result.userPhones[i],
+        userEmail: result.userEmails[i],
+        securityDeposit: slot.serviceType.name == 'lease' ? slot.securityDeposit : null,
       );
-      return;
+
+      if (booking == null) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to book. Seat may be taken.')),
+        );
+        return;
+      }
+
+      createdBookings.add(booking);
     }
 
     if (!mounted) return;
@@ -3863,7 +4927,7 @@ class _PostsPageState extends State<PostsPage> {
       context,
       MaterialPageRoute(
         builder: (context) => BookingMapScreen(
-          booking: booking,
+          booking: createdBookings.first,
           slot: slot,
           vehicle: vehicle,
           isProviderView: false,
@@ -3910,6 +4974,8 @@ class _RequestsBody extends StatefulWidget {
 class _RequestsBodyState extends State<_RequestsBody> {
   bool _isRiderView = true;
   final Map<String, TextEditingController> _otpControllers = {};
+  final TextEditingController _searchController = TextEditingController();
+  String _query = '';
 
   @override
   void initState() {
@@ -3921,6 +4987,7 @@ class _RequestsBodyState extends State<_RequestsBody> {
     for (final c in _otpControllers.values) {
       c.dispose();
     }
+    _searchController.dispose();
     super.dispose();
   }
 
@@ -3998,141 +5065,162 @@ class _RequestsBodyState extends State<_RequestsBody> {
           ),
         ),
         const SizedBox(height: 12),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: TextField(
+            controller: _searchController,
+            decoration: InputDecoration(
+              hintText: 'Search by name, status...',
+              prefixIcon: const Icon(Icons.search),
+              suffixIcon: _query.isNotEmpty
+                  ? IconButton(
+                      icon: const Icon(Icons.clear),
+                      onPressed: () {
+                        _searchController.clear();
+                        setState(() => _query = '');
+                      },
+                    )
+                  : null,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+              contentPadding: const EdgeInsets.symmetric(vertical: 10),
+            ),
+            onChanged: (v) => setState(() => _query = v.trim().toLowerCase()),
+          ),
+        ),
+        const SizedBox(height: 8),
         Expanded(
           child: ValueListenableBuilder<List<Booking>>(
             valueListenable: BookingRepository.instance.bookings,
             builder: (context, bookings, _) {
-              final currentUser = AuthRepository.instance.currentUser;
-              if (currentUser == null) {
-                return const Center(
-                  child: Padding(
-                    padding: EdgeInsets.all(24.0),
-                    child: Text('Please login to view requests'),
-                  ),
-                );
-              }
+              return ValueListenableBuilder<List<UserPostAcceptance>>(
+                valueListenable: UserPostAcceptanceRepository.instance.acceptances,
+                builder: (context, acceptances, _) {
+                  final currentUser = AuthRepository.instance.currentUser;
+                  if (currentUser == null) {
+                    return const Center(
+                      child: Padding(
+                        padding: EdgeInsets.all(24.0),
+                        child: Text('Please login to view requests'),
+                      ),
+                    );
+                  }
 
-              final filtered = bookings
-                  .where((b) {
-                    if (_isRiderView) {
-                      return b.userId == currentUser.id;
-                    } else {
-                      // Provider view: show if providerId matches OR if it's 'user1' (legacy)
-                      return b.providerId == currentUser.id ||
-                          b.providerId == 'user1';
-                    }
-                  })
-                  .toList(growable: false);
+                  final filteredBookings = bookings
+                      .where((b) {
+                        if (_isRiderView) {
+                          if (b.userId != currentUser.id) return false;
+                        } else {
+                          if (b.providerId != currentUser.id && b.providerId != 'user1') return false;
+                        }
+                        if (_query.isEmpty) return true;
+                        return (b.providerName ?? '').toLowerCase().contains(_query) ||
+                            (b.userName ?? '').toLowerCase().contains(_query) ||
+                            b.status.name.toLowerCase().contains(_query);
+                      })
+                      .toList(growable: false);
 
-              // Debug: Print booking info
-              debugPrint('=== REQUESTS DEBUG ===');
-              debugPrint('Current User ID: ${currentUser.id}');
-              debugPrint('Is Provider View: ${!_isRiderView}');
-              debugPrint('Total Bookings: ${bookings.length}');
-              debugPrint('Filtered Bookings: ${filtered.length}');
-              for (var b in bookings) {
-                debugPrint(
-                  'Booking ${b.id}: userId=${b.userId}, providerId=${b.providerId}',
-                );
-              }
-              debugPrint('=====================');
+                  final filteredAcceptances = acceptances
+                      .where((a) {
+                        if (_isRiderView) {
+                          if (a.userId != currentUser.id) return false;
+                        } else {
+                          if (a.providerId != currentUser.id) return false;
+                        }
+                        if (_query.isEmpty) return true;
+                        return a.status.name.toLowerCase().contains(_query);
+                      })
+                      .toList(growable: false);
 
-              if (filtered.isEmpty) {
-                return Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(24.0),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Text(
-                          _isRiderView
-                              ? 'No user bookings yet'
-                              : 'No provider bookings yet',
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(fontSize: 16),
-                        ),
-                        const SizedBox(height: 12),
-                        Text(
-                          'Your ID: ${currentUser.id}',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Colors.grey[600],
-                          ),
-                        ),
-                        if (bookings.isNotEmpty) ...[
-                          const SizedBox(height: 8),
-                          Text(
-                            'Total bookings: ${bookings.length}',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.grey[600],
+                  if (filteredBookings.isEmpty && filteredAcceptances.isEmpty) {
+                    return Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(24.0),
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Text(
+                              _isRiderView
+                                  ? 'No bookings yet'
+                                  : 'No provider bookings yet',
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(fontSize: 16),
                             ),
-                          ),
-                          const SizedBox(height: 16),
-                          ElevatedButton.icon(
-                            onPressed: () async {
-                              final confirm = await showDialog<bool>(
-                                context: context,
-                                builder: (context) => AlertDialog(
-                                  title: const Text('Clear All Bookings?'),
-                                  content: const Text(
-                                    'This will delete all bookings. This action cannot be undone.',
-                                  ),
-                                  actions: [
-                                    TextButton(
-                                      onPressed: () =>
-                                          Navigator.pop(context, false),
-                                      child: const Text('Cancel'),
-                                    ),
-                                    FilledButton(
-                                      onPressed: () =>
-                                          Navigator.pop(context, true),
-                                      child: const Text('Clear All'),
-                                    ),
-                                  ],
-                                ),
-                              );
-
-                              if (confirm == true) {
-                                BookingRepository.instance.bookings.value = [];
-                                BookingRepository
-                                        .instance
-                                        .remainingCapacityBySlotId
-                                        .value =
-                                    {};
-                                final prefs =
-                                    await SharedPreferences.getInstance();
-                                await prefs.remove('bookings_data');
-                                await prefs.remove('remaining_capacity');
-                                if (context.mounted) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(
-                                      content: Text('All bookings cleared'),
+                            if (bookings.isNotEmpty) ...[
+                              const SizedBox(height: 16),
+                              ElevatedButton.icon(
+                                onPressed: () async {
+                                  final confirm = await showDialog<bool>(
+                                    context: context,
+                                    builder: (context) => AlertDialog(
+                                      title: const Text('Clear All Bookings?'),
+                                      content: const Text(
+                                        'This will delete all bookings. This action cannot be undone.',
+                                      ),
+                                      actions: [
+                                        TextButton(
+                                          onPressed: () =>
+                                              Navigator.pop(context, false),
+                                          child: const Text('Cancel'),
+                                        ),
+                                        FilledButton(
+                                          onPressed: () =>
+                                              Navigator.pop(context, true),
+                                          child: const Text('Clear All'),
+                                        ),
+                                      ],
                                     ),
                                   );
-                                }
-                              }
-                            },
-                            icon: const Icon(Icons.delete_sweep),
-                            label: const Text('Clear All Bookings'),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                );
-              }
 
-              return ListView.separated(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-                itemCount: filtered.length,
-                separatorBuilder: (_, _) => const SizedBox(height: 12),
-                itemBuilder: (context, index) {
-                  final b = filtered[index];
-                  return _buildBookingCard(
-                    context,
-                    b,
-                    isRiderView: _isRiderView,
+                                  if (confirm == true) {
+                                    BookingRepository.instance.bookings.value = [];
+                                    BookingRepository
+                                            .instance
+                                            .remainingCapacityBySlotId
+                                            .value = {};
+                                    final prefs =
+                                        await SharedPreferences.getInstance();
+                                    await prefs.remove('bookings_data');
+                                    await prefs.remove('remaining_capacity');
+                                    if (context.mounted) {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        const SnackBar(
+                                          content: Text('All bookings cleared'),
+                                        ),
+                                      );
+                                    }
+                                  }
+                                },
+                                icon: const Icon(Icons.delete_sweep),
+                                label: const Text('Clear All Bookings'),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                    );
+                  }
+
+                  // Combine both lists: slot bookings first, then post acceptances
+                  final totalCount = filteredBookings.length + filteredAcceptances.length;
+
+                  return ListView.separated(
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                    itemCount: totalCount,
+                    separatorBuilder: (_, _) => const SizedBox(height: 12),
+                    itemBuilder: (context, index) {
+                      if (index < filteredBookings.length) {
+                        return _buildBookingCard(
+                          context,
+                          filteredBookings[index],
+                          isRiderView: _isRiderView,
+                        );
+                      } else {
+                        final acceptance = filteredAcceptances[index - filteredBookings.length];
+                        return _buildAcceptanceCard(context, acceptance);
+                      }
+                    },
                   );
                 },
               );
@@ -4141,6 +5229,239 @@ class _RequestsBodyState extends State<_RequestsBody> {
         ),
       ],
     );
+  }
+
+  Widget _buildAcceptanceCard(BuildContext context, UserPostAcceptance acceptance) {
+    final currentUser = AuthRepository.instance.currentUser;
+    final isUserView = currentUser?.id == acceptance.userId;
+
+    // Look up the related post for details
+    UserPost? post;
+    try {
+      post = UserPostRepository.instance.posts.value
+          .firstWhere((p) => p.id == acceptance.postId);
+    } catch (_) {}
+
+    Color statusColor;
+    String statusLabel;
+    switch (acceptance.status) {
+      case AcceptanceStatus.pending:
+        statusColor = Colors.orange;
+        statusLabel = 'Pending OTP';
+        break;
+      case AcceptanceStatus.otpVerified:
+        statusColor = Colors.blue;
+        statusLabel = 'OTP Verified';
+        break;
+      case AcceptanceStatus.paid:
+        statusColor = Colors.green;
+        statusLabel = 'Completed';
+        break;
+      case AcceptanceStatus.cancelled:
+        statusColor = Colors.red;
+        statusLabel = 'Cancelled';
+        break;
+    }
+
+    return Card(
+      elevation: 2,
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.assignment_turned_in_outlined, size: 16, color: Colors.purple),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    'Post Request #${acceptance.postId.length > 8 ? acceptance.postId.substring(0, 8) : acceptance.postId}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: statusColor.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(
+                    statusLabel,
+                    style: TextStyle(
+                      color: statusColor,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            if (post != null) ...[
+              const SizedBox(height: 8),
+              Text(
+                '${_getServiceTypeName(post.serviceType)} · ${_fmtDateTime(post.startTime)} → ${_fmtDateTime(post.endTime)}',
+                style: TextStyle(fontSize: 13, color: Colors.grey[700]),
+              ),
+              if (post.fromLocation != null && post.toLocation != null)
+                Text(
+                  '${post.fromLocation} → ${post.toLocation}',
+                  style: TextStyle(fontSize: 13, color: Colors.grey[700]),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+            ],
+            const Divider(height: 20),
+            Row(
+              children: [
+                Icon(Icons.currency_rupee, size: 14, color: Colors.grey[600]),
+                Text(
+                  acceptance.amount.toStringAsFixed(0),
+                  style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
+                ),
+                const Spacer(),
+                Text(
+                  _fmtDateTime(acceptance.createdAt),
+                  style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+                ),
+              ],
+            ),
+            // OTP section: user sees OTP to share, provider enters OTP
+            if (acceptance.status == AcceptanceStatus.pending) ...[
+              const SizedBox(height: 12),
+              if (isUserView) ...[
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.withValues(alpha: 0.07),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.lock_outline, size: 18, color: Colors.blue),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text('Share this OTP with the provider',
+                                style: TextStyle(fontSize: 12, color: Colors.black54)),
+                            const SizedBox(height: 4),
+                            Text(
+                              acceptance.otp ?? '------',
+                              style: const TextStyle(
+                                fontSize: 22,
+                                fontWeight: FontWeight.bold,
+                                letterSpacing: 6,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (acceptance.otp != null)
+                        IconButton(
+                          icon: const Icon(Icons.copy, size: 18),
+                          tooltip: 'Copy OTP',
+                          onPressed: () {
+                            Clipboard.setData(ClipboardData(text: acceptance.otp!));
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('OTP copied')),
+                            );
+                          },
+                        ),
+                    ],
+                  ),
+                ),
+              ] else ...[
+                // Provider enters OTP
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _otpControllerFor(acceptance.id),
+                        keyboardType: TextInputType.number,
+                        maxLength: 6,
+                        decoration: const InputDecoration(
+                          labelText: 'Enter OTP from user',
+                          border: OutlineInputBorder(),
+                          counterText: '',
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    FilledButton(
+                      onPressed: () async {
+                        final messenger = ScaffoldMessenger.of(context);
+                        final otpText = _otpControllerFor(acceptance.id).text;
+                        if (otpText.length != 6) {
+                          messenger.showSnackBar(
+                            const SnackBar(content: Text('Please enter 6-digit OTP')),
+                          );
+                          return;
+                        }
+                        final ok = await UserPostAcceptanceRepository.instance
+                            .verifyOTP(acceptanceId: acceptance.id, enteredOTP: otpText);
+                        if (!context.mounted) return;
+                        messenger.showSnackBar(
+                          SnackBar(
+                            content: Text(ok ? '✅ OTP verified' : 'Invalid OTP'),
+                            backgroundColor: ok ? Colors.green : Colors.red,
+                          ),
+                        );
+                      },
+                      child: const Text('Verify'),
+                    ),
+                  ],
+                ),
+              ],
+            ],
+            if (acceptance.status == AcceptanceStatus.otpVerified) ...[
+              const SizedBox(height: 10),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.blue.withValues(alpha: 0.07),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(Icons.verified, size: 16, color: Colors.blue),
+                    SizedBox(width: 8),
+                    Text('OTP verified — awaiting payment', style: TextStyle(fontSize: 13)),
+                  ],
+                ),
+              ),
+            ],
+            if (acceptance.status == AcceptanceStatus.paid) ...[
+              const SizedBox(height: 10),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.green.withValues(alpha: 0.07),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(Icons.check_circle, size: 16, color: Colors.green),
+                    SizedBox(width: 8),
+                    Text('Payment completed', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                  ],
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _getServiceTypeName(dynamic serviceType) {
+    return serviceType?.toString().split('.').last ?? 'Service';
   }
 
   Widget _buildBookingCard(
@@ -4248,8 +5569,8 @@ class _RequestsBodyState extends State<_RequestsBody> {
                     child: Text(
                       (slotForMap.fromLocation != null &&
                               slotForMap.toLocation != null)
-                          ? '${slotForMap.fromLocation!} → ${slotForMap.toLocation!}'
-                          : (slotForMap.baseLocation ?? ''),
+                          ? '${_cleanLoc(slotForMap.fromLocation!)} → ${_cleanLoc(slotForMap.toLocation!)}'
+                          : _cleanLoc(slotForMap.baseLocation),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(color: Colors.grey[700]),
@@ -4265,7 +5586,8 @@ class _RequestsBodyState extends State<_RequestsBody> {
               ),
             ],
             if (b.status == BookingStatus.accepted ||
-                b.status == BookingStatus.completed) ...[
+                b.status == BookingStatus.completed ||
+                b.status == BookingStatus.pending) ...[
               const SizedBox(height: 12),
               if (isRiderView) ...[
                 Container(
@@ -4381,22 +5703,121 @@ class _RequestsBodyState extends State<_RequestsBody> {
                   ),
                   child: Row(
                     children: [
-                      const Icon(Icons.lock, size: 18, color: Colors.blue),
+                      Icon(
+                        b.paymentHeldInEscrow ? Icons.lock : Icons.lock_open,
+                        size: 18,
+                        color: Colors.blue,
+                      ),
                       const SizedBox(width: 10),
                       Expanded(
-                        child: Text(
-                          b.status == BookingStatus.completed
-                              ? 'Trip completed'
-                              : 'OTP: ${b.otp ?? '—'}',
-                          style: const TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w700,
-                          ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              b.status == BookingStatus.completed
+                                  ? 'Trip completed'
+                                  : (b.paymentHeldInEscrow
+                                      ? 'Payment Held in Escrow'
+                                      : 'Booking Confirmed'),
+                              style: const TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            if (b.otp != null && b.status != BookingStatus.completed) ...[
+                              const SizedBox(height: 6),
+                              Row(
+                                children: [
+                                  Text(
+                                    'OTP: ',
+                                    style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                                  ),
+                                  Text(
+                                    b.otp!,
+                                    style: const TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                      letterSpacing: 4,
+                                      color: Colors.blue,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              if (b.countdownEndTime != null) ...[
+                                const SizedBox(height: 4),
+                                CountdownText(endTime: b.countdownEndTime!),
+                              ],
+                            ],
+                          ],
                         ),
                       ),
+                      if (b.otp != null && b.status != BookingStatus.completed)
+                        IconButton(
+                          icon: const Icon(Icons.copy, size: 20, color: Colors.blue),
+                          tooltip: 'Copy OTP',
+                          onPressed: () {
+                            Clipboard.setData(ClipboardData(text: b.otp!));
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('OTP copied to clipboard')),
+                            );
+                          },
+                        ),
                     ],
                   ),
                 ),
+                // Add review button for completed trips (user view)
+                if (b.status == BookingStatus.completed) ...[
+                  const SizedBox(height: 10),
+                  OutlinedButton.icon(
+                    onPressed: () {
+                      final currentUser = AuthRepository.instance.currentUser;
+                      if (currentUser == null) return;
+
+                      final hasReviewed = ReviewRepository.instance.hasReviewed(
+                        bookingId: b.id,
+                        reviewerId: currentUser.id,
+                      );
+
+                      if (hasReviewed) {
+                        // Show reviews
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => ReviewsScreen(
+                              userId: b.providerId,
+                              userName: b.providerName ?? _providerName(b.providerId),
+                            ),
+                          ),
+                        );
+                      } else {
+                        // Leave review
+                        showDialog(
+                          context: context,
+                          builder: (context) => ReviewDialog(
+                            bookingId: b.id,
+                            reviewerId: currentUser.id,
+                            revieweeId: b.providerId,
+                            revieweeName: b.providerName ?? _providerName(b.providerId),
+                            type: ReviewType.userToProvider,
+                          ),
+                        );
+                      }
+                    },
+                    icon: Icon(
+                      ReviewRepository.instance.hasReviewed(
+                        bookingId: b.id,
+                        reviewerId: AuthRepository.instance.currentUser?.id ?? '',
+                      ) ? Icons.star : Icons.star_border,
+                      size: 18,
+                    ),
+                    label: Text(
+                      ReviewRepository.instance.hasReviewed(
+                        bookingId: b.id,
+                        reviewerId: AuthRepository.instance.currentUser?.id ?? '',
+                      ) ? 'View Reviews' : 'Leave Review',
+                    ),
+                  ),
+                ],
               ] else ...[
                 Container(
                   width: double.infinity,
@@ -4528,9 +5949,11 @@ class _RequestsBodyState extends State<_RequestsBody> {
                         child: TextField(
                           controller: _otpControllerFor(b.id),
                           keyboardType: TextInputType.number,
+                          maxLength: 6,
                           decoration: const InputDecoration(
                             labelText: 'Enter OTP from user',
                             border: OutlineInputBorder(),
+                            counterText: '',
                           ),
                         ),
                       ),
@@ -4539,41 +5962,177 @@ class _RequestsBodyState extends State<_RequestsBody> {
                         onPressed: () async {
                           final messenger = ScaffoldMessenger.of(context);
                           final otpText = _otpControllerFor(b.id).text;
-                          final otpOk = BookingRepository.instance.isOtpValid(
-                            bookingId: b.id,
-                            otp: otpText,
-                          );
 
-                          if (!otpOk) {
-                            if (!context.mounted) return;
+                          if (otpText.length != 6) {
                             messenger.showSnackBar(
-                              const SnackBar(content: Text('Invalid OTP')),
+                              const SnackBar(content: Text('Please enter 6-digit OTP')),
                             );
                             return;
                           }
 
-                          // Payment will be implemented after Supabase setup
-                          // Will be handled through Razorpay with escrow
-
-                          final ok = await BookingRepository.instance.verifyOtp(
-                            bookingId: b.id,
-                            otp: otpText,
-                          );
-                          if (!context.mounted) return;
-                          messenger.showSnackBar(
-                            SnackBar(
-                              content: Text(
-                                ok
-                                    ? 'Paid & OTP verified ✅'
-                                    : 'OTP verify failed',
-                              ),
+                          // Show loading
+                          showDialog(
+                            context: context,
+                            barrierDismissible: false,
+                            builder: (context) => const Center(
+                              child: CircularProgressIndicator(),
                             ),
                           );
+
+                          try {
+                            // If payment is held in escrow, verify with Stripe backend
+                            if (b.paymentHeldInEscrow && b.stripePaymentIntentId != null) {
+                              final success = await StripeService.instance.verifyOtpAndRelease(
+                                bookingId: b.id,
+                                otp: otpText,
+                              );
+
+                              if (!context.mounted) return;
+                              Navigator.pop(context); // Close loading
+
+                              if (success) {
+                                // Update local booking status
+                                await BookingRepository.instance.updateBookingAfterPayment(
+                                  bookingId: b.id,
+                                  status: BookingStatus.completed,
+                                  otpVerified: true,
+                                );
+
+                                messenger.showSnackBar(
+                                  const SnackBar(
+                                    content: Text('✅ Payment released! Funds transferred to your account.'),
+                                    backgroundColor: Colors.green,
+                                    duration: Duration(seconds: 4),
+                                  ),
+                                );
+
+                                // Prompt for review
+                                if (context.mounted) {
+                                  _promptForReview(context, b, isProvider: true);
+                                }
+                              } else {
+                                messenger.showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Invalid OTP. Please try again.'),
+                                    backgroundColor: Colors.red,
+                                  ),
+                                );
+                              }
+                            } else {
+                              // Legacy booking without escrow
+                              final otpOk = BookingRepository.instance.isOtpValid(
+                                bookingId: b.id,
+                                otp: otpText,
+                              );
+
+                              if (!context.mounted) return;
+                              Navigator.pop(context); // Close loading
+
+                              if (!otpOk) {
+                                messenger.showSnackBar(
+                                  const SnackBar(content: Text('Invalid OTP')),
+                                );
+                                return;
+                              }
+
+                              final ok = await BookingRepository.instance.verifyOtp(
+                                bookingId: b.id,
+                                otp: otpText,
+                              );
+                              
+                              if (ok && b.securityDeposit != null && b.securityDeposit! > 0) {
+                                messenger.showSnackBar(
+                                  SnackBar(
+                                    content: Text(
+                                      '✅ OTP verified! Security deposit of ${AppPreferences.instance.formatMoney(b.securityDeposit!.toInt())} refunded to user.',
+                                    ),
+                                    backgroundColor: Colors.green,
+                                    duration: const Duration(seconds: 4),
+                                  ),
+                                );
+                              } else {
+                                messenger.showSnackBar(
+                                  SnackBar(
+                                    content: Text(
+                                      ok ? 'OTP verified ✅' : 'OTP verify failed',
+                                    ),
+                                  ),
+                                );
+                              }
+
+                              // Prompt for review if successful
+                              if (ok && context.mounted) {
+                                _promptForReview(context, b, isProvider: true);
+                              }
+                            }
+                          } catch (e) {
+                            if (!context.mounted) return;
+                            Navigator.pop(context); // Close loading
+                            messenger.showSnackBar(
+                              SnackBar(
+                                content: Text('Error: $e'),
+                                backgroundColor: Colors.red,
+                              ),
+                            );
+                          }
                         },
                         child: const Text('Verify'),
                       ),
                     ],
                   ),
+                // Add review button for completed trips (provider view)
+                if (!isRiderView && b.status == BookingStatus.completed) ...[
+                  const SizedBox(height: 10),
+                  OutlinedButton.icon(
+                    onPressed: () {
+                      final currentUser = AuthRepository.instance.currentUser;
+                      if (currentUser == null) return;
+
+                      final hasReviewed = ReviewRepository.instance.hasReviewed(
+                        bookingId: b.id,
+                        reviewerId: currentUser.id,
+                      );
+
+                      if (hasReviewed) {
+                        // Show reviews
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => ReviewsScreen(
+                              userId: b.userId,
+                              userName: b.userName ?? _userName(b.userId),
+                            ),
+                          ),
+                        );
+                      } else {
+                        // Leave review
+                        showDialog(
+                          context: context,
+                          builder: (context) => ReviewDialog(
+                            bookingId: b.id,
+                            reviewerId: currentUser.id,
+                            revieweeId: b.userId,
+                            revieweeName: b.userName ?? _userName(b.userId),
+                            type: ReviewType.providerToUser,
+                          ),
+                        );
+                      }
+                    },
+                    icon: Icon(
+                      ReviewRepository.instance.hasReviewed(
+                        bookingId: b.id,
+                        reviewerId: AuthRepository.instance.currentUser?.id ?? '',
+                      ) ? Icons.star : Icons.star_border,
+                      size: 18,
+                    ),
+                    label: Text(
+                      ReviewRepository.instance.hasReviewed(
+                        bookingId: b.id,
+                        reviewerId: AuthRepository.instance.currentUser?.id ?? '',
+                      ) ? 'View Reviews' : 'Leave Review',
+                    ),
+                  ),
+                ],
               ],
               if (isRiderView) ...[const SizedBox(height: 12)],
             ],
@@ -4616,53 +6175,141 @@ class _RequestsBodyState extends State<_RequestsBody> {
   }
 
   String _providerName(String providerId) {
-    // Try to find vehicle by userId and get userName
+    // Try ProfileNameRegistry first
+    final registryName = ProfileNameRegistry.instance.getNameForUser(providerId);
+    if (registryName != null && registryName.isNotEmpty) return registryName;
+    // Try vehicle repos
     try {
       final vehicle = VehicleRepository.instance.allVehicles.firstWhere(
         (v) => v.userId == providerId,
       );
       return vehicle.userName;
     } catch (_) {
-      // Try user vehicles
       try {
         final vehicle = UserVehicleRepository.instance.allVehicles.firstWhere(
           (v) => v.userId == providerId,
         );
         return vehicle.userName;
       } catch (_) {
-        return 'Unknown User';
+        return 'Provider';
       }
     }
   }
 
   String _providerPhone(String providerId) {
-    // Use current profile phone if it's the current user or 'user1', otherwise use default
     final currentUser = AuthRepository.instance.currentUser;
-    if (currentUser != null &&
-        (providerId == currentUser.id || providerId == 'user1')) {
-      return ProfileRepository.instance.profile.value.phone ??
-          '+91 90000 00000';
+    if (currentUser != null && (providerId == currentUser.id || providerId == 'user1')) {
+      return ProfileRepository.instance.profile.value.phone ?? '+91 90000 00000';
     }
-    return '+91 98765 43210';
+    return '+91 90000 00000';
+  }
+
+  void _promptForReview(BuildContext context, Booking booking, {required bool isProvider}) {
+    final currentUser = AuthRepository.instance.currentUser;
+    if (currentUser == null) return;
+
+    // Check if already reviewed
+    final hasReviewed = ReviewRepository.instance.hasReviewed(
+      bookingId: booking.id,
+      reviewerId: currentUser.id,
+    );
+
+    if (hasReviewed) return;
+
+    // Determine who is being reviewed
+    final revieweeId = isProvider ? booking.userId : booking.providerId;
+    final revieweeName = isProvider
+        ? (booking.userName ?? _userName(booking.userId))
+        : (booking.providerName ?? _providerName(booking.providerId));
+
+    final reviewType = isProvider
+        ? ReviewType.providerToUser
+        : ReviewType.userToProvider;
+
+    // Show review dialog after a short delay
+    Future.delayed(const Duration(milliseconds: 500), () {
+      if (!context.mounted) return;
+      
+      showDialog(
+        context: context,
+        builder: (context) => ReviewDialog(
+          bookingId: booking.id,
+          reviewerId: currentUser.id,
+          revieweeId: revieweeId,
+          revieweeName: revieweeName,
+          type: reviewType,
+        ),
+      );
+    });
   }
 
   String _userName(String userId) {
-    // Use current profile name if it's the current user, otherwise use userId
+    final registryName = ProfileNameRegistry.instance.getNameForUser(userId);
+    if (registryName != null && registryName.isNotEmpty) return registryName;
     final currentUser = AuthRepository.instance.currentUser;
     if (currentUser != null && userId == currentUser.id) {
       return ProfileRepository.instance.profile.value.profileName;
     }
-    return userId.isEmpty ? 'User' : userId;
+    return 'User';
   }
 
   String _userPhone(String userId) {
-    // Use current profile phone if it's the current user, otherwise use default
     final currentUser = AuthRepository.instance.currentUser;
     if (currentUser != null && userId == currentUser.id) {
-      return ProfileRepository.instance.profile.value.phone ??
-          '+91 90000 00000';
+      return ProfileRepository.instance.profile.value.phone ?? '+91 90000 00000';
     }
     return '+91 90000 00000';
+  }
+}
+
+class CountdownText extends StatefulWidget {
+  final DateTime endTime;
+  const CountdownText({super.key, required this.endTime});
+
+  @override
+  State<CountdownText> createState() => _CountdownTextState();
+}
+
+class _CountdownTextState extends State<CountdownText> {
+  late Timer _timer;
+  Duration _remaining = Duration.zero;
+
+  @override
+  void initState() {
+    super.initState();
+    _update();
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) => _update());
+  }
+
+  void _update() {
+    final r = widget.endTime.difference(DateTime.now());
+    setState(() => _remaining = r.isNegative ? Duration.zero : r);
+  }
+
+  @override
+  void dispose() {
+    _timer.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_remaining == Duration.zero) {
+      return Text('Refund window expired', style: TextStyle(fontSize: 11, color: Colors.red[400]));
+    }
+    final h = _remaining.inHours.toString().padLeft(2, '0');
+    final m = (_remaining.inMinutes % 60).toString().padLeft(2, '0');
+    final s = (_remaining.inSeconds % 60).toString().padLeft(2, '0');
+    return Row(
+      children: [
+        Icon(Icons.timer_outlined, size: 12, color: Colors.orange[700]),
+        const SizedBox(width: 4),
+        Text(
+          'Auto-refund in $h:$m:$s',
+          style: TextStyle(fontSize: 11, color: Colors.orange[700]),
+        ),
+      ],
+    );
   }
 }
 

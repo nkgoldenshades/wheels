@@ -321,35 +321,60 @@ class _ProfilePhotoVerificationScreenState
   InputImage? _convertCameraImage(CameraImage image) {
     try {
       final camera = _controller?.description;
-      InputImageRotation imageRotation = InputImageRotation.rotation0deg;
+      if (camera == null) return null;
 
-      if (camera != null) {
-        if (camera.lensDirection == CameraLensDirection.front) {
-          imageRotation = InputImageRotation.rotation270deg;
-        } else {
-          imageRotation = InputImageRotation.rotation90deg;
-        }
-      }
+      final nv21 = _yuv420ToNv21(image);
 
-      // ✅ FIX: Concatenate ALL planes (Y + U + V) for proper YUV420 data
-      final WriteBuffer allBytes = WriteBuffer();
-      for (final plane in image.planes) {
-        allBytes.putUint8List(plane.bytes);
-      }
-      final bytes = allBytes.done().buffer.asUint8List();
+      final rotation = InputImageRotationValue.fromRawValue(
+        camera.sensorOrientation,
+      );
+      if (rotation == null) return null;
 
       final inputImageData = InputImageMetadata(
         size: Size(image.width.toDouble(), image.height.toDouble()),
-        rotation: imageRotation,
-        format: InputImageFormat.yuv420,
-        bytesPerRow: image.planes[0].bytesPerRow,
+        rotation: rotation,
+        format: InputImageFormat.nv21,
+        bytesPerRow: image.width,
       );
 
-      return InputImage.fromBytes(bytes: bytes, metadata: inputImageData);
+      return InputImage.fromBytes(bytes: nv21, metadata: inputImageData);
     } catch (e) {
       debugPrint('Error converting camera image: $e');
       return null;
     }
+  }
+
+  Uint8List _yuv420ToNv21(CameraImage image) {
+    final int width = image.width;
+    final int height = image.height;
+
+    final yPlane = image.planes[0];
+    final uPlane = image.planes[1];
+    final vPlane = image.planes[2];
+
+    final Uint8List nv21 = Uint8List(width * height + (width * height ~/ 2));
+
+    int offset = 0;
+    for (int row = 0; row < height; row++) {
+      final int rowStart = row * yPlane.bytesPerRow;
+      nv21.setRange(offset, offset + width, yPlane.bytes, rowStart);
+      offset += width;
+    }
+
+    final int uvHeight = height ~/ 2;
+    final int uvWidth = width ~/ 2;
+    for (int row = 0; row < uvHeight; row++) {
+      for (int col = 0; col < uvWidth; col++) {
+        final int uBpp = uPlane.bytesPerPixel ?? 1;
+        final int vBpp = vPlane.bytesPerPixel ?? 1;
+        final int uvIndex = row * uPlane.bytesPerRow + col * uBpp;
+        final int vuIndex = row * vPlane.bytesPerRow + col * vBpp;
+        nv21[offset++] = vPlane.bytes[vuIndex];
+        nv21[offset++] = uPlane.bytes[uvIndex];
+      }
+    }
+
+    return nv21;
   }
 
   Future<void> _captureVerifiedPhoto() async {

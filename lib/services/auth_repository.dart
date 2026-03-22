@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'profile_name_registry.dart';
 
 class AuthUser {
   final String id;
@@ -96,6 +97,18 @@ class AuthRepository {
     String? profileName,
   }) async {
     try {
+      // Check profile name uniqueness before creating account
+      if (profileName != null && profileName.trim().isNotEmpty) {
+        await ProfileNameRegistry.instance.init();
+        final isAvailable = ProfileNameRegistry.instance.isNameAvailable(
+          profileName.trim(),
+        );
+        
+        if (!isAvailable) {
+          throw 'Profile name already taken. Please choose a different name.';
+        }
+      }
+      
       final credential = await _firebaseAuth.createUserWithEmailAndPassword(
         email: email.trim(),
         password: password,
@@ -103,6 +116,12 @@ class AuthRepository {
 
       if (profileName != null && profileName.trim().isNotEmpty) {
         await credential.user?.updateDisplayName(profileName.trim());
+        
+        // Register the profile name
+        await ProfileNameRegistry.instance.registerName(
+          credential.user!.uid,
+          profileName.trim(),
+        );
       }
 
       final user = AuthUser(
