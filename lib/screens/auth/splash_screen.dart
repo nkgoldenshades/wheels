@@ -31,7 +31,7 @@ class _SplashscreenState extends State<Splashscreen> {
             const Icon(Icons.directions_car, size: 80, color: Colors.blue),
             const SizedBox(height: 16),
             const Text(
-              'Quickohunt',
+              'VaultWheels',
               style: TextStyle(
                 fontSize: 32,
                 fontWeight: FontWeight.bold,

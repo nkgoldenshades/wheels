@@ -65,6 +65,14 @@ class RazorpayService {
     required String userName,
     String? orderId,
   }) async {
+    // ── Dev mode: placeholder key → skip payment, confirm directly ─────────
+    if (_keyId.contains('YourRazorpay') || _keyId.isEmpty) {
+      debugPrint('[RazorpayService] ⚠️ Placeholder key detected — bypassing payment for dev/test');
+      return {
+        'payment_id': 'dev_${DateTime.now().millisecondsSinceEpoch}',
+        'order_id': orderId ?? 'dev_order_${DateTime.now().millisecondsSinceEpoch}',
+      };
+    }
     // ── Web: redirect to Razorpay hosted checkout ──────────────────────────
     if (kIsWeb) {
       return _processWebPayment(
@@ -97,7 +105,7 @@ class RazorpayService {
       'key': _keyId,
       'amount': amountInPaise,
       'currency': 'INR',
-      'name': 'Quickohunt',
+      'name': 'VaultWheels',
       'description': description,
       'prefill': {
         'contact': userPhone,

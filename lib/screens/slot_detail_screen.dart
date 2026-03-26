@@ -360,6 +360,10 @@ class SlotDetailScreen extends StatelessWidget {
       final picked = await showTimePicker(
         context: context,
         initialTime: TimeOfDay.fromDateTime(isStart ? startTime : endTime),
+        builder: (ctx, child) => MediaQuery(
+          data: MediaQuery.of(ctx).copyWith(alwaysUse24HourFormat: true),
+          child: child!,
+        ),
       );
       if (picked == null) return;
       final base = isStart ? startTime : endTime;
@@ -383,9 +387,7 @@ class SlotDetailScreen extends StatelessWidget {
     }
 
     String fmt(DateTime dt) {
-      final h = dt.hour.toString().padLeft(2, '0');
-      final m = dt.minute.toString().padLeft(2, '0');
-      return '$h:$m';
+      return '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
     }
 
     final result = await showModalBottomSheet<Slot>(
@@ -621,9 +623,7 @@ class SlotDetailScreen extends StatelessWidget {
   }
 
   static String _formatTime(DateTime time) {
-    final h = time.hour.toString().padLeft(2, '0');
-    final m = time.minute.toString().padLeft(2, '0');
-    return '$h:$m';
+    return '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
   }
 
   static IconData _serviceTypeIcon(Slot slot) {

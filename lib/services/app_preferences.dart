@@ -14,9 +14,11 @@ class AppPreferences {
   static const _preferredCountryKey = 'preferredCountry';
   static const _avatarBase64Key = 'avatarBase64';
   static const _subscriptionPlanKey = 'subscriptionPlan';
+  static const _preferredLanguageKey = 'preferredLanguage';
 
   final ValueNotifier<String> currencyCode = ValueNotifier<String>('INR');
   final ValueNotifier<String> preferredCountry = ValueNotifier<String>('India');
+  final ValueNotifier<String> preferredLanguage = ValueNotifier<String>('English');
   final ValueNotifier<String?> avatarBase64 = ValueNotifier<String?>(null);
   final ValueNotifier<SubscriptionPlan> subscriptionPlan =
       ValueNotifier<SubscriptionPlan>(SubscriptionPlan.basic);
@@ -26,6 +28,8 @@ class AppPreferences {
     currencyCode.value = prefs.getString(_currencyCodeKey) ?? 'INR';
     preferredCountry.value =
         prefs.getString(_preferredCountryKey) ?? preferredCountry.value;
+    preferredLanguage.value =
+        prefs.getString(_preferredLanguageKey) ?? 'English';
     avatarBase64.value = prefs.getString(_avatarBase64Key);
 
     final planRaw = prefs.getString(_subscriptionPlanKey);
@@ -45,6 +49,12 @@ class AppPreferences {
     preferredCountry.value = country;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_preferredCountryKey, country);
+  }
+
+  Future<void> setPreferredLanguage(String language) async {
+    preferredLanguage.value = language;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_preferredLanguageKey, language);
   }
 
   Future<void> setAvatarBase64(String? value) async {

@@ -114,7 +114,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
               ),
               const SizedBox(height: 8),
               const Text(
-                'Join Quickohunt',
+                'Join VaultWheels',
                 style: TextStyle(fontSize: 16, color: Colors.grey),
               ),
               const SizedBox(height: 32),

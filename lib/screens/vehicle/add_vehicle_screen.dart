@@ -7,6 +7,7 @@ import 'dart:math';
 import '../../models/service_type.dart';
 import '../../models/vehicle.dart';
 import '../../services/auth_repository.dart';
+import '../../services/profile_repository.dart';
 import '../verification/live_camera_screen.dart'
     show LiveCameraScreen, CaptureMode;
 
@@ -759,7 +760,9 @@ class _AddVehicleScreenState extends State<AddVehicleScreen> {
     final vehicle = Vehicle(
       id: _uuidV4(),
       userId: AuthRepository.instance.currentUser?.id ?? '',
-      userName: AuthRepository.instance.currentUser?.profileName ?? 'Unknown User',
+      userName: ProfileRepository.instance.profile.value.profileName.isNotEmpty
+          ? ProfileRepository.instance.profile.value.profileName
+          : (AuthRepository.instance.currentUser?.profileName ?? 'Unknown User'),
       name: name,
       type: type,
       year: year,

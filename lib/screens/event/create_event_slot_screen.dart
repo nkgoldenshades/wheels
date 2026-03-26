@@ -282,6 +282,7 @@ class _CreateEventSlotScreenState extends State<CreateEventSlotScreen> {
                 controller: _fromLocationController,
                 decoration: const InputDecoration(
                   labelText: 'From Location',
+                  hintText: 'e.g., Chennai Central',
                   border: OutlineInputBorder(),
                   prefixIcon: Icon(Icons.location_on),
                 ),
@@ -293,8 +294,9 @@ class _CreateEventSlotScreenState extends State<CreateEventSlotScreen> {
                 controller: _toLocationController,
                 decoration: const InputDecoration(
                   labelText: 'To Location',
+                  hintText: 'e.g., Bangalore City Junction',
                   border: OutlineInputBorder(),
-                  prefixIcon: Icon(Icons.location_on),
+                  prefixIcon: Icon(Icons.location_on_outlined),
                 ),
                 validator: (value) =>
                     value?.isEmpty ?? true ? 'Required' : null,
@@ -304,8 +306,9 @@ class _CreateEventSlotScreenState extends State<CreateEventSlotScreen> {
                 controller: _baseLocationController,
                 decoration: const InputDecoration(
                   labelText: 'Base Location',
+                  hintText: 'e.g., Mumbai CST',
                   border: OutlineInputBorder(),
-                  prefixIcon: Icon(Icons.location_on),
+                  prefixIcon: Icon(Icons.my_location),
                 ),
                 validator: (value) =>
                     value?.isEmpty ?? true ? 'Required' : null,
@@ -532,6 +535,10 @@ class _CreateEventSlotScreenState extends State<CreateEventSlotScreen> {
     final time = await showTimePicker(
       context: context,
       initialTime: TimeOfDay.now(),
+      builder: (ctx, child) => MediaQuery(
+        data: MediaQuery.of(ctx).copyWith(alwaysUse24HourFormat: true),
+        child: child!,
+      ),
     );
     if (time != null) {
       setState(() => _startTime = time);
@@ -554,6 +561,10 @@ class _CreateEventSlotScreenState extends State<CreateEventSlotScreen> {
     final time = await showTimePicker(
       context: context,
       initialTime: _startTime ?? TimeOfDay.now(),
+      builder: (ctx, child) => MediaQuery(
+        data: MediaQuery.of(ctx).copyWith(alwaysUse24HourFormat: true),
+        child: child!,
+      ),
     );
     if (time != null) {
       setState(() => _endTime = time);

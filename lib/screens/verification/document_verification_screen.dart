@@ -466,7 +466,7 @@ class _DocumentVerificationScreenState
           final matchResult = await FaceMatchingService.instance.compareFaces(
             referenceBytes,
             imageBytes,
-            threshold: 40.0, // Increased threshold for better matching
+            threshold: 25.0,
           );
 
           if (!mounted) return;
@@ -489,7 +489,7 @@ class _DocumentVerificationScreenState
                     Text(
                       'Face does not match the document photo.\n\n'
                       'Match score: ${matchScore.toStringAsFixed(1)}%\n'
-                      'Required: 70%',
+                      'Required: 25%',
                       textAlign: TextAlign.center,
                     ),
                   ],
@@ -573,7 +573,7 @@ class _DocumentVerificationScreenState
             final matchResult = await FaceMatchingService.instance.compareFaces(
               profileBytes,
               imageBytes,
-              threshold: 40.0, // Increased threshold for better matching
+              threshold: 25.0,
             );
 
             if (!mounted) return;
@@ -596,7 +596,7 @@ class _DocumentVerificationScreenState
                       Text(
                         'Face does not match your profile photo.\n\n'
                         'Match score: ${matchScore.toStringAsFixed(1)}%\n'
-                        'Required: 70%',
+                        'Required: 25%',
                         textAlign: TextAlign.center,
                       ),
                     ],

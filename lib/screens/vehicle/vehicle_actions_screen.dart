@@ -22,8 +22,10 @@ import '../slot_detail_screen.dart';
 import '../add_flow/create_post_screen.dart';
 import '../verification/document_verification_screen.dart';
 import '../../widgets/slot_card.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../services/location_autocomplete_service.dart';
 import '../../services/app_preferences.dart';
+import '../../services/payment_service.dart';
 
 class VehicleActionsScreen extends StatefulWidget {
   final String vehicleId;
@@ -51,63 +53,6 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
   bool _isVehicleComplianceDoc(DocumentType documentType) {
     return documentType == DocumentType.rc ||
         documentType == DocumentType.insurance;
-  }
-
-  Widget _buildVehicleTagsCard(BuildContext context, Vehicle vehicle) {
-    return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 4),
-      child: Padding(
-        padding: const EdgeInsets.all(12.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Vehicle tags',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
-            ),
-            const SizedBox(height: 8),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              value: vehicle.isVerifiedToggle,
-              onChanged: (v) async {
-                final updated = vehicle.copyWith(isVerifiedToggle: v);
-                await _saveVehicle(context, updated);
-              },
-              title: const Text('Verified vehicle'),
-            ),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              value: vehicle.isExpertToggle,
-              onChanged: (v) async {
-                final updated = vehicle.copyWith(isExpertToggle: v);
-                await _saveVehicle(context, updated);
-              },
-              title: const Text('Expert vehicle'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Future<void> _saveVehicle(BuildContext context, Vehicle updated) async {
-    try {
-      if (widget.isUserMode) {
-        await UserVehicleRepository.instance.updateVehicle(updated);
-      } else {
-        await widget.vehicleRepository!.updateVehicle(updated);
-      }
-
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Vehicle updated')),
-      );
-    } catch (e) {
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not save: $e')),
-      );
-    }
   }
 
   dynamic get _vehicleRepo => widget.isUserMode 
@@ -149,9 +94,18 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
           appBar: AppBar(
             title: Text('${vehicle.name}$yearText'),
             backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+            actions: [
+              IconButton(
+                icon: const Icon(Icons.edit),
+                tooltip: 'Edit vehicle',
+                onPressed: () => _openEditSheet(context, vehicle),
+              ),
+            ],
           ),
           floatingActionButton: FloatingActionButton(
-            onPressed: () => _openAddSheet(context, vehicle),
+            onPressed: () {
+              _openAddSheet(context, vehicle);
+            },
             child: const Icon(Icons.add),
           ),
           body: ValueListenableBuilder(
@@ -169,8 +123,6 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                 padding:
                     const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
                 children: [
-                  _buildVehicleImagesSection(vehicle),
-                  const SizedBox(height: 12),
                   _buildVehicleStatsCard(vehicle, entries.length),
                   const SizedBox(height: 4),
                   _buildVehicleCountryRow(vehicle),
@@ -189,7 +141,6 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                   const SizedBox(height: 12),
                   _buildGpsSettingsCard(vehicle),
                   const SizedBox(height: 12),
-                  _buildVehicleTagsCard(context, vehicle),
                   if (!widget.isUserMode) ...[
                     const SizedBox(height: 12),
                     _buildDocumentVerificationCard(vehicle),
@@ -205,110 +156,6 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
           ),
         );
       },
-    );
-  }
-
-  Widget _buildVehicleImagesSection(Vehicle vehicle) {
-    final hasProfile = vehicle.profileImage != null;
-    final galleryCount = vehicle.galleryImages.length;
-    final totalCount = (hasProfile ? 1 : 0) + galleryCount;
-    
-    return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 4),
-      child: Padding(
-        padding: const EdgeInsets.all(12.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Images ($totalCount)',
-              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
-            ),
-            const SizedBox(height: 8),
-            if (totalCount == 0)
-              const Text('No images added yet')
-            else
-              SizedBox(
-                height: 180,
-                child: ListView.separated(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: totalCount,
-                  separatorBuilder: (_, _) => const SizedBox(width: 12),
-                  itemBuilder: (context, index) {
-                    // First item is profile image if it exists
-                    final isProfile = hasProfile && index == 0;
-                    final photo = isProfile 
-                        ? vehicle.profileImage! 
-                        : vehicle.galleryImages[hasProfile ? index - 1 : index];
-                    
-                    Uint8List? bytes;
-                    try {
-                      final normalized = photo.contains(',')
-                          ? photo.split(',').last
-                          : photo;
-                      bytes = base64Decode(normalized);
-                    } catch (_) {
-                      bytes = null;
-                    }
-                    
-                    return Stack(
-                      children: [
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(12),
-                          child: AspectRatio(
-                            aspectRatio: 16 / 9,
-                            child: bytes == null
-                            ? Container(
-                                color: Colors.black12,
-                                child: const Center(
-                                  child: Icon(Icons.broken_image_outlined),
-                                ),
-                              )
-                            : Image.memory(
-                                bytes,
-                                fit: BoxFit.cover,
-                                errorBuilder: (context, error, stackTrace) {
-                                  return Container(
-                                    color: Colors.black12,
-                                    child: const Center(
-                                      child: Icon(Icons.broken_image_outlined),
-                                    ),
-                                  );
-                                },
-                              ),
-                          ),
-                        ),
-                        if (isProfile)
-                          Positioned(
-                            top: 8,
-                            left: 8,
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 4,
-                              ),
-                              decoration: BoxDecoration(
-                                color: Colors.blue,
-                                borderRadius: BorderRadius.circular(4),
-                              ),
-                              child: const Text(
-                                'PROFILE',
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ),
-                          ),
-                      ],
-                    );
-                  },
-                ),
-              ),
-          ],
-        ),
-      ),
     );
   }
 
@@ -331,31 +178,363 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
   }
 
   Widget _buildSlotCard(BuildContext context, SlotEntry entry) {
-    return SlotCard(
-      slot: entry.slot,
-      vehicle: entry.vehicle,
-      providerName: 'You',
-      providerAvatar: '',
-      providerRating: 5.0,
-      isOffer: true,
-      isUserPost: widget.isUserMode, // User mode = looking for service, Provider mode = offering service
-      onTap: () {
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (context) => SlotDetailScreen(
-              slot: entry.slot,
-              vehicle: entry.vehicle,
-              providerName: 'You',
-              providerAvatar: '',
-              providerRating: 5.0,
-              isOffer: true,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SlotCard(
+          slot: entry.slot,
+          vehicle: entry.vehicle,
+          providerName: 'You',
+          providerAvatar: '',
+          providerRating: 5.0,
+          isOffer: true,
+          isUserPost: widget.isUserMode,
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => SlotDetailScreen(
+                  slot: entry.slot,
+                  vehicle: entry.vehicle,
+                  providerName: 'You',
+                  providerAvatar: '',
+                  providerRating: 5.0,
+                  isOffer: true,
+                ),
+              ),
+            );
+          },
+          onAction: () {},
+        ),
+        Padding(
+          padding: const EdgeInsets.only(right: 16, bottom: 4),
+          child: Align(
+            alignment: Alignment.centerRight,
+            child: TextButton.icon(
+              onPressed: () async {
+                final confirm = await showDialog<bool>(
+                  context: context,
+                  builder: (ctx) => AlertDialog(
+                    title: const Text('Delete post?'),
+                    content: const Text(
+                        'This will permanently remove this post. Existing bookings are not affected.'),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(ctx, false),
+                        child: const Text('Cancel'),
+                      ),
+                      TextButton(
+                        onPressed: () => Navigator.pop(ctx, true),
+                        style: TextButton.styleFrom(foregroundColor: Colors.red),
+                        child: const Text('Delete'),
+                      ),
+                    ],
+                  ),
+                );
+                if (confirm != true || !context.mounted) return;
+                if (widget.isUserMode) {
+                  await UserSlotRepository.instance.deleteSlot(entry.slot.id);
+                } else {
+                  await SlotRepository.instance.deleteSlot(entry.slot.id);
+                }
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Post deleted')),
+                  );
+                }
+              },
+              icon: const Icon(Icons.delete_outline, size: 16, color: Colors.red),
+              label: const Text('Delete post', style: TextStyle(color: Colors.red, fontSize: 13)),
+              style: TextButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
             ),
           ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _openEditSheet(BuildContext context, Vehicle vehicle) async {
+    final nameCtrl = TextEditingController(text: vehicle.name);
+    final typeCtrl = TextEditingController(text: vehicle.type);
+    final yearCtrl = TextEditingController(text: vehicle.year?.toString() ?? '');
+    bool capPassenger = vehicle.capabilities.contains(ServiceType.passenger);
+    bool capParcel = vehicle.capabilities.contains(ServiceType.parcel);
+    bool capWorking = vehicle.capabilities.contains(ServiceType.working);
+
+    final vehicleTypes = ['Car','Bike','Truck','Bus','Van','Ship','Boat','Rocket','Train','Flight','Other'];
+    String? selectedType = vehicleTypes.contains(vehicle.type) ? vehicle.type : 'Other';
+    if (selectedType == 'Other') typeCtrl.text = vehicle.type;
+
+    // Media state
+    String? profileImage = vehicle.profileImage;
+    List<String> galleryImages = [...vehicle.galleryImages];
+    String? videoUrl = vehicle.videoUrl;
+
+    final picker = ImagePicker();
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setModalState) {
+
+            Future<void> pickProfileImage() async {
+              final file = await picker.pickImage(source: ImageSource.gallery, maxWidth: 1024, maxHeight: 1024, imageQuality: 85);
+              if (file == null) return;
+              final bytes = await file.readAsBytes();
+              setModalState(() => profileImage = base64Encode(bytes));
+            }
+
+            Future<void> pickGalleryImages() async {
+              final files = await picker.pickMultiImage(maxWidth: 1024, maxHeight: 1024, imageQuality: 80);
+              if (files.isEmpty) return;
+              final encoded = <String>[];
+              for (final f in files) { encoded.add(base64Encode(await f.readAsBytes())); }
+              setModalState(() => galleryImages.addAll(encoded));
+            }
+
+            Future<void> pickVideo() async {
+              final file = await picker.pickVideo(source: ImageSource.gallery, maxDuration: const Duration(seconds: 60));
+              if (file == null) return;
+              final bytes = await file.readAsBytes();
+              setModalState(() => videoUrl = base64Encode(bytes));
+            }
+
+            return Padding(
+              padding: EdgeInsets.only(
+                left: 16, right: 16, top: 8,
+                bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text('Edit Vehicle',
+                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 16),
+                    TextField(
+                      controller: nameCtrl,
+                      decoration: const InputDecoration(
+                          labelText: 'Vehicle name', border: OutlineInputBorder()),
+                    ),
+                    const SizedBox(height: 12),
+                    DropdownButtonFormField<String>(
+                      initialValue: selectedType,
+                      decoration: const InputDecoration(
+                          labelText: 'Vehicle Type', border: OutlineInputBorder()),
+                      items: vehicleTypes
+                          .map((t) => DropdownMenuItem(value: t, child: Text(t)))
+                          .toList(),
+                      onChanged: (v) => setModalState(() => selectedType = v),
+                    ),
+                    if (selectedType == 'Other') ...[
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: typeCtrl,
+                        decoration: const InputDecoration(
+                            labelText: 'Custom type', border: OutlineInputBorder()),
+                      ),
+                    ],
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: yearCtrl,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                          labelText: 'Year (optional)', border: OutlineInputBorder()),
+                    ),
+                    const SizedBox(height: 16),
+                    const Text('Capabilities',
+                        style: TextStyle(fontWeight: FontWeight.w600)),
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      value: capPassenger,
+                      onChanged: (v) => setModalState(() => capPassenger = v),
+                      title: const Text('Passenger'),
+                    ),
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      value: capParcel,
+                      onChanged: (v) => setModalState(() => capParcel = v),
+                      title: const Text('Parcel'),
+                    ),
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      value: capWorking,
+                      onChanged: (v) => setModalState(() => capWorking = v),
+                      title: const Text('Working / Lease'),
+                    ),
+                    const SizedBox(height: 16),
+                    // --- Media Section ---
+                    const Text('Media', style: TextStyle(fontWeight: FontWeight.w600)),
+                    const SizedBox(height: 8),
+                    // Profile image
+                    Row(
+                      children: [
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: profileImage != null
+                              ? Image.memory(base64Decode(profileImage!), width: 72, height: 72, fit: BoxFit.cover)
+                              : Container(width: 72, height: 72, color: Colors.grey[200],
+                                  child: const Icon(Icons.directions_car, color: Colors.grey)),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text('Profile Image', style: TextStyle(fontWeight: FontWeight.w500)),
+                              const SizedBox(height: 4),
+                              OutlinedButton.icon(
+                                onPressed: pickProfileImage,
+                                icon: const Icon(Icons.photo_camera, size: 16),
+                                label: Text(profileImage != null ? 'Change' : 'Add'),
+                              ),
+                            ],
+                          ),
+                        ),
+                        if (profileImage != null)
+                          IconButton(
+                            icon: const Icon(Icons.close, color: Colors.red),
+                            onPressed: () => setModalState(() => profileImage = null),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    // Gallery images
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text('Gallery (${galleryImages.length})', style: const TextStyle(fontWeight: FontWeight.w500)),
+                        OutlinedButton.icon(
+                          onPressed: pickGalleryImages,
+                          icon: const Icon(Icons.add_photo_alternate, size: 16),
+                          label: const Text('Add'),
+                        ),
+                      ],
+                    ),
+                    if (galleryImages.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      SizedBox(
+                        height: 80,
+                        child: ListView.separated(
+                          scrollDirection: Axis.horizontal,
+                          itemCount: galleryImages.length,
+                          separatorBuilder: (_, i) => const SizedBox(width: 8),
+                          itemBuilder: (_, i) => Stack(
+                            children: [
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(8),
+                                child: Image.memory(base64Decode(galleryImages[i]), width: 80, height: 80, fit: BoxFit.cover),
+                              ),
+                              Positioned(
+                                top: 2, right: 2,
+                                child: GestureDetector(
+                                  onTap: () => setModalState(() => galleryImages.removeAt(i)),
+                                  child: Container(
+                                    decoration: const BoxDecoration(color: Colors.black54, shape: BoxShape.circle),
+                                    child: const Icon(Icons.close, color: Colors.white, size: 16),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 12),
+                    // Video
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text('Video', style: TextStyle(fontWeight: FontWeight.w500)),
+                              const SizedBox(height: 4),
+                              OutlinedButton.icon(
+                                onPressed: pickVideo,
+                                icon: const Icon(Icons.videocam, size: 16),
+                                label: Text(videoUrl != null ? 'Change video' : 'Add video'),
+                              ),
+                            ],
+                          ),
+                        ),
+                        if (videoUrl != null) ...[
+                          const Icon(Icons.check_circle, color: Colors.green),
+                          const SizedBox(width: 4),
+                          IconButton(
+                            icon: const Icon(Icons.close, color: Colors.red),
+                            onPressed: () => setModalState(() => videoUrl = null),
+                          ),
+                        ],
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton(
+                        onPressed: () async {
+                          final name = nameCtrl.text.trim();
+                          if (name.isEmpty) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('Enter vehicle name')));
+                            return;
+                          }
+                          final type = selectedType == 'Other'
+                              ? typeCtrl.text.trim()
+                              : (selectedType ?? vehicle.type);
+                          final caps = <ServiceType>[
+                            if (capPassenger) ServiceType.passenger,
+                            if (capParcel) ServiceType.parcel,
+                            if (capWorking) ServiceType.working,
+                          ];
+                          if (caps.isEmpty) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('Select at least one capability')));
+                            return;
+                          }
+                          final year = int.tryParse(yearCtrl.text.trim());
+                          final updated = vehicle.copyWith(
+                            name: name,
+                            type: type,
+                            year: year,
+                            capabilities: caps,
+                            profileImage: profileImage,
+                            galleryImages: galleryImages,
+                            videoUrl: videoUrl,
+                          );
+                          if (widget.isUserMode) {
+                            await UserVehicleRepository.instance.updateVehicle(updated);
+                          } else {
+                            await widget.vehicleRepository!.updateVehicle(updated);
+                          }
+                          if (!context.mounted) return;
+                          Navigator.pop(ctx);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('Vehicle updated')));
+                        },
+                        child: const Text('Save Changes'),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
         );
       },
-      onAction: () {},
     );
+
+    nameCtrl.dispose();
+    typeCtrl.dispose();
+    yearCtrl.dispose();
   }
 
   Future<void> _openAddSheet(BuildContext context, Vehicle vehicle) async {
@@ -387,119 +566,7 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                 Expanded(
                   child: ListView(
                     children: [
-                      ListTile(
-                        leading: const Icon(Icons.photo_library_outlined),
-                        title: const Text('Vehicle images'),
-                        subtitle: const Text('Add images to your vehicle'),
-                        onTap: () async {
-                          try{
-                            final picker = ImagePicker();
-                            final files = await picker.pickMultiImage(
-                              maxWidth: 1024,
-                              maxHeight: 1024,
-                              imageQuality: 80,
-                            );
-                            if (!context.mounted) return;
-                            Navigator.pop(context);
-                            if (files.isEmpty) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('No images selected')),
-                              );
-                              return;
-                            }
-
-                            debugPrint(
-                              'VehicleImages: picked ${files.length} file(s) for vehicle ${vehicle.id}',
-                            );
-
-                            final encoded = <String>[];
-                            for (final f in files) {
-                              final bytes = await f.readAsBytes();
-                      encoded.add(base64Encode(bytes));
-                    }
-
-                    // If no profile image exists and user picked images, ask if first should be profile
-                    String? newProfileImage = vehicle.profileImage;
-                    List<String> newGalleryImages = [...vehicle.galleryImages];
-                    
-                    if (vehicle.profileImage == null && encoded.isNotEmpty) {
-                      if (!context.mounted) return;
-                      final setAsProfile = await showDialog<bool>(
-                        context: context,
-                        builder: (context) => AlertDialog(
-                          title: const Text('Set Profile Image'),
-                          content: const Text(
-                            'Would you like to set the first image as the vehicle profile image?',
-                          ),
-                          actions: [
-                            TextButton(
-                              onPressed: () => Navigator.pop(context, false),
-                              child: const Text('No, add to gallery'),
-                            ),
-                            FilledButton(
-                              onPressed: () => Navigator.pop(context, true),
-                              child: const Text('Yes, set as profile'),
-                            ),
-                          ],
-                        ),
-                      );
-                      
-                      if (setAsProfile == true) {
-                        newProfileImage = encoded.first;
-                        newGalleryImages.addAll(encoded.skip(1));
-                      } else {
-                        newGalleryImages.addAll(encoded);
-                      }
-                    } else {
-                      newGalleryImages.addAll(encoded);
-                    }
-
-                    final updated = vehicle.copyWith(
-                      profileImage: newProfileImage,
-                      galleryImages: newGalleryImages,
-                    );
-                    debugPrint(
-                      'VehicleImages: saving. profile=${newProfileImage != null} gallery=${newGalleryImages.length}',
-                    );
-                    try {
-                      if (widget.isUserMode) {
-                        UserVehicleRepository.instance.updateVehicle(updated);
-                      } else {
-                        await widget.vehicleRepository!.updateVehicle(updated);
-                      }
-                    } catch (e) {
-                      if (!context.mounted) return;
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text(
-                            'Could not save images: $e',
-                          ),
-                        ),
-                      );
-                      return;
-                    }
-                    VehicleRepository.instance.updateVehicle(updated);
-
-                    if (!context.mounted) return;
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(
-                          'Added ${encoded.length} image(s) to vehicle',
-                        ),
-                      ),
-                    );
-                  } catch (e) {
-                    debugPrint(
-                      'VehicleImages: failed to pick/save images: $e',
-                    );
-                    if (!context.mounted) return;
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Image add failed: $e')),
-                    );
-                  }
-                },
-              ),
-              if (vehicle.capabilities.contains(ServiceType.passenger))
+                      if (vehicle.capabilities.contains(ServiceType.passenger))
                 ListTile(
                   leading: const Icon(Icons.people),
                   title: const Text('Passenger'),
@@ -619,6 +686,7 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
               'Registration Certificate - Proves ownership',
               verificationStatus['RC Book']!,
               DocumentType.rc,
+              imageBase64: vehicle.rcImageBase64,
               isMandatory: true,
               canVerify: canVerify,
             ),
@@ -628,6 +696,7 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
               'Vehicle Insurance - Mandatory by law',
               verificationStatus['Insurance']!,
               DocumentType.insurance,
+              imageBase64: vehicle.insuranceImageBase64,
               expiryDate: vehicle.insuranceExpiryDate,
               isMandatory: true,
               canVerify: canVerify,
@@ -656,6 +725,7 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
               'Valid driving license',
               verificationStatus['Driving License']!,
               DocumentType.dl,
+              imageBase64: vehicle.dlImageBase64,
               isMandatory: false,
               canVerify: canVerify,
             ),
@@ -665,6 +735,7 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
               'Identity verification',
               verificationStatus['National ID']!,
               DocumentType.aadhaar,
+              imageBase64: vehicle.aadhaarImageBase64,
               isMandatory: false,
               canVerify: canVerify,
             ),
@@ -674,6 +745,7 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
               'Tax identification',
               verificationStatus['Tax ID']!,
               DocumentType.pan,
+              imageBase64: vehicle.panImageBase64,
               isMandatory: false,
               canVerify: canVerify,
             ),
@@ -703,62 +775,70 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
     String subtitle,
     bool isVerified,
     DocumentType documentType, {
+    String? imageBase64,
     bool isMandatory = false,
     bool canVerify = true,
   }) {
-    return ListTile(
-      contentPadding: const EdgeInsets.symmetric(vertical: 4),
-      leading: Icon(
-        isVerified ? Icons.verified : (isMandatory ? Icons.error : Icons.pending_outlined),
-        color: isVerified ? Colors.green : (isMandatory ? Colors.red : Colors.orange),
-        size: 28,
-      ),
-      title: Row(
-        children: [
-          Text(
-            title,
-            style: const TextStyle(fontWeight: FontWeight.w600),
+    Uint8List? imageBytes;
+    if (imageBase64 != null && imageBase64.isNotEmpty) {
+      try {
+        imageBytes = base64Decode(imageBase64);
+      } catch (_) {}
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        ListTile(
+          contentPadding: const EdgeInsets.symmetric(vertical: 4),
+          leading: Icon(
+            isVerified ? Icons.verified : (isMandatory ? Icons.error : Icons.pending_outlined),
+            color: isVerified ? Colors.green : (isMandatory ? Colors.red : Colors.orange),
+            size: 28,
           ),
-          if (isMandatory && !isVerified) ...[
-            const SizedBox(width: 6),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-              decoration: BoxDecoration(
-                color: Colors.red,
-                borderRadius: BorderRadius.circular(4),
-              ),
-              child: const Text(
-                'REQUIRED',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 9,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-          ],
-        ],
-      ),
-      subtitle: Text(
-        isVerified ? 'Verified ✓' : subtitle,
-        style: TextStyle(
-          fontSize: 12,
-          color: isVerified ? Colors.green : Colors.grey,
-        ),
-      ),
-      trailing: isVerified
-          ? null
-          : canVerify
-              ? OutlinedButton(
-                  onPressed: () => _startDocumentVerification(documentType),
-                  style: OutlinedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    foregroundColor: isMandatory ? Colors.red : null,
-                    side: isMandatory ? const BorderSide(color: Colors.red, width: 2) : null,
+          title: Row(
+            children: [
+              Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
+              if (isMandatory && !isVerified) ...[
+                const SizedBox(width: 6),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: Colors.red,
+                    borderRadius: BorderRadius.circular(4),
                   ),
-                  child: const Text('Verify'),
-                )
-              : const Icon(Icons.lock_outline, color: Colors.orange),
+                  child: const Text(
+                    'REQUIRED',
+                    style: TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ],
+            ],
+          ),
+          subtitle: Text(
+            isVerified ? 'Verified ✓' : subtitle,
+            style: TextStyle(
+              fontSize: 12,
+              color: isVerified ? Colors.green : Colors.grey,
+            ),
+          ),
+          trailing: isVerified
+              ? null
+              : canVerify
+                  ? OutlinedButton(
+                      onPressed: () => _startDocumentVerification(documentType),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        foregroundColor: isMandatory ? Colors.red : null,
+                        side: isMandatory ? const BorderSide(color: Colors.red, width: 2) : null,
+                      ),
+                      child: Text(imageBytes != null ? 'Verify' : 'Upload'),
+                    )
+                  : const Icon(Icons.lock_outline, color: Colors.orange),
+        ),
+        if (imageBytes != null)
+          _buildDocumentThumbnail(title, imageBytes, isVerified),
+      ],
     );
   }
 
@@ -767,108 +847,217 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
     String subtitle,
     bool isVerified,
     DocumentType documentType, {
+    String? imageBase64,
     DateTime? expiryDate,
     bool isMandatory = false,
     bool canVerify = true,
   }) {
+    Uint8List? imageBytes;
+    if (imageBase64 != null && imageBase64.isNotEmpty) {
+      try { imageBytes = base64Decode(imageBase64); } catch (_) {}
+    }
     final isExpired = expiryDate != null && expiryDate.isBefore(DateTime.now());
-    final isExpiringSoon = expiryDate != null && 
-        expiryDate.isAfter(DateTime.now()) && 
-        expiryDate.isBefore(DateTime.now().add(const Duration(days: 30)));
-    
     final isBlockedForUserMode = widget.isUserMode &&
         _isVehicleComplianceDoc(documentType);
 
-    return ListTile(
-      contentPadding: const EdgeInsets.symmetric(vertical: 4),
-      leading: Icon(
-        isVerified && !isExpired 
-            ? Icons.verified 
-            : (isMandatory || isExpired ? Icons.error : Icons.pending_outlined),
-        color: isVerified && !isExpired 
-            ? Colors.green 
-            : (isMandatory || isExpired ? Colors.red : Colors.orange),
-        size: 28,
-      ),
-      title: Row(
-        children: [
-          Text(
-            title,
-            style: const TextStyle(fontWeight: FontWeight.w600),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        ListTile(
+          contentPadding: const EdgeInsets.symmetric(vertical: 4),
+          leading: Icon(
+            isVerified && !isExpired
+                ? Icons.verified
+                : (isMandatory || isExpired ? Icons.error : Icons.pending_outlined),
+            color: isVerified && !isExpired
+                ? Colors.green
+                : (isMandatory || isExpired ? Colors.red : Colors.orange),
+            size: 28,
           ),
-          if (isMandatory && (!isVerified || isExpired)) ...[
-            const SizedBox(width: 6),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-              decoration: BoxDecoration(
-                color: Colors.red,
-                borderRadius: BorderRadius.circular(4),
+              title: Row(
+            children: [
+              Text(
+                title,
+                style: const TextStyle(fontWeight: FontWeight.w600),
               ),
-              child: const Text(
-                'REQUIRED',
+              if (isMandatory && (!isVerified || isExpired)) ...[
+                const SizedBox(width: 6),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: Colors.red,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: const Text(
+                    'REQUIRED',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 9,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+          subtitle: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                isVerified && !isExpired ? 'Verified ✓' : subtitle,
                 style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 9,
-                  fontWeight: FontWeight.bold,
+                  fontSize: 12,
+                  color: isVerified && !isExpired ? Colors.green : Colors.grey,
                 ),
               ),
-            ),
-          ],
-        ],
-      ),
-      subtitle: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            isVerified && !isExpired ? 'Verified ✓' : subtitle,
-            style: TextStyle(
-              fontSize: 12,
-              color: isVerified && !isExpired ? Colors.green : Colors.grey,
-            ),
+              if (expiryDate != null) ...[
+                const SizedBox(height: 2),
+                Text(
+                  isExpired
+                      ? 'Expired on ${_fmtDate(expiryDate)}'
+                      : expiryDate.isBefore(DateTime.now().add(const Duration(days: 30)))
+                          ? 'Expires soon: ${_fmtDate(expiryDate)}'
+                          : 'Valid until ${_fmtDate(expiryDate)}',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: isExpired ? Colors.red
+                        : expiryDate.isBefore(DateTime.now().add(const Duration(days: 30)))
+                            ? Colors.orange
+                            : Colors.green,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ],
           ),
-          if (expiryDate != null) ...[
-            const SizedBox(height: 2),
-            Text(
-              isExpired
-                  ? 'Expired on ${_fmtDate(expiryDate)}'
-                  : isExpiringSoon
-                      ? 'Expires soon: ${_fmtDate(expiryDate)}'
-                      : 'Valid until ${_fmtDate(expiryDate)}',
-              style: TextStyle(
-                fontSize: 11,
-                color: isExpired 
-                    ? Colors.red 
-                    : isExpiringSoon 
-                        ? Colors.orange 
-                        : Colors.green,
-                fontWeight: FontWeight.w600,
+          trailing: isVerified && !isExpired
+              ? null
+              : !canVerify
+                  ? const Icon(Icons.lock_outline, color: Colors.orange)
+                  : OutlinedButton(
+                      onPressed: isBlockedForUserMode
+                          ? null
+                          : () => _startDocumentVerification(documentType),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        foregroundColor: isMandatory || isExpired ? Colors.red : null,
+                        side: isMandatory || isExpired
+                            ? const BorderSide(color: Colors.red, width: 2)
+                            : null,
+                      ),
+                      child: Text(
+                        isBlockedForUserMode
+                            ? 'Not allowed'
+                            : (imageBytes != null && !isVerified
+                                ? 'Verify'
+                                : (isExpired ? 'Renew' : 'Upload')),
+                      ),
+                    ),
+        ),
+        if (imageBytes != null)
+          _buildDocumentThumbnail(title, imageBytes, isVerified && !isExpired),
+      ],
+    );
+  }
+
+  Widget _buildDocumentThumbnail(String title, Uint8List bytes, bool isVerified) {
+    return GestureDetector(
+      onTap: () => _previewDocumentImage(title, bytes),
+      child: Container(
+        margin: const EdgeInsets.only(left: 48, right: 16, bottom: 8),
+        height: 48,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(
+            color: isVerified ? Colors.green : Colors.blue.shade200,
+            width: 1.5,
+          ),
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(5),
+          child: Row(
+            children: [
+              SizedBox(
+                width: 64,
+                child: Image.memory(bytes, fit: BoxFit.cover, height: 48),
+              ),
+              const SizedBox(width: 8),
+              Icon(
+                isVerified ? Icons.verified : Icons.zoom_in,
+                size: 14,
+                color: isVerified ? Colors.green : Colors.blue,
+              ),
+              const SizedBox(width: 4),
+              Text(
+                isVerified ? 'Verified — tap to preview' : 'Tap to preview',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: isVerified ? Colors.green : Colors.blue,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _previewDocumentImage(String title, Uint8List bytes) {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => Dialog(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: Row(
+                children: [
+                  Expanded(child: Text(title, style: const TextStyle(fontWeight: FontWeight.w700))),
+                  IconButton(onPressed: () => Navigator.pop(ctx), icon: const Icon(Icons.close)),
+                ],
               ),
             ),
+            InteractiveViewer(
+              minScale: 0.5,
+              maxScale: 4,
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Image.memory(bytes, fit: BoxFit.contain),
+              ),
+            ),
+            const SizedBox(height: 8),
           ],
-        ],
+        ),
       ),
-      trailing: isVerified && !isExpired
-          ? null
-          : !canVerify
-              ? const Icon(Icons.lock_outline, color: Colors.orange)
-              : OutlinedButton(
-                  onPressed: isBlockedForUserMode
-                      ? null
-                      : () => _startDocumentVerification(documentType),
-                  style: OutlinedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    foregroundColor: isMandatory || isExpired ? Colors.red : null,
-                    side: isMandatory || isExpired
-                        ? const BorderSide(color: Colors.red, width: 2)
-                        : null,
-                  ),
-                  child: Text(
-                    isBlockedForUserMode
-                        ? 'Not allowed'
-                        : (isExpired ? 'Renew' : 'Verify'),
-                  ),
-                ),
     );
+  }
+
+  /// Routes KYC payment to Razorpay (INR) or Stripe (other currencies).
+  /// Returns true if payment succeeded, false otherwise.
+  Future<bool> _processKycPayment() async {
+    final prefs = await SharedPreferences.getInstance();
+    final userName = prefs.getString('display_name') ?? 'User';
+    final userEmail = prefs.getString('user_email') ?? '';
+    final userPhone = prefs.getString('user_phone') ?? '';
+    final currency = AppPreferences.instance.currencyCode.value;
+
+    final payResult = await PaymentService.instance.processKycPayment(
+      userName: userName,
+      userEmail: userEmail,
+      userPhone: userPhone,
+      currency: currency,
+    );
+
+    if (!mounted) return false;
+
+    if (payResult.containsKey('error')) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Payment failed: ${payResult['error']}')),
+      );
+      return false;
+    }
+    return true;
   }
 
   Future<void> _startDocumentVerification(DocumentType documentType) async {
@@ -991,65 +1180,112 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
         lastDate: DateTime.now().add(const Duration(days: 365 * 5)),
         helpText: 'Select insurance expiry date',
       );
-
-      if (expiryDate == null || !mounted) return; // User cancelled
+      if (expiryDate == null || !mounted) return;
     }
 
-    // Step 2: Show instructions before opening camera
-    final proceedToCamera = await showDialog<bool>(
+    // Step 2: Ask whether to verify or just save
+    final action = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Live Verification'),
+        title: const Text('What would you like to do?'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.camera_alt, size: 64, color: Colors.green),
-            const SizedBox(height: 16),
-            const Text(
-              'Next, we\'ll verify you with the document',
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.save_alt, color: Colors.blue),
+              title: const Text('Save document only'),
+              subtitle: const Text('Upload without live verification'),
+              onTap: () => Navigator.pop(context, 'save'),
             ),
-            const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.blue.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: const Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    '📸 You\'ll need to:',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  SizedBox(height: 8),
-                  Text('1. Show your face clearly'),
-                  Text('2. Turn your head left'),
-                  Text('3. Turn your head right'),
-                  Text('4. Hold the physical document next to your face'),
-                ],
-              ),
+            const Divider(),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.verified_user, color: Colors.green),
+              title: const Text('Save & Verify'),
+              subtitle: const Text('Live camera verification (adds verified badge)'),
+              onTap: () => Navigator.pop(context, 'verify'),
             ),
           ],
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context, false),
+            onPressed: () => Navigator.pop(context),
             child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Start Verification'),
           ),
         ],
       ),
     );
 
-    if (proceedToCamera != true || !mounted) return;
+    if (action == null || !mounted) return;
 
-    // Step 3: Open camera with document reference
+    if (action == 'save') {
+      // Save document image to vehicle without verification badge
+      final base64Doc = base64Encode(documentBytes);
+      Vehicle updatedVehicle;
+      switch (documentType) {
+        case DocumentType.rc:
+          updatedVehicle = vehicle.copyWith(rcImageBase64: base64Doc);
+          break;
+        case DocumentType.insurance:
+          updatedVehicle = vehicle.copyWith(
+            insuranceImageBase64: base64Doc,
+            insuranceExpiryDate: expiryDate,
+          );
+          break;
+        case DocumentType.dl:
+          updatedVehicle = vehicle.copyWith(dlImageBase64: base64Doc);
+          break;
+        case DocumentType.aadhaar:
+          updatedVehicle = vehicle.copyWith(aadhaarImageBase64: base64Doc);
+          break;
+        case DocumentType.pan:
+          updatedVehicle = vehicle.copyWith(panImageBase64: base64Doc);
+          break;
+      }
+      if (widget.isUserMode) {
+        UserVehicleRepository.instance.updateVehicle(updatedVehicle);
+      } else {
+        await widget.vehicleRepository!.updateVehicle(updatedVehicle);
+      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${_getDocumentName(documentType)} saved (unverified)')),
+      );
+      return;
+    }
+
+    // action == 'verify' — charge KYC fee before opening camera
+    if (!mounted) return;
+    final payConfirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('KYC Verification Fee'),
+        content: const Text(
+          'A one-time fee of ₹49 is charged to verify your document.\n\n'
+          'This helps prevent fake accounts and covers verification costs.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.pop(ctx, true),
+            icon: const Icon(Icons.payment),
+            label: const Text('Pay ₹49 & Verify'),
+          ),
+        ],
+      ),
+    );
+
+    if (payConfirmed != true || !mounted) return;
+
+    // Route payment via Razorpay (INR) or Stripe (international)
+    final paid = await _processKycPayment();
+    if (!paid || !mounted) return;
+
+    // Payment succeeded — open live camera
     final result = await Navigator.push<Map<String, dynamic>>(
       context,
       MaterialPageRoute(
@@ -1062,66 +1298,61 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
 
     if (result == null || !mounted) return;
 
-    // Handle verification result
     final faceVerified = result['faceVerified'] as bool;
     final docType = result['documentType'] as String;
 
     if (faceVerified) {
       final faceMatched = result['faceMatched'] as bool? ?? false;
       final matchScore = result['matchScore'] as double? ?? 0.0;
-
-      // Update vehicle with verification status
+      final base64Doc = base64Encode(documentBytes);
       final now = DateTime.now();
       Vehicle updatedVehicle;
-
       switch (documentType) {
         case DocumentType.rc:
           updatedVehicle = vehicle.copyWith(
-            rcVerified: true,
-            rcVerifiedAt: now,
+            rcVerified: true, rcVerifiedAt: now, rcImageBase64: base64Doc,
           );
           break;
         case DocumentType.insurance:
           updatedVehicle = vehicle.copyWith(
-            insuranceVerified: true,
-            insuranceVerifiedAt: now,
-            insuranceExpiryDate: expiryDate,
+            insuranceVerified: true, insuranceVerifiedAt: now,
+            insuranceExpiryDate: expiryDate, insuranceImageBase64: base64Doc,
           );
           break;
         case DocumentType.dl:
           updatedVehicle = vehicle.copyWith(
-            dlVerified: true,
-            dlVerifiedAt: now,
+            dlVerified: true, dlVerifiedAt: now, dlImageBase64: base64Doc,
           );
           break;
         case DocumentType.aadhaar:
           updatedVehicle = vehicle.copyWith(
-            aadhaarVerified: true,
-            aadhaarVerifiedAt: now,
+            aadhaarVerified: true, aadhaarVerifiedAt: now, aadhaarImageBase64: base64Doc,
           );
           break;
         case DocumentType.pan:
           updatedVehicle = vehicle.copyWith(
-            panVerified: true,
-            panVerifiedAt: now,
+            panVerified: true, panVerifiedAt: now, panImageBase64: base64Doc,
           );
           break;
       }
-
-      // Save to repository
+      // Auto-grant verified badge if all documents are now verified
+      final withBadge = updatedVehicle.isFullyVerified
+          ? updatedVehicle.copyWith(isVerifiedToggle: true)
+          : updatedVehicle;
       if (widget.isUserMode) {
-        UserVehicleRepository.instance.updateVehicle(updatedVehicle);
+        UserVehicleRepository.instance.updateVehicle(withBadge);
       } else {
-        await widget.vehicleRepository!.updateVehicle(updatedVehicle);
+        await widget.vehicleRepository!.updateVehicle(withBadge);
       }
-
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            faceMatched
-                ? '$docType verified with face matching! ${matchScore.toStringAsFixed(1)}% match ✓'
-                : '$docType verified with liveness detection! ✓',
+            updatedVehicle.isFullyVerified
+                ? '$docType verified! All documents complete — Verified badge granted ✓'
+                : faceMatched
+                    ? '$docType verified! ${matchScore.toStringAsFixed(1)}% match ✓'
+                    : '$docType verified with liveness ✓',
           ),
           backgroundColor: Colors.green,
         ),
@@ -1137,7 +1368,6 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
   }
 
   Widget _buildHistorySection(List<SlotEntry> entries) {
-    final slotIds = entries.map((e) => e.slot.id).toSet();
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 4),
       child: Padding(
@@ -1146,43 +1376,41 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'Booking History',
+              'Slot History',
               style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
             ),
-            const SizedBox(height: 8),
-            ValueListenableBuilder<List<Booking>>(
-              valueListenable: BookingRepository.instance.bookings,
-              builder: (context, bookings, _) {
-                final vehicleBookings = bookings
-                    .where((b) => slotIds.contains(b.slotId))
-                    .toList(growable: false);
-
-                if (vehicleBookings.isEmpty) {
-                  return const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 8.0),
-                    child: Text('No bookings yet'),
-                  );
-                }
-
-                return Column(
-                  children: vehicleBookings
-                      .map(
-                        (b) => ListTile(
-                          contentPadding: EdgeInsets.zero,
-                          leading: const Icon(Icons.history),
-                          title: Text('Booking #${b.id}'),
-                          subtitle: Text('Status: ${_statusLabel(b)}'),
-                          trailing: Text(
-                            _fmtDate(b.createdAt),
-                            style:
-                                const TextStyle(fontSize: 12, color: Colors.grey),
-                          ),
-                        ),
-                      )
-                      .toList(),
-                );
-              },
+            const SizedBox(height: 4),
+            const Text(
+              'Booking history grouped by slot',
+              style: TextStyle(fontSize: 12, color: Colors.grey),
             ),
+            const SizedBox(height: 8),
+            if (entries.isEmpty)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 8),
+                child: Text('No slots yet'),
+              )
+            else
+              ValueListenableBuilder<List<Booking>>(
+                valueListenable: BookingRepository.instance.bookings,
+                builder: (context, bookings, _) {
+                  return Column(
+                    children: entries.map((entry) {
+                      final slot = entry.slot;
+                      final slotBookings = bookings
+                          .where((b) => b.slotId == slot.id)
+                          .toList(growable: false);
+
+                      return _SlotHistoryTile(
+                        slot: slot,
+                        bookings: slotBookings,
+                        fmtDate: _fmtDate,
+                        statusLabel: _statusLabel,
+                      );
+                    }).toList(),
+                  );
+                },
+              ),
           ],
         ),
       ),
@@ -1756,6 +1984,8 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
         return 'Completed';
       case BookingStatus.rejected:
         return 'Rejected';
+      case BookingStatus.refunded:
+        return 'Refunded';
     }
   }
 
@@ -1853,6 +2083,14 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
   }
 
   Widget _buildVehicleStatsCard(Vehicle vehicle, int activePostsCount) {
+    // Get slot IDs that belong to this specific vehicle
+    final vehicleSlotIds = {
+      ...SlotRepository.instance.getSlotsByVehicleId(vehicle.id).map((s) => s.id),
+      ...UserSlotRepository.instance.allSlotsRaw
+          .where((s) => s.vehicleId == vehicle.id)
+          .map((s) => s.id),
+    };
+
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 4),
       child: Padding(
@@ -1863,13 +2101,13 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
             ValueListenableBuilder<List<Review>>(
               valueListenable: ReviewRepository.instance.reviews,
               builder: (context, allReviews, _) {
-                final userReviews = allReviews
+                final vehicleReviews = allReviews
                     .where((r) => r.revieweeId == vehicle.userId)
                     .toList();
-                final avgRating = userReviews.isEmpty
+                final avgRating = vehicleReviews.isEmpty
                     ? 0.0
-                    : userReviews.fold<double>(0, (s, r) => s + r.rating) /
-                        userReviews.length;
+                    : vehicleReviews.fold<double>(0, (s, r) => s + r.rating) /
+                        vehicleReviews.length;
                 return Column(
                   children: [
                     Row(
@@ -1886,7 +2124,7 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      '${userReviews.length} ratings',
+                      '${vehicleReviews.length} ratings',
                       style: const TextStyle(fontSize: 12, color: Colors.grey),
                     ),
                   ],
@@ -1896,9 +2134,10 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
             ValueListenableBuilder<List<Booking>>(
               valueListenable: BookingRepository.instance.bookings,
               builder: (context, allBookings, _) {
+                // Only completed bookings for this vehicle's slots
                 final totalTrips = allBookings
                     .where((b) =>
-                        b.providerId == vehicle.userId &&
+                        vehicleSlotIds.contains(b.slotId) &&
                         b.status == BookingStatus.completed)
                     .length;
                 return Column(
@@ -1949,7 +2188,6 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
       ),
     );
   }
-
   String _formatReviewDate(DateTime date) {
     final now = DateTime.now();
     final difference = now.difference(date);
@@ -1968,5 +2206,151 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
     } else {
       return '${(difference.inDays / 365).floor()}y ago';
     }
+  }
+}
+
+/// Expandable tile showing a slot's summary and its booking history.
+class _SlotHistoryTile extends StatefulWidget {
+  final dynamic slot; // Slot
+  final List<Booking> bookings;
+  final String Function(DateTime) fmtDate;
+  final String Function(Booking) statusLabel;
+
+  const _SlotHistoryTile({
+    required this.slot,
+    required this.bookings,
+    required this.fmtDate,
+    required this.statusLabel,
+  });
+
+  @override
+  State<_SlotHistoryTile> createState() => _SlotHistoryTileState();
+}
+
+class _SlotHistoryTileState extends State<_SlotHistoryTile> {
+  bool _expanded = false;
+
+  Color _colorFor(Booking b) {
+    switch (b.status) {
+      case BookingStatus.completed: return Colors.green;
+      case BookingStatus.accepted:  return Colors.blue;
+      case BookingStatus.pending:   return Colors.orange;
+      case BookingStatus.rejected:  return Colors.red;
+      case BookingStatus.refunded:  return Colors.purple;
+    }
+  }
+
+  String _fmtTime(DateTime d) {
+    final h = d.hour.toString().padLeft(2, '0');
+    final m = d.minute.toString().padLeft(2, '0');
+    return '${widget.fmtDate(d)} $h:$m';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final slot = widget.slot;
+    final bookings = widget.bookings;
+    final completed = bookings.where((b) => b.status == BookingStatus.completed).length;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        InkWell(
+          borderRadius: BorderRadius.circular(8),
+          onTap: () => setState(() => _expanded = !_expanded),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+            child: Row(
+              children: [
+                Container(
+                  width: 36, height: 36,
+                  decoration: BoxDecoration(
+                    color: Colors.blue.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(Icons.event_note, size: 18, color: Colors.blue),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '${slot.serviceType?.name ?? 'Slot'} · ${_fmtTime(slot.startTime)}',
+                        style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                      ),
+                      Text(
+                        '${bookings.length} booking${bookings.length == 1 ? '' : 's'}'
+                        '${bookings.isNotEmpty ? ' · $completed completed' : ''}',
+                        style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                      ),
+                    ],
+                  ),
+                ),
+                Icon(
+                  _expanded ? Icons.expand_less : Icons.expand_more,
+                  color: Colors.grey,
+                ),
+              ],
+            ),
+          ),
+        ),
+        if (_expanded) ...[
+          if (bookings.isEmpty)
+            Padding(
+              padding: const EdgeInsets.only(left: 46, bottom: 8),
+              child: Text('No bookings for this slot',
+                  style: TextStyle(fontSize: 12, color: Colors.grey[500])),
+            )
+          else
+            ...bookings.map((b) {
+              final color = _colorFor(b);
+              return Padding(
+                padding: const EdgeInsets.only(left: 46, bottom: 6),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: 0.06),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: color.withValues(alpha: 0.2)),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              b.userName ?? 'Booking #${b.id}',
+                              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              _fmtTime(b.createdAt),
+                              style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: color.withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Text(
+                          widget.statusLabel(b),
+                          style: TextStyle(fontSize: 11, color: color, fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }),
+          const Divider(height: 8),
+        ],
+      ],
+    );
   }
 }

@@ -326,6 +326,45 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
                     '${_formatTime(slot.startTime)} – ${_formatTime(slot.endTime)}',
               ),
               const SizedBox(height: 8),
+              // Terms/notes banner
+              if (slot.notes != null && slot.notes!.isNotEmpty) ...[
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: Colors.amber.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.amber.shade300),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(Icons.gavel, size: 16, color: Colors.amber.shade700),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Terms & Notes',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.amber.shade800,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              slot.notes!,
+                              style: TextStyle(fontSize: 13, color: Colors.grey[800]),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 8),
+              ],
               ValueListenableBuilder<String>(
                 valueListenable: AppPreferences.instance.currencyCode,
                 builder: (context, _, _) {
@@ -972,7 +1011,8 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
                                   final slotLocation = (widget.slot.fromLocation?.isNotEmpty ?? false)
                                       ? widget.slot.fromLocation
                                       : widget.slot.baseLocation;
-                                  final countryCode = PaymentService.countryCodeFromLocation(slotLocation);
+                                  // Default to 'IN' if country can't be detected (India-first app)
+                                  final countryCode = PaymentService.countryCodeFromLocation(slotLocation) ?? 'IN';
                                   final currency = (countryCode == 'IN') ? 'inr' : 'usd';
 
                                   // Route to Razorpay (India) or Stripe (international)
@@ -1047,6 +1087,9 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
                                       countdownEndTime: countdownEnd,
                                       otp: otp,
                                       securityDeposit: deposit > 0 ? deposit : null,
+                                      termsSnapshot: widget.slot.notes?.isNotEmpty == true
+                                          ? widget.slot.notes
+                                          : null,
                                     );
 
                                     if (localBooking != null && context.mounted) {

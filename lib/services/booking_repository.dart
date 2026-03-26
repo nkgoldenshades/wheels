@@ -167,6 +167,7 @@ class BookingRepository {
     DateTime? countdownEndTime,
     String? otp,
     double? securityDeposit,
+    String? termsSnapshot,
   }) async {
     if (seatKey != null) {
       final exists = bookings.value.any(
@@ -213,6 +214,7 @@ class BookingRepository {
       countdownEndTime: countdownEndTime,
       paymentHeldInEscrow: stripePaymentIntentId != null,
       securityDeposit: securityDeposit,
+      termsSnapshot: termsSnapshot,
     );
 
     bookings.value = [booking, ...bookings.value];
@@ -303,6 +305,19 @@ class BookingRepository {
     } catch (_) {
       return null;
     }
+  }
+
+  Future<void> markRefunded(String bookingId) async {
+    final booking = bookings.value.firstWhere((b) => b.id == bookingId);
+    final currentRemaining = remainingCapacityBySlotId.value[booking.slotId] ?? 0;
+    remainingCapacityBySlotId.value = {
+      ...remainingCapacityBySlotId.value,
+      booking.slotId: currentRemaining + 1,
+    };
+    bookings.value = bookings.value
+        .map((b) => b.id == bookingId ? b.copyWith(status: BookingStatus.refunded) : b)
+        .toList(growable: false);
+    await _persist();
   }
 
   String _generateOtp() {

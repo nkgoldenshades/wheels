@@ -8,6 +8,7 @@ import '../../models/service_type.dart';
 import '../../models/pickup_mode.dart';
 import '../../services/slot_repository.dart';
 import '../../services/content_filter_service.dart';
+import '../../widgets/location_field.dart';
 
 class CreateSlotScreen extends StatefulWidget {
   final Vehicle vehicle;
@@ -166,34 +167,22 @@ class _CreateSlotScreenState extends State<CreateSlotScreen> {
           const SizedBox(height: 8),
           
           if (_slotType == SlotType.fromTo) ...[
-            TextField(
+            LocationField(
               controller: _fromController,
-              decoration: const InputDecoration(
-                labelText: 'From Location *',
-                hintText: 'e.g., Mumbai Airport',
-                border: OutlineInputBorder(),
-                prefixIcon: Icon(Icons.location_on),
-              ),
+              labelText: 'From Location *',
+              hintText: 'e.g., Mumbai Airport',
             ),
             const SizedBox(height: 12),
-            TextField(
+            LocationField(
               controller: _toController,
-              decoration: const InputDecoration(
-                labelText: 'To Location *',
-                hintText: 'e.g., Pune Station',
-                border: OutlineInputBorder(),
-                prefixIcon: Icon(Icons.location_on),
-              ),
+              labelText: 'To Location *',
+              hintText: 'e.g., Pune Station',
             ),
           ] else ...[
-            TextField(
+            LocationField(
               controller: _baseController,
-              decoration: const InputDecoration(
-                labelText: 'Base Location *',
-                hintText: 'e.g., City Center',
-                border: OutlineInputBorder(),
-                prefixIcon: Icon(Icons.location_on),
-              ),
+              labelText: 'Base Location *',
+              hintText: 'e.g., City Center',
             ),
             const SizedBox(height: 12),
             TextField(
@@ -346,6 +335,10 @@ class _CreateSlotScreenState extends State<CreateSlotScreen> {
         isStart 
             ? (_startTime ?? DateTime.now()) 
             : (_endTime ?? DateTime.now().add(const Duration(hours: 4))),
+      ),
+      builder: (ctx, child) => MediaQuery(
+        data: MediaQuery.of(ctx).copyWith(alwaysUse24HourFormat: true),
+        child: child!,
       ),
     );
     if (time == null) return;

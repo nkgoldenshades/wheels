@@ -1,4 +1,4 @@
- 
+﻿ 
 import 'dart:async';
 import 'dart:math' as math;
 import 'dart:convert';
@@ -199,7 +199,14 @@ class _EditUserPostPageState extends State<EditUserPostPage> {
 
   Future<void> _pickTime({required bool isStart}) async {
     final initial = TimeOfDay.fromDateTime(isStart ? _startTime! : _endTime!);
-    final picked = await showTimePicker(context: context, initialTime: initial);
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: initial,
+      builder: (ctx, child) => MediaQuery(
+        data: MediaQuery.of(ctx).copyWith(alwaysUse24HourFormat: true),
+        child: child!,
+      ),
+    );
     if (picked == null) return;
     final date = isStart ? _startTime! : _endTime!;
     final newDt = DateTime(
@@ -223,6 +230,7 @@ class _EditUserPostPageState extends State<EditUserPostPage> {
 
   Future<void> _save() async {
     if (_slotType == SlotType.fromTo) {
+
       if (_fromController.text.trim().isEmpty ||
           _toController.text.trim().isEmpty) {
         _showError('Please enter both from and to locations');
@@ -316,7 +324,7 @@ class _EditUserPostPageState extends State<EditUserPostPage> {
               border: OutlineInputBorder(),
             ),
             items: SlotType.values
-                .map((t) => DropdownMenuItem(value: t, child: Text(t.name)))
+                .map((t) => DropdownMenuItem(value: t, child: Text(t.displayName)))
                 .toList(growable: false),
             onChanged: (v) {
               if (v == null) return;
@@ -329,7 +337,9 @@ class _EditUserPostPageState extends State<EditUserPostPage> {
               controller: _fromController,
               decoration: const InputDecoration(
                 labelText: 'From',
+                hintText: 'e.g. Chennai Central',
                 border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.location_on),
               ),
             ),
             const SizedBox(height: 12),
@@ -337,7 +347,9 @@ class _EditUserPostPageState extends State<EditUserPostPage> {
               controller: _toController,
               decoration: const InputDecoration(
                 labelText: 'To',
+                hintText: 'e.g. Bangalore City Junction',
                 border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.location_on_outlined),
               ),
             ),
           ] else ...[
@@ -345,7 +357,9 @@ class _EditUserPostPageState extends State<EditUserPostPage> {
               controller: _baseController,
               decoration: const InputDecoration(
                 labelText: 'Base location',
+                hintText: 'e.g. Mumbai CST',
                 border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.my_location),
               ),
             ),
             const SizedBox(height: 12),
@@ -1236,7 +1250,7 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     if (startupError != null && startupError!.trim().isNotEmpty) {
       return MaterialApp(
-        title: 'Quickohunt',
+        title: 'VaultWheels',
         theme: ThemeData(
           primarySwatch: Colors.blue,
           useMaterial3: true,
@@ -1247,7 +1261,7 @@ class MyApp extends StatelessWidget {
     }
 
     return MaterialApp(
-      title: 'Quickohunt',
+      title: 'VaultWheels',
       theme: ThemeData(
         primarySwatch: Colors.blue,
         useMaterial3: true,
@@ -1610,7 +1624,14 @@ class _CreateUserPostPageState extends State<CreateUserPostPage> {
 
   Future<void> _pickTime({required bool isStart}) async {
     final initial = TimeOfDay.fromDateTime(isStart ? _startTime! : _endTime!);
-    final picked = await showTimePicker(context: context, initialTime: initial);
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: initial,
+      builder: (ctx, child) => MediaQuery(
+        data: MediaQuery.of(ctx).copyWith(alwaysUse24HourFormat: true),
+        child: child!,
+      ),
+    );
     if (picked == null) return;
     final date = isStart ? _startTime! : _endTime!;
     final newDt = DateTime(
@@ -1747,7 +1768,7 @@ class _CreateUserPostPageState extends State<CreateUserPostPage> {
               border: OutlineInputBorder(),
             ),
             items: SlotType.values
-                .map((t) => DropdownMenuItem(value: t, child: Text(t.name)))
+                .map((t) => DropdownMenuItem(value: t, child: Text(t.displayName)))
                 .toList(growable: false),
             onChanged: (v) {
               if (v == null) return;
@@ -1760,7 +1781,9 @@ class _CreateUserPostPageState extends State<CreateUserPostPage> {
               controller: _fromController,
               decoration: const InputDecoration(
                 labelText: 'From',
+                hintText: 'e.g. Chennai Central',
                 border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.location_on),
               ),
             ),
             const SizedBox(height: 12),
@@ -1768,7 +1791,9 @@ class _CreateUserPostPageState extends State<CreateUserPostPage> {
               controller: _toController,
               decoration: const InputDecoration(
                 labelText: 'To',
+                hintText: 'e.g. Bangalore City Junction',
                 border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.location_on_outlined),
               ),
             ),
           ] else ...[
@@ -1776,7 +1801,9 @@ class _CreateUserPostPageState extends State<CreateUserPostPage> {
               controller: _baseController,
               decoration: const InputDecoration(
                 labelText: 'Base location',
+                hintText: 'e.g. Mumbai CST',
                 border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.my_location),
               ),
             ),
             const SizedBox(height: 12),
@@ -3165,7 +3192,7 @@ class _MainScreenState extends State<MainScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Quickohunt'),
+        title: const Text('VaultWheels'),
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
       ),
       body: _pages[_currentIndex],
@@ -3247,6 +3274,16 @@ class _PostsPageState extends State<PostsPage> {
   // Security deposit filter (only for Lease)
   double? _minSecurityDeposit;
   double? _maxSecurityDeposit;
+
+  // Parcel dimension filters (only for Parcel)
+  double? _minParcelWeight;
+  double? _maxParcelWeight;
+  double? _minParcelLength;
+  double? _maxParcelLength;
+  double? _minParcelWidth;
+  double? _maxParcelWidth;
+  double? _minParcelHeight;
+  double? _maxParcelHeight;
 
   final TextEditingController _searchController = TextEditingController();
   final TextEditingController _fromSearchController = TextEditingController();
@@ -4008,13 +4045,33 @@ class _PostsPageState extends State<PostsPage> {
             })
             .toList(growable: false);
 
+    // Apply parcel dimension filter
+    final hasParcelFilter = _minParcelWeight != null || _maxParcelWeight != null ||
+        _minParcelLength != null || _maxParcelLength != null ||
+        _minParcelWidth  != null || _maxParcelWidth  != null ||
+        _minParcelHeight != null || _maxParcelHeight != null;
+    final parcelFiltered = !hasParcelFilter
+        ? depositFiltered
+        : depositFiltered.where((e) {
+            if (e.slot.serviceType != ServiceType.parcel) return true;
+            bool check(double? val, double? min, double? max) {
+              if (val == null) return min == null && max == null;
+              if (min != null && val < min) return false;
+              if (max != null && val > max) return false;
+              return true;
+            }
+            return check(e.slot.maxWeight, _minParcelWeight, _maxParcelWeight) &&
+                check(e.slot.maxLength, _minParcelLength, _maxParcelLength) &&
+                check(e.slot.maxWidth,  _minParcelWidth,  _maxParcelWidth)  &&
+                check(e.slot.maxHeight, _minParcelHeight, _maxParcelHeight);
+          }).toList(growable: false);
+
     // Apply route type filter
     final routeFiltered = _selectedSlotType == null
-        ? depositFiltered
-        : depositFiltered
+        ? parcelFiltered
+        : parcelFiltered
             .where((e) => e.slot.slotType == _selectedSlotType)
             .toList(growable: false);
-
     // Apply pickup mode filter
     final pickupFiltered = _selectedPickupMode == null
         ? routeFiltered
@@ -4215,14 +4272,36 @@ class _PostsPageState extends State<PostsPage> {
           ) ??
           '',
     );
-
     final minSecurityDepositController = TextEditingController(
       text: _minSecurityDeposit?.toInt().toString() ?? '',
     );
     final maxSecurityDepositController = TextEditingController(
       text: _maxSecurityDeposit?.toInt().toString() ?? '',
     );
-
+    final minWeightController = TextEditingController(
+      text: _minParcelWeight?.toString() ?? '',
+    );
+    final maxWeightController = TextEditingController(
+      text: _maxParcelWeight?.toString() ?? '',
+    );
+    final minLengthController = TextEditingController(
+      text: _minParcelLength?.toString() ?? '',
+    );
+    final maxLengthController = TextEditingController(
+      text: _maxParcelLength?.toString() ?? '',
+    );
+    final minWidthController = TextEditingController(
+      text: _minParcelWidth?.toString() ?? '',
+    );
+    final maxWidthController = TextEditingController(
+      text: _maxParcelWidth?.toString() ?? '',
+    );
+    final minHeightController = TextEditingController(
+      text: _minParcelHeight?.toString() ?? '',
+    );
+    final maxHeightController = TextEditingController(
+      text: _maxParcelHeight?.toString() ?? '',
+    );
     final fromLocationController = TextEditingController(
       text: _filterFromLocation ?? '',
     );
@@ -4232,13 +4311,13 @@ class _PostsPageState extends State<PostsPage> {
     final baseLocationController = TextEditingController(
       text: _filterBaseLocation ?? '',
     );
+
     DateTime? from = _fromDateTime;
     DateTime? to = _toDateTime;
     bool nearest = _nearestEnabled;
     bool requestingLocation = false;
-
-    String? businessType = ProfileRepository.instance.profile.value.businessType;
-
+    String? businessType =
+        ProfileRepository.instance.profile.value.businessType;
     SlotType? slotType = _selectedSlotType;
     PickupMode? pickupMode = _selectedPickupMode;
 
@@ -4264,440 +4343,620 @@ class _PostsPageState extends State<PostsPage> {
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                  const Text(
-                    'Filters',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
-                  ),
-                  const SizedBox(height: 12),
-                  SwitchListTile(
-                    value: nearest,
-                    onChanged: (v) async {
-                      if (requestingLocation) return;
-                      if (!v) {
-                        setSheetState(() => nearest = false);
-                        return;
-                      }
-
-                      if (_currentUserPosition != null) {
-                        setSheetState(() => nearest = true);
-                        return;
-                      }
-
-                      setSheetState(() {
-                        requestingLocation = true;
-                      });
-
-                      final ok = await _requestUserLocation();
-                      if (!mounted) return;
-
-                      setSheetState(() {
-                        requestingLocation = false;
-                        nearest = ok && _currentUserPosition != null;
-                      });
-                    },
-                    title: const Text('Nearest first'),
-                    subtitle: Text(
-                      _currentUserPosition == null
-                          ? 'Requires location permission'
-                          : 'Sort by distance from your location',
-                    ),
-                    secondary: requestingLocation
-                        ? const SizedBox(
-                            height: 18,
-                            width: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : null,
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: maxDistanceController,
-                    decoration: const InputDecoration(
-                      labelText: 'Max distance (km)',
-                      border: OutlineInputBorder(),
-                      prefixIcon: Icon(Icons.social_distance),
-                    ),
-                    keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true,
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  const Text(
-                    'Branding type',
-                    style: TextStyle(fontWeight: FontWeight.w700),
-                  ),
-                  const SizedBox(height: 8),
-                  ValueListenableBuilder<ProfileInfo>(
-                    valueListenable: ProfileRepository.instance.profile,
-                    builder: (context, info, _) {
-                      final current = businessType ?? info.businessType;
-                      return Wrap(
+                      const Text(
+                        'Filters',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      SwitchListTile(
+                        value: nearest,
+                        onChanged: (v) async {
+                          if (requestingLocation) return;
+                          if (!v) {
+                            setSheetState(() => nearest = false);
+                            return;
+                          }
+                          if (_currentUserPosition != null) {
+                            setSheetState(() => nearest = true);
+                            return;
+                          }
+                          setSheetState(() => requestingLocation = true);
+                          final ok = await _requestUserLocation();
+                          if (!mounted) return;
+                          setSheetState(() {
+                            requestingLocation = false;
+                            nearest = ok && _currentUserPosition != null;
+                          });
+                        },
+                        title: const Text('Nearest first'),
+                        subtitle: Text(
+                          _currentUserPosition == null
+                              ? 'Requires location permission'
+                              : 'Sort by distance from your location',
+                        ),
+                        secondary: requestingLocation
+                            ? const SizedBox(
+                                height: 18,
+                                width: 18,
+                                child:
+                                    CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : null,
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: maxDistanceController,
+                        decoration: const InputDecoration(
+                          labelText: 'Max distance (km)',
+                          border: OutlineInputBorder(),
+                          prefixIcon: Icon(Icons.social_distance),
+                        ),
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      const Text(
+                        'Branding type',
+                        style: TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                      const SizedBox(height: 8),
+                      ValueListenableBuilder<ProfileInfo>(
+                        valueListenable: ProfileRepository.instance.profile,
+                        builder: (context, info, _) {
+                          final current = businessType ?? info.businessType;
+                          return Wrap(
+                            spacing: 8,
+                            children: [
+                              ChoiceChip(
+                                label: const Text('Solo'),
+                                selected: current == 'solo',
+                                onSelected: (_) async {
+                                  setSheetState(() => businessType = 'solo');
+                                  await ProfileRepository.instance.update(
+                                    businessType: 'solo',
+                                    setBusinessTypeNull: false,
+                                  );
+                                },
+                              ),
+                              ChoiceChip(
+                                label: const Text('Pvt'),
+                                selected: current == 'private',
+                                onSelected: (_) async {
+                                  setSheetState(
+                                      () => businessType = 'private');
+                                  await ProfileRepository.instance.update(
+                                    businessType: 'private',
+                                    setBusinessTypeNull: false,
+                                  );
+                                },
+                              ),
+                              ChoiceChip(
+                                label: const Text('LLM'),
+                                selected: current == 'llc',
+                                onSelected: (_) async {
+                                  setSheetState(() => businessType = 'llc');
+                                  await ProfileRepository.instance.update(
+                                    businessType: 'llc',
+                                    setBusinessTypeNull: false,
+                                  );
+                                },
+                              ),
+                            ],
+                          );
+                        },
+                      ),
+                      const SizedBox(height: 12),
+                      const Text(
+                        'Route type',
+                        style: TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                      const SizedBox(height: 8),
+                      Wrap(
                         spacing: 8,
+                        children: SlotType.values
+                            .map(
+                              (t) => ChoiceChip(
+                                label: Text(t.displayName),
+                                selected: slotType == t,
+                                onSelected: (_) => setSheetState(() {
+                                  slotType = slotType == t ? null : t;
+                                }),
+                              ),
+                            )
+                            .toList(),
+                      ),
+                      const SizedBox(height: 12),
+                      if (slotType == SlotType.fromTo) ...[
+                        _locationAutocompleteField(
+                          controller: fromLocationController,
+                          label: 'From location',
+                          icon: Icons.my_location,
+                          suggestions: _allLocationNames(field: 'from'),
+                          onChanged: () => setSheetState(() {}),
+                        ),
+                        const SizedBox(height: 12),
+                        _locationAutocompleteField(
+                          controller: toLocationController,
+                          label: 'To location',
+                          icon: Icons.place,
+                          suggestions: _allLocationNames(field: 'to'),
+                          onChanged: () => setSheetState(() {}),
+                        ),
+                        const SizedBox(height: 12),
+                      ],
+                      if (slotType == SlotType.fromRange) ...[
+                        _locationAutocompleteField(
+                          controller: baseLocationController,
+                          label: 'Base location',
+                          icon: Icons.location_on,
+                          suggestions: _allLocationNames(field: 'base'),
+                          onChanged: () => setSheetState(() {}),
+                        ),
+                        const SizedBox(height: 12),
+                      ],
+                      const Text(
+                        'Pickup mode',
+                        style: TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        children: PickupMode.values
+                            .map(
+                              (m) => ChoiceChip(
+                                label: Text(m.shortLabel),
+                                selected: pickupMode == m,
+                                onSelected: (_) => setSheetState(() {
+                                  pickupMode = pickupMode == m ? null : m;
+                                }),
+                              ),
+                            )
+                            .toList(),
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
                         children: [
-                          ChoiceChip(
-                            label: const Text('Solo'),
-                            selected: current == 'solo',
-                            onSelected: (_) async {
-                              setSheetState(() => businessType = 'solo');
-                              await ProfileRepository.instance.update(
-                                businessType: 'solo',
-                                setBusinessTypeNull: false,
-                              );
-                            },
+                          Expanded(
+                            child: TextField(
+                              controller: minPriceController,
+                              decoration: const InputDecoration(
+                                labelText: 'Min Price',
+                                border: OutlineInputBorder(),
+                                prefixIcon: Icon(Icons.currency_rupee),
+                              ),
+                              keyboardType: TextInputType.number,
+                            ),
                           ),
-                          ChoiceChip(
-                            label: const Text('Pvt'),
-                            selected: current == 'private',
-                            onSelected: (_) async {
-                              setSheetState(() => businessType = 'private');
-                              await ProfileRepository.instance.update(
-                                businessType: 'private',
-                                setBusinessTypeNull: false,
-                              );
-                            },
-                          ),
-                          ChoiceChip(
-                            label: const Text('LLM'),
-                            selected: current == 'llc',
-                            onSelected: (_) async {
-                              setSheetState(() => businessType = 'llc');
-                              await ProfileRepository.instance.update(
-                                businessType: 'llc',
-                                setBusinessTypeNull: false,
-                              );
-                            },
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: TextField(
+                              controller: maxPriceController,
+                              decoration: const InputDecoration(
+                                labelText: 'Max Price',
+                                border: OutlineInputBorder(),
+                                prefixIcon: Icon(Icons.currency_rupee),
+                              ),
+                              keyboardType: TextInputType.number,
+                            ),
                           ),
                         ],
-                      );
-                    },
-                  ),
-                  const SizedBox(height: 12),
-                  const Text(
-                    'Route type',
-                    style: TextStyle(fontWeight: FontWeight.w700),
-                  ),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    children: [
-                      ...SlotType.values.map(
-                        (t) => ChoiceChip(
-                          label: Text(t.displayName),
-                          selected: slotType == t,
-                          onSelected: (_) =>
-                              setSheetState(() => slotType = slotType == t ? null : t),
-                        ),
                       ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  if (slotType == SlotType.fromTo) ...[
-                    _locationAutocompleteField(
-                      controller: fromLocationController,
-                      label: 'From location',
-                      icon: Icons.my_location,
-                      suggestions: _allLocationNames(field: 'from'),
-                      onChanged: () => setSheetState(() {}),
-                    ),
-                    const SizedBox(height: 12),
-                    _locationAutocompleteField(
-                      controller: toLocationController,
-                      label: 'To location',
-                      icon: Icons.place,
-                      suggestions: _allLocationNames(field: 'to'),
-                      onChanged: () => setSheetState(() {}),
-                    ),
-                    const SizedBox(height: 12),
-                  ],
-                  if (slotType == SlotType.fromRange) ...[
-                    _locationAutocompleteField(
-                      controller: baseLocationController,
-                      label: 'Base location',
-                      icon: Icons.location_on,
-                      suggestions: _allLocationNames(field: 'base'),
-                      onChanged: () => setSheetState(() {}),
-                    ),
-                    const SizedBox(height: 12),
-                  ],
-                  const Text(
-                    'Pickup mode',
-                    style: TextStyle(fontWeight: FontWeight.w700),
-                  ),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    children: [
-                      ...PickupMode.values.map(
-                        (m) => ChoiceChip(
-                          label: Text(m.shortLabel),
-                          selected: pickupMode == m,
-                          onSelected: (_) => setSheetState(
-                            () => pickupMode = pickupMode == m ? null : m,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: minPriceController,
-                          decoration: const InputDecoration(
-                            labelText: 'Min Price',
-                            border: OutlineInputBorder(),
-                            prefixIcon: Icon(Icons.currency_rupee),
-                          ),
-                          keyboardType: TextInputType.number,
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: TextField(
-                          controller: maxPriceController,
-                          decoration: const InputDecoration(
-                            labelText: 'Max Price',
-                            border: OutlineInputBorder(),
-                            prefixIcon: Icon(Icons.currency_rupee),
-                          ),
-                          keyboardType: TextInputType.number,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    leading: const Icon(Icons.calendar_month),
-                    title: const Text('From date/time'),
-                    subtitle: Text(from == null ? 'Any' : _fmtDateTime(from!)),
-                    trailing: TextButton(
-                      onPressed: () async {
-                        final pickedDate = await showDatePicker(
-                          context: context,
-                          firstDate: DateTime(2020),
-                          lastDate: DateTime(2100),
-                          initialDate: from ?? DateTime.now(),
-                        );
-                        if (!context.mounted) return;
-                        if (pickedDate == null) return;
-                        final pickedTime = await showTimePicker(
-                          context: context,
-                          initialTime: TimeOfDay.fromDateTime(
-                            from ?? DateTime.now(),
-                          ),
-                        );
-                        if (!context.mounted) return;
-                        if (pickedTime == null) return;
-                        setSheetState(() {
-                          from = DateTime(
-                            pickedDate.year,
-                            pickedDate.month,
-                            pickedDate.day,
-                            pickedTime.hour,
-                            pickedTime.minute,
-                          );
-                        });
-                      },
-                      child: const Text('Pick'),
-                    ),
-                  ),
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    leading: const Icon(Icons.calendar_month),
-                    title: const Text('To date/time'),
-                    subtitle: Text(to == null ? 'Any' : _fmtDateTime(to!)),
-                    trailing: TextButton(
-                      onPressed: () async {
-                        final pickedDate = await showDatePicker(
-                          context: context,
-                          firstDate: DateTime(2020),
-                          lastDate: DateTime(2100),
-                          initialDate: to ?? (from ?? DateTime.now()),
-                        );
-                        if (!context.mounted) return;
-                        if (pickedDate == null) return;
-                        final pickedTime = await showTimePicker(
-                          context: context,
-                          initialTime: TimeOfDay.fromDateTime(
-                            to ?? DateTime.now(),
-                          ),
-                        );
-                        if (!context.mounted) return;
-                        if (pickedTime == null) return;
-                        setSheetState(() {
-                          to = DateTime(
-                            pickedDate.year,
-                            pickedDate.month,
-                            pickedDate.day,
-                            pickedTime.hour,
-                            pickedTime.minute,
-                          );
-                        });
-                      },
-                      child: const Text('Pick'),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  if (_selectedServiceType == ServiceType.lease) ...[
-                    const Text(
-                      'Lease',
-                      style: TextStyle(fontWeight: FontWeight.w700),
-                    ),
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: TextField(
-                            controller: minSecurityDepositController,
-                            decoration: const InputDecoration(
-                              labelText: 'Min Security Deposit',
-                              border: OutlineInputBorder(),
-                              prefixIcon: Icon(Icons.currency_rupee),
-                            ),
-                            keyboardType: TextInputType.number,
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: TextField(
-                            controller: maxSecurityDepositController,
-                            decoration: const InputDecoration(
-                              labelText: 'Max Security Deposit',
-                              border: OutlineInputBorder(),
-                              prefixIcon: Icon(Icons.currency_rupee),
-                            ),
-                            keyboardType: TextInputType.number,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                  ],
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton(
-                          onPressed: () {
-                            setState(() {
-                              _minPrice = null;
-                              _maxPrice = null;
-                              _fromDateTime = null;
-                              _toDateTime = null;
-                              _nearestEnabled = false;
-                              _maxDistanceKm = null;
-                              _minSecurityDeposit = null;
-                              _maxSecurityDeposit = null;
-                              _selectedSlotType = null;
-                              _selectedPickupMode = null;
-                              _filterFromLocation = null;
-                              _filterToLocation = null;
-                              _filterBaseLocation = null;
-                              _filterBaseLatLon = null;
-
-                              _searchController.clear();
-                              _fromSearchController.clear();
-                              _toSearchController.clear();
-                              _baseSearchController.clear();
-                            });
-                            Navigator.pop(context);
-                          },
-                          child: const Text('Reset'),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: FilledButton(
+                      const SizedBox(height: 12),
+                      ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        leading: const Icon(Icons.calendar_month),
+                        title: const Text('From date/time'),
+                        subtitle:
+                            Text(from == null ? 'Any' : _fmtDateTime(from!)),
+                        trailing: TextButton(
                           onPressed: () async {
-                            final messenger = ScaffoldMessenger.of(context);
-
-                            final parsedMaxDistance =
-                                double.tryParse(maxDistanceController.text.trim());
-                            final wantsDistance = parsedMaxDistance != null &&
-                                parsedMaxDistance.isFinite &&
-                                parsedMaxDistance > 0;
-
-                            if (wantsDistance && _currentUserPosition == null) {
-                              if (context.mounted) {
-                                Navigator.pop(context);
-                              }
-                              await _requestUserLocation();
-                              if (!mounted) return;
-                              if (_currentUserPosition == null) {
-                                messenger.showSnackBar(
-                                  const SnackBar(
-                                    content: Text(
-                                      'Location permission required for distance filter',
-                                    ),
-                                  ),
-                                );
-                                return;
-                              }
-                            }
-
-                            setState(() {
-                              _minPrice = double.tryParse(
-                                minPriceController.text,
+                            final pickedDate = await showDatePicker(
+                              context: context,
+                              firstDate: DateTime(2020),
+                              lastDate: DateTime(2100),
+                              initialDate: from ?? DateTime.now(),
+                            );
+                            if (!context.mounted) return;
+                            if (pickedDate == null) return;
+                            final pickedTime = await showTimePicker(
+                              context: context,
+                              initialTime: TimeOfDay.fromDateTime(
+                                from ?? DateTime.now(),
+                              ),
+                              builder: (ctx, child) => MediaQuery(
+                                data: MediaQuery.of(ctx).copyWith(
+                                    alwaysUse24HourFormat: true),
+                                child: child!,
+                              ),
+                            );
+                            if (!context.mounted) return;
+                            if (pickedTime == null) return;
+                            setSheetState(() {
+                              from = DateTime(
+                                pickedDate.year,
+                                pickedDate.month,
+                                pickedDate.day,
+                                pickedTime.hour,
+                                pickedTime.minute,
                               );
-                              _maxPrice = double.tryParse(
-                                maxPriceController.text,
-                              );
-                              _fromDateTime = from;
-                              _toDateTime = to;
-                              _nearestEnabled = nearest;
-                              _maxDistanceKm = wantsDistance ? parsedMaxDistance : null;
-                              _minSecurityDeposit =
-                                  double.tryParse(minSecurityDepositController.text);
-                              _maxSecurityDeposit =
-                                  double.tryParse(maxSecurityDepositController.text);
-                              _selectedSlotType = slotType;
-                              _selectedPickupMode = pickupMode;
-                              _filterFromLocation =
-                                  fromLocationController.text.trim().isEmpty
-                                      ? null
-                                      : fromLocationController.text.trim();
-                              _filterToLocation =
-                                  toLocationController.text.trim().isEmpty
-                                      ? null
-                                      : toLocationController.text.trim();
-                              _filterBaseLocation =
-                                  baseLocationController.text.trim().isEmpty
-                                      ? null
-                                      : baseLocationController.text.trim();
-
-                              _fromSearchController.text = _filterFromLocation ?? '';
-                              _toSearchController.text = _filterToLocation ?? '';
-                              _baseSearchController.text = _filterBaseLocation ?? '';
-                              // Reset resolved coords; will re-resolve below
-                              _filterBaseLatLon = null;
                             });
-
-                            // Resolve base location to coordinates for radius filtering
-                            final baseText = _filterBaseLocation;
-                            if (baseText != null && baseText.length >= 3) {
-                              final results = await LocationAutocompleteService
-                                  .instance
-                                  .searchLocations(baseText);
-                              if (results.isNotEmpty && mounted) {
-                                setState(() {
-                                  _filterBaseLatLon = (
-                                    results.first.lat,
-                                    results.first.lon,
-                                  );
-                                });
-                              }
-                            }
-
-                            if (context.mounted) {
-                              Navigator.pop(context);
-                            }
                           },
-                          child: const Text('Apply'),
+                          child: const Text('Pick'),
                         ),
                       ),
-                    ],
-                  ),
+                      ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        leading: const Icon(Icons.calendar_month),
+                        title: const Text('To date/time'),
+                        subtitle: Text(to == null ? 'Any' : _fmtDateTime(to!)),
+                        trailing: TextButton(
+                          onPressed: () async {
+                            final pickedDate = await showDatePicker(
+                              context: context,
+                              firstDate: DateTime(2020),
+                              lastDate: DateTime(2100),
+                              initialDate: to ?? (from ?? DateTime.now()),
+                            );
+                            if (!context.mounted) return;
+                            if (pickedDate == null) return;
+                            final pickedTime = await showTimePicker(
+                              context: context,
+                              initialTime:
+                                  TimeOfDay.fromDateTime(to ?? DateTime.now()),
+                              builder: (ctx, child) => MediaQuery(
+                                data: MediaQuery.of(ctx).copyWith(
+                                    alwaysUse24HourFormat: true),
+                                child: child!,
+                              ),
+                            );
+                            if (!context.mounted) return;
+                            if (pickedTime == null) return;
+                            setSheetState(() {
+                              to = DateTime(
+                                pickedDate.year,
+                                pickedDate.month,
+                                pickedDate.day,
+                                pickedTime.hour,
+                                pickedTime.minute,
+                              );
+                            });
+                          },
+                          child: const Text('Pick'),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      if (_selectedServiceType == ServiceType.lease) ...[
+                        const Text(
+                          'Security Deposit',
+                          style: TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: TextField(
+                                controller: minSecurityDepositController,
+                                decoration: const InputDecoration(
+                                  labelText: 'Min Deposit',
+                                  border: OutlineInputBorder(),
+                                  prefixIcon: Icon(Icons.currency_rupee),
+                                ),
+                                keyboardType: TextInputType.number,
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: TextField(
+                                controller: maxSecurityDepositController,
+                                decoration: const InputDecoration(
+                                  labelText: 'Max Deposit',
+                                  border: OutlineInputBorder(),
+                                  prefixIcon: Icon(Icons.currency_rupee),
+                                ),
+                                keyboardType: TextInputType.number,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                      ],
+                      if (_selectedServiceType == ServiceType.parcel) ...[
+                        const Text(
+                          'Parcel Dimensions',
+                          style: TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: TextField(
+                                controller: minWeightController,
+                                decoration: const InputDecoration(
+                                  labelText: 'Min Weight (kg)',
+                                  border: OutlineInputBorder(),
+                                  prefixIcon: Icon(Icons.scale),
+                                ),
+                                keyboardType:
+                                    TextInputType.numberWithOptions(decimal: true),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: TextField(
+                                controller: maxWeightController,
+                                decoration: const InputDecoration(
+                                  labelText: 'Max Weight (kg)',
+                                  border: OutlineInputBorder(),
+                                  prefixIcon: Icon(Icons.scale),
+                                ),
+                                keyboardType:
+                                    TextInputType.numberWithOptions(decimal: true),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 10),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: TextField(
+                                controller: minLengthController,
+                                decoration: const InputDecoration(
+                                  labelText: 'Min Length (cm)',
+                                  border: OutlineInputBorder(),
+                                  prefixIcon: Icon(Icons.straighten),
+                                ),
+                                keyboardType:
+                                    TextInputType.numberWithOptions(decimal: true),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: TextField(
+                                controller: maxLengthController,
+                                decoration: const InputDecoration(
+                                  labelText: 'Max Length (cm)',
+                                  border: OutlineInputBorder(),
+                                  prefixIcon: Icon(Icons.straighten),
+                                ),
+                                keyboardType:
+                                    TextInputType.numberWithOptions(decimal: true),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 10),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: TextField(
+                                controller: minWidthController,
+                                decoration: const InputDecoration(
+                                  labelText: 'Min Width (cm)',
+                                  border: OutlineInputBorder(),
+                                  prefixIcon: Icon(Icons.width_normal),
+                                ),
+                                keyboardType:
+                                    TextInputType.numberWithOptions(decimal: true),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: TextField(
+                                controller: maxWidthController,
+                                decoration: const InputDecoration(
+                                  labelText: 'Max Width (cm)',
+                                  border: OutlineInputBorder(),
+                                  prefixIcon: Icon(Icons.width_normal),
+                                ),
+                                keyboardType:
+                                    TextInputType.numberWithOptions(decimal: true),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 10),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: TextField(
+                                controller: minHeightController,
+                                decoration: const InputDecoration(
+                                  labelText: 'Min Height (cm)',
+                                  border: OutlineInputBorder(),
+                                  prefixIcon: Icon(Icons.height),
+                                ),
+                                keyboardType:
+                                    TextInputType.numberWithOptions(decimal: true),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: TextField(
+                                controller: maxHeightController,
+                                decoration: const InputDecoration(
+                                  labelText: 'Max Height (cm)',
+                                  border: OutlineInputBorder(),
+                                  prefixIcon: Icon(Icons.height),
+                                ),
+                                keyboardType:
+                                    TextInputType.numberWithOptions(decimal: true),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                      ],
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton(
+                              onPressed: () {
+                                setState(() {
+                                  _minPrice = null;
+                                  _maxPrice = null;
+                                  _fromDateTime = null;
+                                  _toDateTime = null;
+                                  _nearestEnabled = false;
+                                  _maxDistanceKm = null;
+                                  _minSecurityDeposit = null;
+                                  _maxSecurityDeposit = null;
+                                  _selectedSlotType = null;
+                                  _selectedPickupMode = null;
+                                  _filterFromLocation = null;
+                                  _filterToLocation = null;
+                                  _filterBaseLocation = null;
+                                  _filterBaseLatLon = null;
+                                  _minParcelWeight = null;
+                                  _maxParcelWeight = null;
+                                  _minParcelLength = null;
+                                  _maxParcelLength = null;
+                                  _minParcelWidth = null;
+                                  _maxParcelWidth = null;
+                                  _minParcelHeight = null;
+                                  _maxParcelHeight = null;
+                                  _selectedServiceType = null;
+                                  _searchController.clear();
+                                  _fromSearchController.clear();
+                                  _toSearchController.clear();
+                                  _baseSearchController.clear();
+                                });
+                                Navigator.pop(context);
+                              },
+                              child: const Text('Reset'),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: FilledButton(
+                              onPressed: () async {
+                                final parsedMaxDistance = double.tryParse(
+                                    maxDistanceController.text.trim());
+                                final wantsDistance = parsedMaxDistance !=
+                                        null &&
+                                    parsedMaxDistance.isFinite &&
+                                    parsedMaxDistance > 0;
+                                if (wantsDistance && _currentUserPosition == null) {
+                                  if (context.mounted) {
+                                    Navigator.pop(context);
+                                  }
+                                  await _requestUserLocation();
+                                  if (!mounted) return;
+                                  if (_currentUserPosition == null) {
+                                    if (context.mounted) {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        const SnackBar(
+                                          content: Text(
+                                            'Location permission required for distance filter',
+                                          ),
+                                        ),
+                                      );
+                                    }
+                                    return;
+                                  }
+                                }
+                                setState(() {
+                                  _minPrice =
+                                      double.tryParse(minPriceController.text);
+                                  _maxPrice =
+                                      double.tryParse(maxPriceController.text);
+                                  _fromDateTime = from;
+                                  _toDateTime = to;
+                                  _nearestEnabled = nearest;
+                                  _maxDistanceKm =
+                                      wantsDistance ? parsedMaxDistance : null;
+                                  _minSecurityDeposit = _selectedServiceType ==
+                                          ServiceType.lease
+                                      ? double.tryParse(
+                                          minSecurityDepositController.text,
+                                        )
+                                      : null;
+                                  _maxSecurityDeposit = _selectedServiceType ==
+                                          ServiceType.lease
+                                      ? double.tryParse(
+                                          maxSecurityDepositController.text,
+                                        )
+                                      : null;
+                                  _selectedSlotType = slotType;
+                                  _selectedPickupMode = pickupMode;
+                                  _filterFromLocation =
+                                      fromLocationController.text.trim().isEmpty
+                                          ? null
+                                          : fromLocationController.text.trim();
+                                  _filterToLocation =
+                                      toLocationController.text.trim().isEmpty
+                                          ? null
+                                          : toLocationController.text.trim();
+                                  _filterBaseLocation =
+                                      baseLocationController.text.trim().isEmpty
+                                          ? null
+                                          : baseLocationController.text.trim();
+                                  _fromSearchController.text =
+                                      _filterFromLocation ?? '';
+                                  _toSearchController.text = _filterToLocation ?? '';
+                                  _baseSearchController.text =
+                                      _filterBaseLocation ?? '';
+                                  _filterBaseLatLon = null;
+                                  _minParcelWeight =
+                                      _selectedServiceType == ServiceType.parcel
+                                          ? double.tryParse(minWeightController.text)
+                                          : null;
+                                  _maxParcelWeight =
+                                      _selectedServiceType == ServiceType.parcel
+                                          ? double.tryParse(maxWeightController.text)
+                                          : null;
+                                  _minParcelLength =
+                                      _selectedServiceType == ServiceType.parcel
+                                          ? double.tryParse(minLengthController.text)
+                                          : null;
+                                  _maxParcelLength =
+                                      _selectedServiceType == ServiceType.parcel
+                                          ? double.tryParse(maxLengthController.text)
+                                          : null;
+                                  _minParcelWidth =
+                                      _selectedServiceType == ServiceType.parcel
+                                          ? double.tryParse(minWidthController.text)
+                                          : null;
+                                  _maxParcelWidth =
+                                      _selectedServiceType == ServiceType.parcel
+                                          ? double.tryParse(maxWidthController.text)
+                                          : null;
+                                  _minParcelHeight =
+                                      _selectedServiceType == ServiceType.parcel
+                                          ? double.tryParse(minHeightController.text)
+                                          : null;
+                                  _maxParcelHeight =
+                                      _selectedServiceType == ServiceType.parcel
+                                          ? double.tryParse(maxHeightController.text)
+                                          : null;
+                                });
+
+                                final baseText = _filterBaseLocation;
+                                if (baseText != null && baseText.length >= 3) {
+                                  final results =
+                                      await LocationAutocompleteService.instance
+                                          .searchLocations(baseText);
+                                  if (results.isNotEmpty && mounted) {
+                                    setState(() {
+                                      _filterBaseLatLon =
+                                          (results.first.lat, results.first.lon);
+                                    });
+                                  }
+                                }
+
+                                if (context.mounted) {
+                                  Navigator.pop(context);
+                                }
+                              },
+                              child: const Text('Apply'),
+                            ),
+                          ),
+                        ],
+                      ),
                     ],
                   ),
                 );
@@ -4949,8 +5208,49 @@ class _PostsPageState extends State<PostsPage> {
   }
 }
 
-class RequestsPage extends StatelessWidget {
+class RequestsPage extends StatefulWidget {
   const RequestsPage({super.key});
+
+  @override
+  State<RequestsPage> createState() => _RequestsPageState();
+}
+
+class _RequestsPageState extends State<RequestsPage> {
+  DateTimeRange? _dateRange;
+
+  void _showDateRangeFilter() async {
+    final picked = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(2020),
+      lastDate: DateTime.now().add(const Duration(days: 365)),
+      initialDateRange: _dateRange,
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: ColorScheme.light(
+              primary: Colors.blue,
+              onPrimary: Colors.white,
+              surface: Colors.white,
+              onSurface: Colors.black,
+            ),
+          ),
+          child: child!,
+        );
+      },
+    );
+
+    if (picked != null) {
+      setState(() {
+        _dateRange = picked;
+      });
+    }
+  }
+
+  void _clearDateFilter() {
+    setState(() {
+      _dateRange = null;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -4958,14 +5258,32 @@ class RequestsPage extends StatelessWidget {
       appBar: AppBar(
         title: const Text('Requests'),
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+        actions: [
+          if (_dateRange != null)
+            IconButton(
+              icon: const Icon(Icons.clear),
+              tooltip: 'Clear date filter',
+              onPressed: _clearDateFilter,
+            ),
+          IconButton(
+            icon: Icon(
+              _dateRange != null ? Icons.filter_alt : Icons.filter_alt_outlined,
+              color: _dateRange != null ? Colors.blue : null,
+            ),
+            tooltip: 'Filter by date range',
+            onPressed: _showDateRangeFilter,
+          ),
+        ],
       ),
-      body: const _RequestsBody(),
+      body: _RequestsBody(dateRange: _dateRange),
     );
   }
 }
 
 class _RequestsBody extends StatefulWidget {
-  const _RequestsBody();
+  final DateTimeRange? dateRange;
+  
+  const _RequestsBody({this.dateRange});
 
   @override
   State<_RequestsBody> createState() => _RequestsBodyState();
@@ -4996,6 +5314,10 @@ class _RequestsBodyState extends State<_RequestsBody> {
       bookingId,
       () => TextEditingController(),
     );
+  }
+
+  String _formatDate(DateTime date) {
+    return '${date.day}/${date.month}/${date.year}';
   }
 
   @override
@@ -5090,6 +5412,31 @@ class _RequestsBodyState extends State<_RequestsBody> {
           ),
         ),
         const SizedBox(height: 8),
+        if (widget.dateRange != null)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: Colors.blue.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.blue.withValues(alpha: 0.3)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.date_range, size: 16, color: Colors.blue),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Filtered: ${_formatDate(widget.dateRange!.start)} - ${_formatDate(widget.dateRange!.end)}',
+                      style: const TextStyle(fontSize: 12, color: Colors.blue),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        if (widget.dateRange != null) const SizedBox(height: 8),
         Expanded(
           child: ValueListenableBuilder<List<Booking>>(
             valueListenable: BookingRepository.instance.bookings,
@@ -5114,10 +5461,23 @@ class _RequestsBodyState extends State<_RequestsBody> {
                         } else {
                           if (b.providerId != currentUser.id && b.providerId != 'user1') return false;
                         }
+                        
+                        // Date range filter
+                        if (widget.dateRange != null) {
+                          final bookingDate = b.createdAt;
+                          final startDate = widget.dateRange!.start;
+                          final endDate = widget.dateRange!.end.add(const Duration(days: 1)); // Include end date
+                          if (bookingDate.isBefore(startDate) || bookingDate.isAfter(endDate)) {
+                            return false;
+                          }
+                        }
+                        
                         if (_query.isEmpty) return true;
                         return (b.providerName ?? '').toLowerCase().contains(_query) ||
                             (b.userName ?? '').toLowerCase().contains(_query) ||
-                            b.status.name.toLowerCase().contains(_query);
+                            b.status.name.toLowerCase().contains(_query) ||
+                            b.id.toLowerCase().contains(_query) ||
+                            b.slotId.toLowerCase().contains(_query);
                       })
                       .toList(growable: false);
 
@@ -5128,6 +5488,17 @@ class _RequestsBodyState extends State<_RequestsBody> {
                         } else {
                           if (a.providerId != currentUser.id) return false;
                         }
+                        
+                        // Date range filter
+                        if (widget.dateRange != null) {
+                          final acceptanceDate = a.createdAt;
+                          final startDate = widget.dateRange!.start;
+                          final endDate = widget.dateRange!.end.add(const Duration(days: 1)); // Include end date
+                          if (acceptanceDate.isBefore(startDate) || acceptanceDate.isAfter(endDate)) {
+                            return false;
+                          }
+                        }
+                        
                         if (_query.isEmpty) return true;
                         return a.status.name.toLowerCase().contains(_query);
                       })
@@ -5557,10 +5928,21 @@ class _RequestsBodyState extends State<_RequestsBody> {
               style: TextStyle(color: Colors.grey[700], fontSize: 13),
             ),
             const SizedBox(height: 4),
-            Text(
-              'Time: ${_fmtDateTime(b.createdAt)}',
-              style: TextStyle(color: Colors.grey[700]),
-            ),
+            if (bookingSlot != null) ...[
+              Text(
+                'Start: ${_fmtDateTime(bookingSlot.startTime)}',
+                style: TextStyle(color: Colors.grey[700]),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                'End:   ${_fmtDateTime(bookingSlot.endTime)}',
+                style: TextStyle(color: Colors.grey[700]),
+              ),
+            ] else
+              Text(
+                'Booked: ${_fmtDateTime(b.createdAt)}',
+                style: TextStyle(color: Colors.grey[700]),
+              ),
             if (slotForMap != null) ...[
               const SizedBox(height: 6),
               Row(
@@ -5583,6 +5965,16 @@ class _RequestsBodyState extends State<_RequestsBody> {
                     icon: const Icon(Icons.map_outlined),
                   ),
                 ],
+              ),
+            ],
+            if (bookingSlot != null &&
+                (b.status == BookingStatus.accepted ||
+                    b.status == BookingStatus.pending)) ...[
+              const SizedBox(height: 8),
+              _BookingTimingSection(
+                booking: b,
+                slot: bookingSlot,
+                isRiderView: isRiderView,
               ),
             ],
             if (b.status == BookingStatus.accepted ||
@@ -5745,7 +6137,11 @@ class _RequestsBodyState extends State<_RequestsBody> {
                               ),
                               if (b.countdownEndTime != null) ...[
                                 const SizedBox(height: 4),
-                                CountdownText(endTime: b.countdownEndTime!),
+                                CountdownText(
+                                  endTime: b.countdownEndTime!,
+                                  startTime: bookingSlot?.startTime,
+                                  bookingId: b.id,
+                                ),
                               ],
                             ],
                           ],
@@ -5765,6 +6161,13 @@ class _RequestsBodyState extends State<_RequestsBody> {
                     ],
                   ),
                 ),
+                // After end time: user can extend or request refund
+                if (bookingSlot != null) ...[
+                  _AutoRefundSection(
+                    booking: b,
+                    slot: bookingSlot,
+                  ),
+                ],
                 // Add review button for completed trips (user view)
                 if (b.status == BookingStatus.completed) ...[
                   const SizedBox(height: 10),
@@ -5941,6 +6344,89 @@ class _RequestsBodyState extends State<_RequestsBody> {
                         ),
                       ],
                     ),
+                  )
+                else if (bookingSlot != null && DateTime.now().isAfter(bookingSlot.endTime))
+                  // After end time: ask user to extend or enter OTP
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.orange.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: Colors.orange.withValues(alpha: 0.4)),
+                        ),
+                        child: const Row(
+                          children: [
+                            Icon(Icons.access_time, color: Colors.orange),
+                            SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                'Service time ended. Ask the user to extend time or provide OTP to complete.',
+                                style: TextStyle(fontSize: 13),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: _otpControllerFor(b.id),
+                              keyboardType: TextInputType.number,
+                              maxLength: 6,
+                              decoration: const InputDecoration(
+                                labelText: 'Enter OTP to complete',
+                                border: OutlineInputBorder(),
+                                counterText: '',
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          FilledButton(
+                            onPressed: () async {
+                              final messenger = ScaffoldMessenger.of(context);
+                              final otpText = _otpControllerFor(b.id).text;
+                              if (otpText.length != 6) {
+                                messenger.showSnackBar(const SnackBar(content: Text('Please enter 6-digit OTP')));
+                                return;
+                              }
+                              showDialog(context: context, barrierDismissible: false, builder: (_) => const Center(child: CircularProgressIndicator()));
+                              try {
+                                if (b.paymentHeldInEscrow && b.stripePaymentIntentId != null) {
+                                  final success = await StripeService.instance.verifyOtpAndRelease(bookingId: b.id, otp: otpText);
+                                  if (!context.mounted) return;
+                                  Navigator.pop(context);
+                                  if (success) {
+                                    await BookingRepository.instance.updateBookingAfterPayment(bookingId: b.id, status: BookingStatus.completed, otpVerified: true);
+                                    if (context.mounted) {
+                                      messenger.showSnackBar(const SnackBar(content: Text('✅ Payment released!'), backgroundColor: Colors.green));
+                                      _promptForReview(context, b, isProvider: true);
+                                    }
+                                  } else {
+                                    messenger.showSnackBar(const SnackBar(content: Text('Invalid OTP'), backgroundColor: Colors.red));
+                                  }
+                                } else {
+                                  final ok = await BookingRepository.instance.verifyOtp(bookingId: b.id, otp: otpText);
+                                  if (!context.mounted) return;
+                                  Navigator.pop(context);
+                                  messenger.showSnackBar(SnackBar(content: Text(ok ? 'OTP verified ✅' : 'Invalid OTP'), backgroundColor: ok ? Colors.green : Colors.red));
+                                  if (ok && context.mounted) _promptForReview(context, b, isProvider: true);
+                                }
+                              } catch (e) {
+                                if (!context.mounted) return;
+                                Navigator.pop(context);
+                                messenger.showSnackBar(SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red));
+                              }
+                            },
+                            child: const Text('Verify'),
+                          ),
+                        ],
+                      ),
+                    ],
                   )
                 else
                   Row(
@@ -6152,6 +6638,8 @@ class _RequestsBodyState extends State<_RequestsBody> {
         return 'Completed';
       case BookingStatus.rejected:
         return 'Rejected';
+      case BookingStatus.refunded:
+        return 'Refunded';
     }
   }
 
@@ -6165,6 +6653,8 @@ class _RequestsBodyState extends State<_RequestsBody> {
         return Colors.blue;
       case BookingStatus.rejected:
         return Colors.red;
+      case BookingStatus.refunded:
+        return Colors.purple;
     }
   }
 
@@ -6262,28 +6752,98 @@ class _RequestsBodyState extends State<_RequestsBody> {
   }
 }
 
-class CountdownText extends StatefulWidget {
-  final DateTime endTime;
-  const CountdownText({super.key, required this.endTime});
+/// Dialog for user to request a time extension on a booking.
+class _ExtendTimeDialog extends StatefulWidget {
+  final Booking booking;
+  final Slot slot;
+  const _ExtendTimeDialog({required this.booking, required this.slot});
 
   @override
-  State<CountdownText> createState() => _CountdownTextState();
+  State<_ExtendTimeDialog> createState() => _ExtendTimeDialogState();
 }
 
-class _CountdownTextState extends State<CountdownText> {
+class _ExtendTimeDialogState extends State<_ExtendTimeDialog> {
+  int _extraHours = 1;
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Extend Time'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Text('How many extra hours do you need?'),
+          const SizedBox(height: 16),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              IconButton(
+                icon: const Icon(Icons.remove_circle_outline),
+                onPressed: _extraHours > 1 ? () => setState(() => _extraHours--) : null,
+              ),
+              Text('$_extraHours hr${_extraHours > 1 ? 's' : ''}',
+                  style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+              IconButton(
+                icon: const Icon(Icons.add_circle_outline),
+                onPressed: _extraHours < 12 ? () => setState(() => _extraHours++) : null,
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'New end time: ${_fmtDT(widget.slot.endTime.add(Duration(hours: _extraHours)))}',
+            style: const TextStyle(fontSize: 13, color: Colors.grey),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+        FilledButton(
+          onPressed: () {
+            Navigator.pop(context);
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Extension request sent to provider (+$_extraHours hr${_extraHours > 1 ? 's' : ''})'),
+                backgroundColor: Colors.blue,
+              ),
+            );
+          },
+          child: const Text('Request Extension'),
+        ),
+      ],
+    );
+  }
+
+  static String _fmtDT(DateTime d) {
+    final h = d.hour.toString().padLeft(2, '0');
+    final m = d.minute.toString().padLeft(2, '0');
+    return '${d.day}/${d.month}/${d.year} $h:$m';
+  }
+}
+
+/// Auto-refund section that shows refund button after trip end time
+class _AutoRefundSection extends StatefulWidget {
+  final Booking booking;
+  final Slot slot;
+
+  const _AutoRefundSection({
+    required this.booking,
+    required this.slot,
+  });
+
+  @override
+  State<_AutoRefundSection> createState() => _AutoRefundSectionState();
+}
+
+class _AutoRefundSectionState extends State<_AutoRefundSection> {
   late Timer _timer;
-  Duration _remaining = Duration.zero;
 
   @override
   void initState() {
     super.initState();
-    _update();
-    _timer = Timer.periodic(const Duration(seconds: 1), (_) => _update());
-  }
-
-  void _update() {
-    final r = widget.endTime.difference(DateTime.now());
-    setState(() => _remaining = r.isNegative ? Duration.zero : r);
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() {});
+    });
   }
 
   @override
@@ -6294,18 +6854,316 @@ class _CountdownTextState extends State<CountdownText> {
 
   @override
   Widget build(BuildContext context) {
-    if (_remaining == Duration.zero) {
-      return Text('Refund window expired', style: TextStyle(fontSize: 11, color: Colors.red[400]));
+    final now = DateTime.now();
+    final hasEnded = now.isAfter(widget.slot.endTime);
+    final booking = widget.booking;
+
+    // Don't show if already completed or refunded
+    if (booking.status == BookingStatus.completed ||
+        booking.status == BookingStatus.refunded) {
+      return const SizedBox.shrink();
     }
-    final h = _remaining.inHours.toString().padLeft(2, '0');
-    final m = (_remaining.inMinutes % 60).toString().padLeft(2, '0');
-    final s = (_remaining.inSeconds % 60).toString().padLeft(2, '0');
+
+    // Only show after end time
+    if (!hasEnded) {
+      return const SizedBox.shrink();
+    }
+
+    return Column(
+      children: [
+        const SizedBox(height: 10),
+        Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: Colors.orange.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: Colors.orange.withValues(alpha: 0.35)),
+          ),
+          child: const Row(
+            children: [
+              Icon(Icons.timer_off_outlined, color: Colors.orange),
+              SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Service time has ended. Extend time or request a refund.',
+                  style: TextStyle(fontSize: 13),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Expanded(
+              child: OutlinedButton.icon(
+                icon: const Icon(Icons.more_time),
+                label: const Text('Extend Time'),
+                onPressed: () {
+                  showDialog(
+                    context: context,
+                    builder: (ctx) => _ExtendTimeDialog(
+                      booking: booking,
+                      slot: widget.slot,
+                    ),
+                  );
+                },
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: OutlinedButton.icon(
+                icon: const Icon(Icons.undo, color: Colors.red),
+                label: const Text('Refund', style: TextStyle(color: Colors.red)),
+                style: OutlinedButton.styleFrom(
+                  side: const BorderSide(color: Colors.red),
+                ),
+                onPressed: () async {
+                  final confirm = await showDialog<bool>(
+                    context: context,
+                    builder: (ctx) => AlertDialog(
+                      title: const Text('Request Refund'),
+                      content: const Text(
+                        'The service time has ended. Do you want to request a refund?',
+                      ),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(ctx, false),
+                          child: const Text('Cancel'),
+                        ),
+                        FilledButton(
+                          onPressed: () => Navigator.pop(ctx, true),
+                          style: FilledButton.styleFrom(
+                            backgroundColor: Colors.red,
+                          ),
+                          child: const Text('Refund'),
+                        ),
+                      ],
+                    ),
+                  );
+                  if (confirm != true || !context.mounted) return;
+                  await BookingRepository.instance.markRefunded(booking.id);
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Refund requested'),
+                        backgroundColor: Colors.orange,
+                      ),
+                    );
+                  }
+                },
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+/// Shows a time-phase banner on a booking card:
+/// • Before start time  → "Starts in HH:MM:SS"
+/// • Between start & end → "In Progress · ends in HH:MM:SS"
+/// • After end time      → "Service ended"
+class _BookingTimingSection extends StatefulWidget {
+  final Booking booking;
+  final Slot slot;
+  final bool isRiderView;
+
+  const _BookingTimingSection({
+    required this.booking,
+    required this.slot,
+    required this.isRiderView,
+  });
+
+  @override
+  State<_BookingTimingSection> createState() => _BookingTimingSectionState();
+}
+
+class _BookingTimingSectionState extends State<_BookingTimingSection> {
+  late Timer _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer.cancel();
+    super.dispose();
+  }
+
+  String _fmt(Duration d) {
+    if (d.isNegative) return '00:00:00';
+    final h = d.inHours.toString().padLeft(2, '0');
+    final m = (d.inMinutes % 60).toString().padLeft(2, '0');
+    final s = (d.inSeconds % 60).toString().padLeft(2, '0');
+    return '$h:$m:$s';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final now = DateTime.now();
+    final start = widget.slot.startTime;
+    final end = widget.slot.endTime;
+
+    Color bgColor;
+    IconData icon;
+    String label;
+
+    if (now.isBefore(start)) {
+      final diff = start.difference(now);
+      bgColor = Colors.blue;
+      icon = Icons.schedule;
+      label = 'Starts in ${_fmt(diff)}';
+    } else if (now.isBefore(end)) {
+      final diff = end.difference(now);
+      bgColor = Colors.green;
+      icon = Icons.play_circle_outline;
+      label = 'In Progress · ends in ${_fmt(diff)}';
+    } else {
+      bgColor = Colors.orange;
+      icon = Icons.timer_off_outlined;
+      label = 'Service time ended';
+    }
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: bgColor.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: bgColor.withValues(alpha: 0.35)),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, size: 18, color: bgColor),
+          const SizedBox(width: 8),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: bgColor,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class CountdownText extends StatefulWidget {
+  final DateTime endTime;
+  final DateTime? startTime;   // slot start time — shows "Trip starts in" phase
+  final String? bookingId;     // if set, auto-refund fires when endTime passes
+  const CountdownText({
+    super.key,
+    required this.endTime,
+    this.startTime,
+    this.bookingId,
+  });
+
+  @override
+  State<CountdownText> createState() => _CountdownTextState();
+}
+
+class _CountdownTextState extends State<CountdownText> {
+  late Timer _timer;
+  Duration _remaining = Duration.zero;
+  bool _autoRefundFired = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _update();
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) => _update());
+  }
+
+  void _update() {
+    final now = DateTime.now();
+    final start = widget.startTime;
+
+    // Phase 1: before start time
+    if (start != null && now.isBefore(start)) {
+      final r = start.difference(now);
+      setState(() => _remaining = r);
+      return;
+    }
+
+    // Phase 2: between start and end
+    final r = widget.endTime.difference(now);
+    if (r.isNegative) {
+      setState(() => _remaining = Duration.zero);
+      // Auto-refund: fire once when end time passes
+      if (!_autoRefundFired && widget.bookingId != null) {
+        _autoRefundFired = true;
+        _triggerAutoRefund();
+      }
+    } else {
+      setState(() => _remaining = r);
+    }
+  }
+
+  Future<void> _triggerAutoRefund() async {
+    final id = widget.bookingId!;
+    final booking = BookingRepository.instance.getBookingById(id);
+    if (booking == null) return;
+    if (booking.status == BookingStatus.completed ||
+        booking.status == BookingStatus.refunded) {
+      return;
+    }
+    await BookingRepository.instance.markRefunded(id);
+  }
+
+  @override
+  void dispose() {
+    _timer.cancel();
+    super.dispose();
+  }
+
+  String _fmt(Duration d) {
+    final h = d.inHours.toString().padLeft(2, '0');
+    final m = (d.inMinutes % 60).toString().padLeft(2, '0');
+    final s = (d.inSeconds % 60).toString().padLeft(2, '0');
+    return '$h:$m:$s';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final now = DateTime.now();
+    final start = widget.startTime;
+
+    // Expired
+    if (_remaining == Duration.zero && now.isAfter(widget.endTime)) {
+      return Text('Auto-refunded', style: TextStyle(fontSize: 11, color: Colors.red[400]));
+    }
+
+    // Before start
+    if (start != null && now.isBefore(start)) {
+      return Row(
+        children: [
+          Icon(Icons.schedule, size: 12, color: Colors.blue[700]),
+          const SizedBox(width: 4),
+          Text(
+            'Trip starts in ${_fmt(_remaining)}',
+            style: TextStyle(fontSize: 11, color: Colors.blue[700]),
+          ),
+        ],
+      );
+    }
+
+    // In progress — counting to end time
     return Row(
       children: [
         Icon(Icons.timer_outlined, size: 12, color: Colors.orange[700]),
         const SizedBox(width: 4),
         Text(
-          'Auto-refund in $h:$m:$s',
+          'Auto-refund in ${_fmt(_remaining)}',
           style: TextStyle(fontSize: 11, color: Colors.orange[700]),
         ),
       ],

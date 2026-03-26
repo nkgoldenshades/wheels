@@ -124,6 +124,38 @@ class PaymentService {
     }
   }
 
+  /// Process a flat KYC verification fee.
+  /// Routes to Razorpay (INR) or Stripe (international).
+  /// Returns result map with `payment_id` on success or `error` on failure.
+  Future<Map<String, dynamic>> processKycPayment({
+    required String userName,
+    required String userEmail,
+    required String userPhone,
+    required String currency,
+  }) async {
+    if (_isIndia(currency == 'INR' ? 'IN' : null) || currency == 'INR') {
+      return RazorpayService.instance.processPayment(
+        amountInPaise: 4900, // ₹49
+        description: 'KYC Document Verification',
+        userEmail: userEmail,
+        userPhone: userPhone,
+        userName: userName,
+      );
+    } else {
+      // International: Stripe — flat $0.99
+      await StripeService.instance.init();
+      final result = await StripeService.instance.processPayment(
+        amount: 99,
+        currency: currency.toLowerCase(),
+        providerId: '',
+        userId: userEmail,
+        applicationFee: 0,
+        slotId: 'kyc_verification',
+      );
+      return result ?? {'error': 'Payment cancelled'};
+    }
+  }
+
   String _generateOtp(int seed) {
     final base = (seed % 900000) + 100000;
     return base.toString().padLeft(6, '0');

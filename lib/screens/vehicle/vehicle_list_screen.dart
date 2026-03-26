@@ -155,14 +155,23 @@ class VehicleListScreen extends StatelessWidget {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(
-                                '${v.name}$yearText',
-                                style: const TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                              const SizedBox(height: 4),
+                              Row(
+                                children: [
+                                  Flexible(
+                                    child: Text(
+                                      '${v.name}$yearText',
+                                      style: const TextStyle(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ),
+                                  if (v.isVerifiedToggle) ...[
+                                    const SizedBox(width: 6),
+                                    const Icon(Icons.verified, color: Colors.blue, size: 18),
+                                  ],
+                                ],
+                              ),                              const SizedBox(height: 4),
                               Text(
                                 '${v.type} • ${v.capabilities.map((e) => e.displayName).join(', ')}',
                                 style: const TextStyle(

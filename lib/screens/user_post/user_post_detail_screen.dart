@@ -500,7 +500,7 @@ class _UserPostDetailScreenState extends State<UserPostDetailScreen> {
       'key': 'rzp_test_SMpj1xxJxAcT6K',
       'amount': orderData['amount'],
       'currency': orderData['currency'],
-      'name': 'QuickOHunt',
+      'name': 'VaultWheels',
       'description': 'Payment for service request',
       'order_id': orderData['id'],
       'prefill': {

@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../vehicle/vehicle_list_screen.dart';
@@ -154,6 +156,10 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     final TimeOfDay? picked = await showTimePicker(
       context: context,
       initialTime: TimeOfDay.fromDateTime(isStart ? _startTime! : _endTime!),
+      builder: (ctx, child) => MediaQuery(
+        data: MediaQuery.of(ctx).copyWith(alwaysUse24HourFormat: true),
+        child: child!,
+      ),
     );
     if (picked != null) {
       final date = (isStart ? _startTime! : _endTime!);
@@ -363,6 +369,10 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(message), backgroundColor: Colors.red),
     );
+  }
+
+  String _fmtTime24(DateTime d) {
+    return '${d.day}/${d.month} ${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
   }
 
   Future<void> _postSlot() async {
@@ -658,7 +668,79 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
             child: _selectedVehicle != null
                 ? Row(
                     children: [
-                      Icon(Icons.directions_car, color: Colors.blue.shade700),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: _selectedVehicle!.profileImage != null
+                            ? Builder(
+                                builder: (context) {
+                                  final image = _selectedVehicle!.profileImage!;
+                                  if (image.startsWith('http://') ||
+                                      image.startsWith('https://')) {
+                                    return Image.network(
+                                      image,
+                                      width: 32,
+                                      height: 32,
+                                      fit: BoxFit.cover,
+                                      errorBuilder: (context, error, stackTrace) {
+                                        return Container(
+                                          width: 32,
+                                          height: 32,
+                                          color: Colors.blue.withValues(alpha: 0.12),
+                                          child: Icon(
+                                            Icons.directions_car,
+                                            color: Colors.blue.shade700,
+                                            size: 18,
+                                          ),
+                                        );
+                                      },
+                                    );
+                                  }
+
+                                  try {
+                                    final bytes = base64Decode(image);
+                                    return Image.memory(
+                                      bytes,
+                                      width: 32,
+                                      height: 32,
+                                      fit: BoxFit.cover,
+                                      errorBuilder: (context, error, stackTrace) {
+                                        return Container(
+                                          width: 32,
+                                          height: 32,
+                                          color: Colors.blue.withValues(alpha: 0.12),
+                                          child: Icon(
+                                            Icons.directions_car,
+                                            color: Colors.blue.shade700,
+                                            size: 18,
+                                          ),
+                                        );
+                                      },
+                                    );
+                                  } catch (_) {
+                                    return Container(
+                                      width: 32,
+                                      height: 32,
+                                      color: Colors.blue.withValues(alpha: 0.12),
+                                      child: Icon(
+                                        Icons.directions_car,
+                                        color: Colors.blue.shade700,
+                                        size: 18,
+                                      ),
+                                    );
+                                  }
+                                },
+                              )
+                            : Container(
+                                width: 32,
+                                height: 32,
+                                color: Colors.blue.withValues(alpha: 0.12),
+                                child: Icon(
+                                  Icons.directions_car,
+                                  color: Colors.blue.shade700,
+                                  size: 18,
+                                ),
+                              ),
+                      ),
                       const SizedBox(width: 12),
                       Expanded(
                         child: Column(
@@ -820,12 +902,28 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
               LocationAutocompleteField(
                 controller: _fromController,
                 label: 'From',
-                hint: 'Start location',
+                hint: 'e.g., Mumbai Airport',
                 icon: Icons.location_on,
                 onLocationSelected: (suggestion) {
                   _fromSuggestion = suggestion;
                 },
               ),
+              if (_fromSuggestion != null) ...[
+                const SizedBox(height: 4),
+                Padding(
+                  padding: const EdgeInsets.only(left: 12),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.gps_fixed, size: 12, color: Colors.green),
+                      const SizedBox(width: 4),
+                      Text(
+                        'Lat: ${_fromSuggestion!.lat.toStringAsFixed(6)}, Lon: ${_fromSuggestion!.lon.toStringAsFixed(6)}',
+                        style: const TextStyle(fontSize: 11, color: Colors.green),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
               const Padding(
                 padding: EdgeInsets.symmetric(vertical: 4),
                 child: Icon(Icons.arrow_downward, color: Colors.grey),
@@ -833,12 +931,28 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
               LocationAutocompleteField(
                 controller: _toController,
                 label: 'To',
-                hint: 'Destination',
+                hint: 'e.g., Pune Station',
                 icon: Icons.flag,
                 onLocationSelected: (suggestion) {
                   _toSuggestion = suggestion;
                 },
               ),
+              if (_toSuggestion != null) ...[
+                const SizedBox(height: 4),
+                Padding(
+                  padding: const EdgeInsets.only(left: 12),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.gps_fixed, size: 12, color: Colors.green),
+                      const SizedBox(width: 4),
+                      Text(
+                        'Lat: ${_toSuggestion!.lat.toStringAsFixed(6)}, Lon: ${_toSuggestion!.lon.toStringAsFixed(6)}',
+                        style: const TextStyle(fontSize: 11, color: Colors.green),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ],
           ),
           Row(
@@ -885,14 +999,28 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
           LocationAutocompleteField(
             controller: _baseController,
             label: 'Base Location',
-            hint: 'Service area center',
+            hint: 'e.g., City Center',
             icon: Icons.home,
             onLocationSelected: (suggestion) {
               _baseSuggestion = suggestion;
-              debugPrint('Base location selected: ${suggestion.displayName}');
-              debugPrint('Coordinates: ${suggestion.lat}, ${suggestion.lon}');
             },
           ),
+          if (_baseSuggestion != null) ...[
+            const SizedBox(height: 4),
+            Padding(
+              padding: const EdgeInsets.only(left: 12),
+              child: Row(
+                children: [
+                  const Icon(Icons.gps_fixed, size: 12, color: Colors.green),
+                  const SizedBox(width: 4),
+                  Text(
+                    'Lat: ${_baseSuggestion!.lat.toStringAsFixed(6)}, Lon: ${_baseSuggestion!.lon.toStringAsFixed(6)}',
+                    style: const TextStyle(fontSize: 11, color: Colors.green),
+                  ),
+                ],
+              ),
+            ),
+          ],
           Align(
             alignment: Alignment.centerRight,
             child: TextButton.icon(
@@ -963,7 +1091,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                           const SizedBox(width: 8),
                           Text(
                             _startTime != null
-                                ? '${_startTime!.day}/${_startTime!.month} ${_startTime!.hour.toString().padLeft(2, '0')}:${_startTime!.minute.toString().padLeft(2, '0')}'
+                                ? _fmtTime24(_startTime!)
                                 : 'Select start time',
                           ),
                         ],
@@ -1000,7 +1128,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                           const SizedBox(width: 8),
                           Text(
                             _endTime != null
-                                ? '${_endTime!.day}/${_endTime!.month} ${_endTime!.hour.toString().padLeft(2, '0')}:${_endTime!.minute.toString().padLeft(2, '0')}'
+                                ? _fmtTime24(_endTime!)
                                 : 'Select end time',
                           ),
                         ],

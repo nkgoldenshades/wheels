@@ -155,7 +155,7 @@ class LocationAutocompleteService {
     final response = await http.get(
       url,
       headers: {
-        'User-Agent': 'QuickOhunt/1.0', // Required by Nominatim
+        'User-Agent': 'VaultWheels/1.0',
         'Accept': 'application/json',
       },
     ).timeout(const Duration(seconds: 5));
@@ -184,7 +184,7 @@ class LocationAutocompleteService {
       final response = await http.get(
         url,
         headers: {
-          'User-Agent': 'QuickOhunt/1.0',
+          'User-Agent': 'VaultWheels/1.0',
           'Accept': 'application/json',
         },
       ).timeout(const Duration(seconds: 5));

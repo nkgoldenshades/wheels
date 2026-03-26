@@ -1,6 +1,6 @@
 import 'seat_layout.dart';
 
-enum BookingStatus { pending, accepted, completed, rejected }
+enum BookingStatus { pending, accepted, completed, rejected, refunded }
 
 class Booking {
   final String id;
@@ -32,6 +32,9 @@ class Booking {
   // Lease security deposit
   final double? securityDeposit;
 
+  // Terms snapshot — frozen at booking time
+  final String? termsSnapshot;
+
   Booking({
     required this.id,
     required this.slotId,
@@ -57,6 +60,7 @@ class Booking {
     this.countdownEndTime,
     this.paymentHeldInEscrow = false,
     this.securityDeposit,
+    this.termsSnapshot,
   });
 
   Booking copyWith({
@@ -77,6 +81,7 @@ class Booking {
     DateTime? countdownEndTime,
     bool? paymentHeldInEscrow,
     double? securityDeposit,
+    String? termsSnapshot,
   }) {
     return Booking(
       id: id,
@@ -103,6 +108,7 @@ class Booking {
       countdownEndTime: countdownEndTime ?? this.countdownEndTime,
       paymentHeldInEscrow: paymentHeldInEscrow ?? this.paymentHeldInEscrow,
       securityDeposit: securityDeposit ?? this.securityDeposit,
+      termsSnapshot: termsSnapshot ?? this.termsSnapshot,
     );
   }
 
@@ -132,6 +138,7 @@ class Booking {
       'countdownEndTime': countdownEndTime?.toIso8601String(),
       'paymentHeldInEscrow': paymentHeldInEscrow,
       'securityDeposit': securityDeposit,
+      'termsSnapshot': termsSnapshot,
     };
   }
 
@@ -165,6 +172,7 @@ class Booking {
           : null,
       paymentHeldInEscrow: json['paymentHeldInEscrow'] ?? false,
       securityDeposit: (json['securityDeposit'] as num?)?.toDouble(),
+      termsSnapshot: json['termsSnapshot'] as String?,
     );
   }
 }

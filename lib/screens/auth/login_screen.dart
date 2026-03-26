@@ -69,7 +69,7 @@ class _LoginScreenState extends State<LoginScreen> {
               const Icon(Icons.account_circle, size: 80, color: Colors.blue),
               const SizedBox(height: 24),
               const Text(
-                'Quickohunt',
+                'VaultWheels',
                 style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 8),

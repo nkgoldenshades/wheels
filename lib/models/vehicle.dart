@@ -33,15 +33,27 @@ class Vehicle {
   // Document verification status
   final bool rcVerified;
   final DateTime? rcVerifiedAt;
+  final String? rcImageBase64;
   final bool insuranceVerified;
   final DateTime? insuranceVerifiedAt;
   final DateTime? insuranceExpiryDate;
+  final String? insuranceImageBase64;
   final bool dlVerified;
   final DateTime? dlVerifiedAt;
+  final String? dlImageBase64;
   final bool aadhaarVerified;
   final DateTime? aadhaarVerifiedAt;
+  final String? aadhaarImageBase64;
   final bool panVerified;
   final DateTime? panVerifiedAt;
+  final String? panImageBase64;
+
+  /// True only when all mandatory + optional docs are verified and none expired
+  bool get isFullyVerified {
+    final insuranceValid = insuranceVerified &&
+        (insuranceExpiryDate == null || insuranceExpiryDate!.isAfter(DateTime.now()));
+    return rcVerified && insuranceValid && dlVerified && aadhaarVerified && panVerified;
+  }
 
   Vehicle({
     required this.id,
@@ -69,15 +81,20 @@ class Vehicle {
     this.activePostsCount = 0,
     this.rcVerified = false,
     this.rcVerifiedAt,
+    this.rcImageBase64,
     this.insuranceVerified = false,
     this.insuranceVerifiedAt,
     this.insuranceExpiryDate,
+    this.insuranceImageBase64,
     this.dlVerified = false,
     this.dlVerifiedAt,
+    this.dlImageBase64,
     this.aadhaarVerified = false,
     this.aadhaarVerifiedAt,
+    this.aadhaarImageBase64,
     this.panVerified = false,
     this.panVerifiedAt,
+    this.panImageBase64,
   });
 
   Vehicle copyWith({
@@ -106,15 +123,20 @@ class Vehicle {
     int? activePostsCount,
     bool? rcVerified,
     DateTime? rcVerifiedAt,
+    String? rcImageBase64,
     bool? insuranceVerified,
     DateTime? insuranceVerifiedAt,
     DateTime? insuranceExpiryDate,
+    String? insuranceImageBase64,
     bool? dlVerified,
     DateTime? dlVerifiedAt,
+    String? dlImageBase64,
     bool? aadhaarVerified,
     DateTime? aadhaarVerifiedAt,
+    String? aadhaarImageBase64,
     bool? panVerified,
     DateTime? panVerifiedAt,
+    String? panImageBase64,
   }) {
     return Vehicle(
       id: id ?? this.id,
@@ -142,15 +164,20 @@ class Vehicle {
       activePostsCount: activePostsCount ?? this.activePostsCount,
       rcVerified: rcVerified ?? this.rcVerified,
       rcVerifiedAt: rcVerifiedAt ?? this.rcVerifiedAt,
+      rcImageBase64: rcImageBase64 ?? this.rcImageBase64,
       insuranceVerified: insuranceVerified ?? this.insuranceVerified,
       insuranceVerifiedAt: insuranceVerifiedAt ?? this.insuranceVerifiedAt,
       insuranceExpiryDate: insuranceExpiryDate ?? this.insuranceExpiryDate,
+      insuranceImageBase64: insuranceImageBase64 ?? this.insuranceImageBase64,
       dlVerified: dlVerified ?? this.dlVerified,
       dlVerifiedAt: dlVerifiedAt ?? this.dlVerifiedAt,
+      dlImageBase64: dlImageBase64 ?? this.dlImageBase64,
       aadhaarVerified: aadhaarVerified ?? this.aadhaarVerified,
       aadhaarVerifiedAt: aadhaarVerifiedAt ?? this.aadhaarVerifiedAt,
+      aadhaarImageBase64: aadhaarImageBase64 ?? this.aadhaarImageBase64,
       panVerified: panVerified ?? this.panVerified,
       panVerifiedAt: panVerifiedAt ?? this.panVerifiedAt,
+      panImageBase64: panImageBase64 ?? this.panImageBase64,
     );
   }
 
@@ -181,15 +208,20 @@ class Vehicle {
       'active_posts_count': activePostsCount,
       'rc_verified': rcVerified,
       'rc_verified_at': rcVerifiedAt?.toIso8601String(),
+      'rc_image': rcImageBase64,
       'insurance_verified': insuranceVerified,
       'insurance_verified_at': insuranceVerifiedAt?.toIso8601String(),
       'insurance_expiry_date': insuranceExpiryDate?.toIso8601String(),
+      'insurance_image': insuranceImageBase64,
       'dl_verified': dlVerified,
       'dl_verified_at': dlVerifiedAt?.toIso8601String(),
+      'dl_image': dlImageBase64,
       'aadhaar_verified': aadhaarVerified,
       'aadhaar_verified_at': aadhaarVerifiedAt?.toIso8601String(),
+      'aadhaar_image': aadhaarImageBase64,
       'pan_verified': panVerified,
       'pan_verified_at': panVerifiedAt?.toIso8601String(),
+      'pan_image': panImageBase64,
       'is_online': true, // Default to online when creating
       'is_user_vehicle': false, // Will be set by repository
       'updated_at': DateTime.now().toIso8601String(),
@@ -233,6 +265,7 @@ class Vehicle {
       rcVerifiedAt: json['rc_verified_at'] != null || json['rcVerifiedAt'] != null
           ? DateTime.parse(json['rc_verified_at'] ?? json['rcVerifiedAt'])
           : null,
+      rcImageBase64: json['rc_image'] ?? json['rcImage'],
       insuranceVerified: json['insurance_verified'] ?? json['insuranceVerified'] ?? false,
       insuranceVerifiedAt: json['insurance_verified_at'] != null || json['insuranceVerifiedAt'] != null
           ? DateTime.parse(json['insurance_verified_at'] ?? json['insuranceVerifiedAt'])
@@ -240,18 +273,22 @@ class Vehicle {
       insuranceExpiryDate: json['insurance_expiry_date'] != null || json['insuranceExpiryDate'] != null
           ? DateTime.parse(json['insurance_expiry_date'] ?? json['insuranceExpiryDate'])
           : null,
+      insuranceImageBase64: json['insurance_image'] ?? json['insuranceImage'],
       dlVerified: json['dl_verified'] ?? json['dlVerified'] ?? false,
       dlVerifiedAt: json['dl_verified_at'] != null || json['dlVerifiedAt'] != null
           ? DateTime.parse(json['dl_verified_at'] ?? json['dlVerifiedAt'])
           : null,
+      dlImageBase64: json['dl_image'] ?? json['dlImage'],
       aadhaarVerified: json['aadhaar_verified'] ?? json['aadhaarVerified'] ?? false,
       aadhaarVerifiedAt: json['aadhaar_verified_at'] != null || json['aadhaarVerifiedAt'] != null
           ? DateTime.parse(json['aadhaar_verified_at'] ?? json['aadhaarVerifiedAt'])
           : null,
+      aadhaarImageBase64: json['aadhaar_image'] ?? json['aadhaarImage'],
       panVerified: json['pan_verified'] ?? json['panVerified'] ?? false,
       panVerifiedAt: json['pan_verified_at'] != null || json['panVerifiedAt'] != null
           ? DateTime.parse(json['pan_verified_at'] ?? json['panVerifiedAt'])
           : null,
+      panImageBase64: json['pan_image'] ?? json['panImage'],
     );
   }
 }

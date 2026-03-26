@@ -71,7 +71,7 @@ class StripeService {
       await Stripe.instance.initPaymentSheet(
         paymentSheetParameters: SetupPaymentSheetParameters(
           paymentIntentClientSecret: clientSecret,
-          merchantDisplayName: 'Quickohunt',
+          merchantDisplayName: 'VaultWheels',
           style: ThemeMode.system,
         ),
       );
@@ -164,8 +164,8 @@ class StripeService {
           'currency': currency,
           'commission_amount': applicationFee,
           // success/cancel URLs — update to your actual domain
-          'success_url': 'https://quickohunt.web.app/#/payment-success',
-          'cancel_url': 'https://quickohunt.web.app/#/payment-cancel',
+          'success_url': 'https://vaultwheels.web.app/#/payment-success',
+          'cancel_url': 'https://vaultwheels.web.app/#/payment-cancel',
         }),
       );
 

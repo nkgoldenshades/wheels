@@ -72,8 +72,14 @@ class _LiveCameraScreenState extends State<LiveCameraScreen> {
     } catch (e) {
       debugPrint('Camera initialization error: $e');
       if (!mounted) return;
+      
+      String errorMessage = 'Camera error: $e';
+      if (e.toString().contains('RECORD_AUDIO') || e.toString().contains('audio')) {
+        errorMessage = 'Audio permission required for video recording. Please grant microphone permission.';
+      }
+      
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Camera error: $e')),
+        SnackBar(content: Text(errorMessage)),
       );
     }
   }
@@ -119,8 +125,14 @@ class _LiveCameraScreenState extends State<LiveCameraScreen> {
       _updateTimer();
     } catch (e) {
       if (!mounted) return;
+      
+      String errorMessage = 'Failed to start recording: $e';
+      if (e.toString().contains('RECORD_AUDIO') || e.toString().contains('audio')) {
+        errorMessage = 'Audio permission required for video recording. Please grant microphone permission.';
+      }
+      
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to start recording: $e')),
+        SnackBar(content: Text(errorMessage)),
       );
     }
   }

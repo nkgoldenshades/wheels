@@ -84,6 +84,10 @@ class SlotCard extends StatelessWidget {
               
               // TIME
               _buildTimeRow(),
+              const SizedBox(height: 8),
+
+              // GPS MODE INDICATOR
+              _buildGpsModeRow(),
               const SizedBox(height: 12),
               
               // PRICE + CAPACITY
@@ -98,11 +102,7 @@ class SlotCard extends StatelessWidget {
                 const SizedBox(height: 12),
               ],
               
-              // OPTIONAL NOTES
-              if (slot.notes != null && slot.notes!.isNotEmpty) ...[
-                _buildNotesRow(),
-                const SizedBox(height: 12),
-              ],
+              // TERMS ICON (shown in action row, not here)
               
               // BOTTOM - ACTION
               _buildActionRow(),
@@ -586,8 +586,42 @@ class SlotCard extends StatelessWidget {
     );
   }
 
-  Widget _buildTimeRow() {
-    final duration = slot.endTime.difference(slot.startTime);
+  Widget _buildGpsModeRow() {
+    final IconData icon;
+    final String label;
+    final Color color;
+
+    switch (vehicle.gpsMode) {
+      case VehicleGpsMode.deviceLive:
+        icon = Icons.gps_fixed;
+        label = 'Live GPS (device)';
+        color = Colors.green;
+        break;
+      case VehicleGpsMode.externalLink:
+        icon = Icons.link;
+        label = 'GPS via external link';
+        color = Colors.blue;
+        break;
+      case VehicleGpsMode.manual:
+        icon = Icons.edit_location_alt;
+        label = 'Manual location';
+        color = Colors.orange;
+        break;
+    }
+
+    return Row(
+      children: [
+        Icon(icon, size: 13, color: color),
+        const SizedBox(width: 5),
+        Text(
+          label,
+          style: TextStyle(fontSize: 12, color: color, fontWeight: FontWeight.w500),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildTimeRow() {    final duration = slot.endTime.difference(slot.startTime);
     final hours = duration.inHours;
     final minutes = duration.inMinutes % 60;
     final durationText = hours > 0 && minutes > 0
@@ -659,34 +693,6 @@ class SlotCard extends StatelessWidget {
     );
   }
 
-  Widget _buildNotesRow() {
-    return Container(
-      padding: const EdgeInsets.all(8),
-      decoration: BoxDecoration(
-        color: Colors.grey[100],
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Row(
-        children: [
-          Icon(Icons.info_outline, size: 16, color: Colors.grey[600]),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              slot.notes!,
-              style: TextStyle(
-                fontSize: 13,
-                color: Colors.grey[700],
-                fontStyle: FontStyle.italic,
-              ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildParcelDimensionsRow() {
     final parts = <String>[];
     if (slot.maxWeight != null) parts.add('${slot.maxWeight}kg');
@@ -706,26 +712,45 @@ class SlotCard extends StatelessWidget {
   }
 
   Widget _buildActionRow() {
-    return SizedBox(
-      width: double.infinity,
-      child: ElevatedButton(
-        onPressed: onAction,
-        style: ElevatedButton.styleFrom(
-          backgroundColor: isOffer ? Colors.blue : Colors.green,
-          foregroundColor: Colors.white,
-          padding: const EdgeInsets.symmetric(vertical: 12),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(8),
+    final hasTerms = slot.notes != null && slot.notes!.isNotEmpty;
+    return Row(
+      children: [
+        if (hasTerms) ...[
+          Tooltip(
+            message: 'Has terms/notes — view in details',
+            child: Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: Colors.amber.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.amber.shade400, width: 1),
+              ),
+              child: Icon(Icons.gavel, size: 18, color: Colors.amber.shade700),
+            ),
+          ),
+          const SizedBox(width: 8),
+        ],
+        Expanded(
+          child: ElevatedButton(
+            onPressed: onAction,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: isOffer ? Colors.blue : Colors.green,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+            child: Text(
+              isOffer ? '👉 Book' : '👉 Accept',
+              style: const TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
           ),
         ),
-        child: Text(
-          isOffer ? '👉 Book' : '👉 Accept',
-          style: const TextStyle(
-            fontSize: 16,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-      ),
+      ],
     );
   }
 

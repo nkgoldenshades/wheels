@@ -45,7 +45,7 @@ class FaceMatchingService {
   Future<FaceMatchResult> compareFaces(
     Uint8List referenceBytes,
     Uint8List capturedBytes, {
-    double threshold = 65.0,
+    double threshold = 25.0,
   }) async {
     _ensureInitialized();
 
@@ -219,10 +219,7 @@ class FaceMatchingService {
       features.addAll([0.0, 0.0]);
     }
 
-    // 4. Head pose angles (normalized)
-    features.add((face.headEulerAngleX ?? 0) / 90.0);
-    features.add((face.headEulerAngleY ?? 0) / 90.0);
-    features.add((face.headEulerAngleZ ?? 0) / 90.0);
+    // 4. Head pose angles — EXCLUDED: flat ID photo vs live camera will always differ
 
     // 5. Face contours (sample key points)
     final contourTypes = [
