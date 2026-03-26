@@ -1,4 +1,4 @@
-﻿ 
+ 
 import 'dart:async';
 import 'dart:math' as math;
 import 'dart:convert';
@@ -2588,26 +2588,52 @@ class _EarningsPageState extends State<EarningsPage> {
   Widget _buildTransactionCard(Booking booking, Slot? slot) {
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
-      child: ListTile(
-        leading: CircleAvatar(
-          backgroundColor: Colors.green.withValues(alpha: 0.1),
-          child: const Icon(Icons.check_circle, color: Colors.green),
-        ),
-        title: Text(
-          slot != null ? '${slot.serviceType.displayName} Service' : 'Service',
-          style: const TextStyle(fontWeight: FontWeight.w500),
-        ),
-        subtitle: Text(
-          '${booking.createdAt.day}/${booking.createdAt.month}/${booking.createdAt.year}',
-          style: const TextStyle(fontSize: 12),
-        ),
-        trailing: Text(
-          '₹${booking.price.toStringAsFixed(2)}',
-          style: const TextStyle(
-            fontSize: 16,
-            fontWeight: FontWeight.bold,
-            color: Colors.green,
-          ),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                CircleAvatar(
+                  backgroundColor: Colors.green.withValues(alpha: 0.1),
+                  child: const Icon(Icons.check_circle, color: Colors.green, size: 20),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        slot != null ? '${slot.serviceType.displayName} Service' : 'Service',
+                        style: const TextStyle(fontWeight: FontWeight.w500),
+                      ),
+                      Text(
+                        '${booking.createdAt.day}/${booking.createdAt.month}/${booking.createdAt.year}',
+                        style: const TextStyle(fontSize: 12, color: Colors.grey),
+                      ),
+                    ],
+                  ),
+                ),
+                Text(
+                  '₹${booking.price.toStringAsFixed(2)}',
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.green,
+                  ),
+                ),
+              ],
+            ),
+            if (slot != null) ...[
+              const SizedBox(height: 12),
+              _BookingTimingSection(
+                booking: booking,
+                slot: slot,
+                isRiderView: true,
+              ),
+            ],
+          ],
         ),
       ),
     );
@@ -5122,8 +5148,10 @@ class _PostsPageState extends State<PostsPage> {
     if (!mounted) return;
 
     // Use fallback provider info if not provided
+    // Priority: 1. Operator contact (if assigned), 2. Provided contact, 3. Owner contact
     final finalProviderName = providerName ?? vehicle.userName;
-    final finalProviderPhone = providerPhone ?? _providerPhone(vehicle.userId);
+    final finalProviderPhone = providerPhone ?? 
+        (vehicle.operatorPhone ?? _providerPhone(vehicle.userId));
 
     debugPrint('=== BOOKING DEBUG ===');
     debugPrint('Vehicle userId: ${vehicle.userId}');
@@ -5967,9 +5995,7 @@ class _RequestsBodyState extends State<_RequestsBody> {
                 ],
               ),
             ],
-            if (bookingSlot != null &&
-                (b.status == BookingStatus.accepted ||
-                    b.status == BookingStatus.pending)) ...[
+            if (bookingSlot != null) ...[
               const SizedBox(height: 8),
               _BookingTimingSection(
                 booking: b,
@@ -7393,31 +7419,57 @@ class _SpendingPageState extends State<SpendingPage> {
   Widget _buildTransactionCard(Booking booking, Slot? slot) {
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
-      child: ListTile(
-        leading: CircleAvatar(
-          backgroundColor: Colors.blue.withValues(alpha: 0.1),
-          child: const Icon(Icons.payment, color: Colors.blue),
-        ),
-        title: Text(
-          slot != null ? '${slot.serviceType.displayName} Service' : 'Service',
-          style: const TextStyle(fontWeight: FontWeight.w500),
-        ),
-        subtitle: Text(
-          '${booking.createdAt.day}/${booking.createdAt.month}/${booking.createdAt.year}',
-          style: const TextStyle(fontSize: 12),
-        ),
-        trailing: ValueListenableBuilder<String>(
-          valueListenable: AppPreferences.instance.currencyCode,
-          builder: (context, _, _) {
-            return Text(
-              AppPreferences.instance.formatMoney(booking.price.toInt()),
-              style: const TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.bold,
-                color: Colors.blue,
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                CircleAvatar(
+                  backgroundColor: Colors.blue.withValues(alpha: 0.1),
+                  child: const Icon(Icons.payment, color: Colors.blue, size: 20),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        slot != null ? '${slot.serviceType.displayName} Service' : 'Service',
+                        style: const TextStyle(fontWeight: FontWeight.w500),
+                      ),
+                      Text(
+                        '${booking.createdAt.day}/${booking.createdAt.month}/${booking.createdAt.year}',
+                        style: const TextStyle(fontSize: 12, color: Colors.grey),
+                      ),
+                    ],
+                  ),
+                ),
+                ValueListenableBuilder<String>(
+                  valueListenable: AppPreferences.instance.currencyCode,
+                  builder: (context, _, _) {
+                    return Text(
+                      AppPreferences.instance.formatMoney(booking.price.toInt()),
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.blue,
+                      ),
+                    );
+                  },
+                ),
+              ],
+            ),
+            if (slot != null) ...[
+              const SizedBox(height: 12),
+              _BookingTimingSection(
+                booking: booking,
+                slot: slot,
+                isRiderView: false,
               ),
-            );
-          },
+            ],
+          ],
         ),
       ),
     );

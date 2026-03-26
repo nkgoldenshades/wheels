@@ -269,3 +269,4 @@ exports.verifyOtp = stripeEscrow.verifyOtp;
 exports.autoRefundExpired = stripeEscrow.autoRefundExpired;
 exports.refundPayment = stripeEscrow.refundPayment;
 exports.releaseFunds = stripeEscrow.releaseFunds;
+exports.createCheckoutSession = stripeEscrow.createCheckoutSession;

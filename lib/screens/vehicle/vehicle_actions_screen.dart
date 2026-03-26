@@ -148,6 +148,8 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                   const SizedBox(height: 12),
                   _buildHistorySection(entries),
                   const SizedBox(height: 12),
+                  _buildVehicleBookingHistory(context, vehicle),
+                  const SizedBox(height: 12),
                   _buildReviewsSection(context, vehicle),
                   const SizedBox(height: 32),
                 ],
@@ -274,6 +276,12 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
     List<String> galleryImages = [...vehicle.galleryImages];
     String? videoUrl = vehicle.videoUrl;
 
+    // Operator state
+    final operatorNameCtrl = TextEditingController(text: vehicle.operatorName ?? '');
+    final operatorPhoneCtrl = TextEditingController(text: vehicle.operatorPhone ?? '');
+    final operatorLicenseCtrl = TextEditingController(text: vehicle.operatorLicense ?? '');
+    String? operatorPhoto = vehicle.operatorPhoto;
+
     final picker = ImagePicker();
 
     await showModalBottomSheet<void>(
@@ -304,6 +312,13 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
               if (file == null) return;
               final bytes = await file.readAsBytes();
               setModalState(() => videoUrl = base64Encode(bytes));
+            }
+
+            Future<void> pickOperatorPhoto() async {
+              final file = await picker.pickImage(source: ImageSource.gallery, maxWidth: 512, maxHeight: 512, imageQuality: 85);
+              if (file == null) return;
+              final bytes = await file.readAsBytes();
+              setModalState(() => operatorPhoto = base64Encode(bytes));
             }
 
             return Padding(
@@ -477,6 +492,78 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                       ],
                     ),
                     const SizedBox(height: 16),
+                    // --- Operator Section ---
+                    const Divider(),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        const Icon(Icons.person_outline, size: 20, color: Colors.blue),
+                        const SizedBox(width: 8),
+                        const Text('Vehicle Operator (Optional)', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16)),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    const Text(
+                      'Assign a person who operates/handles this vehicle. Their contact will be shown to users instead of yours.',
+                      style: TextStyle(fontSize: 12, color: Colors.grey),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: operatorNameCtrl,
+                      decoration: const InputDecoration(
+                        labelText: 'Operator name',
+                        hintText: 'e.g. John Driver',
+                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.badge_outlined),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: operatorPhoneCtrl,
+                      keyboardType: TextInputType.phone,
+                      decoration: const InputDecoration(
+                        labelText: 'Operator phone',
+                        hintText: 'e.g. +1234567890',
+                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.phone_outlined),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: operatorLicenseCtrl,
+                      decoration: const InputDecoration(
+                        labelText: 'License number (optional)',
+                        hintText: 'For your records',
+                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.credit_card_outlined),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        if (operatorPhoto != null)
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(8),
+                            child: Image.memory(base64Decode(operatorPhoto!), width: 60, height: 60, fit: BoxFit.cover),
+                          ),
+                        if (operatorPhoto != null) const SizedBox(width: 12),
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: pickOperatorPhoto,
+                            icon: const Icon(Icons.photo_camera, size: 16),
+                            label: Text(operatorPhoto != null ? 'Change photo' : 'Add operator photo'),
+                          ),
+                        ),
+                        if (operatorPhoto != null) ...[
+                          const SizedBox(width: 8),
+                          IconButton(
+                            icon: const Icon(Icons.close, color: Colors.red),
+                            onPressed: () => setModalState(() => operatorPhoto = null),
+                          ),
+                        ],
+                      ],
+                    ),
+                    const SizedBox(height: 16),
                     SizedBox(
                       width: double.infinity,
                       child: FilledButton(
@@ -509,6 +596,10 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                             profileImage: profileImage,
                             galleryImages: galleryImages,
                             videoUrl: videoUrl,
+                            operatorName: operatorNameCtrl.text.trim().isEmpty ? null : operatorNameCtrl.text.trim(),
+                            operatorPhone: operatorPhoneCtrl.text.trim().isEmpty ? null : operatorPhoneCtrl.text.trim(),
+                            operatorLicense: operatorLicenseCtrl.text.trim().isEmpty ? null : operatorLicenseCtrl.text.trim(),
+                            operatorPhoto: operatorPhoto,
                           );
                           if (widget.isUserMode) {
                             await UserVehicleRepository.instance.updateVehicle(updated);
@@ -535,6 +626,9 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
     nameCtrl.dispose();
     typeCtrl.dispose();
     yearCtrl.dispose();
+    operatorNameCtrl.dispose();
+    operatorPhoneCtrl.dispose();
+    operatorLicenseCtrl.dispose();
   }
 
   Future<void> _openAddSheet(BuildContext context, Vehicle vehicle) async {
@@ -1368,6 +1462,12 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
   }
 
   Widget _buildHistorySection(List<SlotEntry> entries) {
+    // Slot history removed - users only need booking history
+    // Bookings are shown in the Requests page
+    return const SizedBox.shrink();
+  }
+
+  Widget _buildVehicleBookingHistory(BuildContext context, Vehicle vehicle) {
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 4),
       child: Padding(
@@ -1376,43 +1476,198 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'Slot History',
+              'Booking History',
               style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
             ),
             const SizedBox(height: 4),
             const Text(
-              'Booking history grouped by slot',
+              'Recent bookings for this vehicle',
               style: TextStyle(fontSize: 12, color: Colors.grey),
             ),
-            const SizedBox(height: 8),
-            if (entries.isEmpty)
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 8),
-                child: Text('No slots yet'),
-              )
-            else
-              ValueListenableBuilder<List<Booking>>(
-                valueListenable: BookingRepository.instance.bookings,
-                builder: (context, bookings, _) {
-                  return Column(
-                    children: entries.map((entry) {
-                      final slot = entry.slot;
-                      final slotBookings = bookings
-                          .where((b) => b.slotId == slot.id)
-                          .toList(growable: false);
+            const SizedBox(height: 12),
+            ValueListenableBuilder<List<Booking>>(
+              valueListenable: BookingRepository.instance.bookings,
+              builder: (context, allBookings, _) {
+                // Get all slots for this vehicle
+                final vehicleSlotIds = (widget.isUserMode
+                        ? UserSlotRepository.instance.allSlots
+                        : SlotRepository.instance.allSlots)
+                    .where((e) => e.slot.vehicleId == vehicle.id)
+                    .map((e) => e.slot.id)
+                    .toSet();
 
-                      return _SlotHistoryTile(
-                        slot: slot,
-                        bookings: slotBookings,
-                        fmtDate: _fmtDate,
-                        statusLabel: _statusLabel,
-                      );
-                    }).toList(),
+                // Filter bookings for this vehicle's slots
+                final vehicleBookings = allBookings
+                    .where((b) => vehicleSlotIds.contains(b.slotId))
+                    .toList()
+                  ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+
+                if (vehicleBookings.isEmpty) {
+                  return const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 8.0),
+                    child: Text(
+                      'No bookings yet',
+                      style: TextStyle(color: Colors.grey),
+                    ),
                   );
-                },
-              ),
+                }
+
+                // Show statistics
+                final completed = vehicleBookings
+                    .where((b) => b.status == BookingStatus.completed)
+                    .length;
+                final totalEarnings = vehicleBookings
+                    .where((b) => b.status == BookingStatus.completed)
+                    .fold<double>(0, (sum, b) => sum + b.price);
+
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Statistics row
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _buildStatBox(
+                            'Total',
+                            vehicleBookings.length.toString(),
+                            Icons.local_taxi,
+                            Colors.blue,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: _buildStatBox(
+                            'Done',
+                            completed.toString(),
+                            Icons.check_circle,
+                            Colors.green,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: _buildStatBox(
+                            'Earned',
+                            '₹${totalEarnings.toStringAsFixed(0)}',
+                            Icons.currency_rupee,
+                            Colors.orange,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    const Text(
+                      'Recent Bookings',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    // Show latest 3 bookings
+                    ...vehicleBookings.take(3).map((booking) {
+                      return _buildBookingTile(booking);
+                    }),
+                    if (vehicleBookings.length > 3) ...[
+                      const SizedBox(height: 8),
+                      Center(
+                        child: TextButton(
+                          onPressed: () {
+                            Navigator.pushNamed(context, '/requests');
+                          },
+                          child: const Text('View All'),
+                        ),
+                      ),
+                    ],
+                  ],
+                );
+              },
+            ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildStatBox(String label, String value, IconData icon, Color color) {
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        children: [
+          Icon(icon, size: 18, color: color),
+          const SizedBox(height: 4),
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.bold,
+              color: color,
+            ),
+          ),
+          Text(
+            label,
+            style: const TextStyle(fontSize: 10, color: Colors.grey),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBookingTile(Booking booking) {
+    Color statusColor;
+    switch (booking.status) {
+      case BookingStatus.completed:
+        statusColor = Colors.green;
+        break;
+      case BookingStatus.accepted:
+        statusColor = Colors.blue;
+        break;
+      case BookingStatus.pending:
+        statusColor = Colors.orange;
+        break;
+      case BookingStatus.rejected:
+        statusColor = Colors.red;
+        break;
+      case BookingStatus.refunded:
+        statusColor = Colors.purple;
+        break;
+    }
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: statusColor.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: statusColor.withValues(alpha: 0.2)),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.person, size: 16, color: statusColor),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  booking.userName ?? 'User',
+                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12),
+                ),
+                Text(
+                  _fmtDate(booking.createdAt),
+                  style: const TextStyle(fontSize: 10, color: Colors.grey),
+                ),
+              ],
+            ),
+          ),
+          Text(
+            '₹${booking.price.toStringAsFixed(0)}',
+            style: TextStyle(fontWeight: FontWeight.bold, color: statusColor, fontSize: 13),
+          ),
+        ],
       ),
     );
   }
@@ -1973,21 +2228,6 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
     );
   }
   */
-
-  String _statusLabel(Booking booking) {
-    switch (booking.status) {
-      case BookingStatus.pending:
-        return 'Pending';
-      case BookingStatus.accepted:
-        return 'Accepted';
-      case BookingStatus.completed:
-        return 'Completed';
-      case BookingStatus.rejected:
-        return 'Rejected';
-      case BookingStatus.refunded:
-        return 'Refunded';
-    }
-  }
 
   String _fmtDate(DateTime d) {
     return '${d.day}/${d.month}/${d.year}';

@@ -48,6 +48,12 @@ class Vehicle {
   final DateTime? panVerifiedAt;
   final String? panImageBase64;
 
+  // Operator information (optional - person who operates/handles this vehicle)
+  final String? operatorName;
+  final String? operatorPhone;
+  final String? operatorPhoto; // base64 or URL
+  final String? operatorLicense; // License number for records
+
   /// True only when all mandatory + optional docs are verified and none expired
   bool get isFullyVerified {
     final insuranceValid = insuranceVerified &&
@@ -95,6 +101,10 @@ class Vehicle {
     this.panVerified = false,
     this.panVerifiedAt,
     this.panImageBase64,
+    this.operatorName,
+    this.operatorPhone,
+    this.operatorPhoto,
+    this.operatorLicense,
   });
 
   Vehicle copyWith({
@@ -137,6 +147,10 @@ class Vehicle {
     bool? panVerified,
     DateTime? panVerifiedAt,
     String? panImageBase64,
+    String? operatorName,
+    String? operatorPhone,
+    String? operatorPhoto,
+    String? operatorLicense,
   }) {
     return Vehicle(
       id: id ?? this.id,
@@ -178,6 +192,10 @@ class Vehicle {
       panVerified: panVerified ?? this.panVerified,
       panVerifiedAt: panVerifiedAt ?? this.panVerifiedAt,
       panImageBase64: panImageBase64 ?? this.panImageBase64,
+      operatorName: operatorName ?? this.operatorName,
+      operatorPhone: operatorPhone ?? this.operatorPhone,
+      operatorPhoto: operatorPhoto ?? this.operatorPhoto,
+      operatorLicense: operatorLicense ?? this.operatorLicense,
     );
   }
 
@@ -222,6 +240,10 @@ class Vehicle {
       'pan_verified': panVerified,
       'pan_verified_at': panVerifiedAt?.toIso8601String(),
       'pan_image': panImageBase64,
+      'operator_name': operatorName,
+      'operator_phone': operatorPhone,
+      'operator_photo': operatorPhoto,
+      'operator_license': operatorLicense,
       'is_online': true, // Default to online when creating
       'is_user_vehicle': false, // Will be set by repository
       'updated_at': DateTime.now().toIso8601String(),
@@ -289,6 +311,10 @@ class Vehicle {
           ? DateTime.parse(json['pan_verified_at'] ?? json['panVerifiedAt'])
           : null,
       panImageBase64: json['pan_image'] ?? json['panImage'],
+      operatorName: json['operator_name'] ?? json['operatorName'],
+      operatorPhone: json['operator_phone'] ?? json['operatorPhone'],
+      operatorPhoto: json['operator_photo'] ?? json['operatorPhoto'],
+      operatorLicense: json['operator_license'] ?? json['operatorLicense'],
     );
   }
 }

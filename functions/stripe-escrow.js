@@ -2,24 +2,25 @@ const functions = require('firebase-functions');
 const admin = require('firebase-admin');
 const { createClient } = require('@supabase/supabase-js');
 
-const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
+// Try to get from .env first (local), then Firebase config (deployed)
+const stripeSecretKey = process.env.STRIPE_SECRET_KEY || functions.config()?.stripe?.secret_key;
 if (!stripeSecretKey) {
-  throw new Error('Missing STRIPE_SECRET_KEY environment variable');
+  console.warn('Missing STRIPE_SECRET_KEY - Stripe functions will not work');
 }
-const stripe = require('stripe')(stripeSecretKey);
+const stripe = stripeSecretKey ? require('stripe')(stripeSecretKey) : null;
 
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-if (!supabaseUrl) {
-  throw new Error('Missing SUPABASE_URL environment variable');
-}
-if (!supabaseServiceRoleKey) {
-  throw new Error('Missing SUPABASE_SERVICE_ROLE_KEY environment variable');
+const supabaseUrl = process.env.SUPABASE_URL || functions.config()?.supabase?.url;
+const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || functions.config()?.supabase?.service_role_key;
+
+if (!supabaseUrl || !supabaseServiceRoleKey) {
+  console.warn('Missing Supabase config - Database functions will not work');
 }
 
-const supabase = createClient(supabaseUrl, supabaseServiceRoleKey, {
-  auth: { persistSession: false },
-});
+const supabase = (supabaseUrl && supabaseServiceRoleKey) 
+  ? createClient(supabaseUrl, supabaseServiceRoleKey, {
+      auth: { persistSession: false },
+    })
+  : null;
 
 async function _getAuthUid(req) {
   const header = req.headers?.authorization || req.headers?.Authorization;
@@ -545,6 +546,158 @@ exports.releaseFunds = functions.https.onRequest(async (req, res) => {
     });
   } catch (error) {
     console.error('Release funds error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * Create Stripe Checkout Session for web payments
+ * Called when web users want to pay
+ */
+exports.createCheckoutSession = functions.https.onRequest(async (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  if (req.method === 'OPTIONS') {
+    res.set('Access-Control-Allow-Methods', 'POST');
+    res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    return res.status(204).send('');
+  }
+
+  const {
+    user_id,
+    provider_id,
+    post_id,
+    slot_id,
+    amount,
+    currency,
+    commission_amount,
+    success_url,
+    cancel_url,
+  } = req.body;
+
+  let callerUid = null;
+  try {
+    callerUid = await _getAuthUid(req);
+  } catch (e) {
+    return res.status(401).json({ error: 'Invalid auth token' });
+  }
+  if (!callerUid) {
+    return res.status(401).json({ error: 'Missing auth token' });
+  }
+
+  const parsedAmount = _toInt(amount);
+  const parsedCommission = _toInt(commission_amount) ?? 0;
+  const normalizedCurrency =
+    typeof currency === 'string' && currency.trim() !== ''
+      ? currency.trim().toLowerCase()
+      : 'inr';
+
+  if (!user_id || !provider_id || (!post_id && !slot_id)) {
+    return res.status(400).json({ error: 'Missing required fields' });
+  }
+  if (callerUid !== user_id) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  if (parsedAmount === null || parsedAmount <= 0) {
+    return res.status(400).json({ error: 'Invalid amount' });
+  }
+  if (parsedCommission < 0 || parsedCommission > parsedAmount) {
+    return res.status(400).json({ error: 'Invalid commission_amount' });
+  }
+
+  try {
+    // Generate OTP for later verification
+    const otp = generateOTP();
+
+    // Calculate countdown end time (1 hour from now)
+    const countdownEndTime = new Date();
+    countdownEndTime.setHours(countdownEndTime.getHours() + 1);
+
+    // Create Stripe Checkout Session
+    const session = await stripe.checkout.sessions.create({
+      payment_method_types: ['card'],
+      line_items: [
+        {
+          price_data: {
+            currency: normalizedCurrency,
+            product_data: {
+              name: 'Booking Payment',
+              description: slot_id ? `Slot: ${slot_id}` : `Post: ${post_id}`,
+            },
+            unit_amount: parsedAmount,
+          },
+          quantity: 1,
+        },
+      ],
+      mode: 'payment',
+      success_url: success_url || 'https://vaultwheels.web.app/#/payment-success',
+      cancel_url: cancel_url || 'https://vaultwheels.web.app/#/payment-cancel',
+      metadata: {
+        user_id: user_id,
+        provider_id: provider_id,
+        ...(post_id ? { post_id: post_id } : {}),
+        ...(slot_id ? { slot_id: slot_id } : {}),
+        commission_amount: parsedCommission.toString(),
+        otp: otp,
+        countdown_end_time: countdownEndTime.toISOString(),
+      },
+      payment_intent_data: {
+        capture_method: 'manual',
+        metadata: {
+          user_id: user_id,
+          provider_id: provider_id,
+          ...(post_id ? { post_id: post_id } : {}),
+          ...(slot_id ? { slot_id: slot_id } : {}),
+        },
+      },
+    });
+
+    // Create pending booking in Supabase
+    const countdownIso = countdownEndTime.toISOString();
+    const createdIso = new Date().toISOString();
+    const insertPayload = {
+      user_id: user_id,
+      provider_id: provider_id,
+      ...(post_id ? { post_id: post_id } : {}),
+      ...(slot_id ? { slot_id: slot_id } : {}),
+      stripe_payment_intent_id: session.payment_intent,
+      amount: parsedAmount,
+      currency: normalizedCurrency,
+      commission_amount: parsedCommission,
+      otp: otp,
+      otp_verified: false,
+      countdown_end_time: countdownIso,
+      status: 'pending',
+      created_at: createdIso,
+    };
+
+    const { data: insertedBooking, error: insertError } = await supabase
+      .from('bookings')
+      .insert(insertPayload)
+      .select('id')
+      .single();
+
+    if (insertError) {
+      console.error('Supabase insert booking error:', insertError);
+      throw new Error('Failed to create booking');
+    }
+
+    const bookingId = insertedBooking?.id;
+    if (!bookingId) {
+      throw new Error('Failed to create booking');
+    }
+
+    console.log(`Created checkout session for booking ${bookingId}`);
+
+    res.json({
+      success: true,
+      url: session.url,
+      session_id: session.id,
+      payment_intent: session.payment_intent,
+      otp: otp, // Remove this in production!
+      countdown_end_time: countdownEndTime.toISOString(),
+    });
+  } catch (error) {
+    console.error('Create checkout session error:', error);
     res.status(500).json({ error: error.message });
   }
 });
