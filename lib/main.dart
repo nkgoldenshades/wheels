@@ -67,6 +67,22 @@ String _cleanLoc(String? raw) {
   return t.contains('|') ? t.split('|').first.trim() : t;
 }
 
+/// Extract lat,lng from location string format: "Address|lat,lng|keywords"
+Map<String, double>? _extractLatLng(String? raw) {
+  if (raw == null || raw.isEmpty) return null;
+  final parts = raw.split('|');
+  if (parts.length < 2) return null;
+  
+  final coords = parts[1].split(',');
+  if (coords.length != 2) return null;
+  
+  final lat = double.tryParse(coords[0].trim());
+  final lng = double.tryParse(coords[1].trim());
+  
+  if (lat == null || lng == null) return null;
+  return {'lat': lat, 'lng': lng};
+}
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -1275,6 +1291,8 @@ class MyApp extends StatelessWidget {
         '/main': (context) => const MainScreen(),
         '/plans': (context) => const PlansScreen(),
         '/expert-support': (context) => const ExpertSupportScreen(),
+        '/payment-success': (context) => const PaymentSuccessScreen(),
+        '/payment-cancel': (context) => const PaymentCancelScreen(),
       },
     );
   }
@@ -2175,7 +2193,7 @@ class UserMyPostsPage extends StatelessWidget {
       return '$h:$m';
     }
 
-    return '${p.startTime.day}/${p.startTime.month} ${fmt(p.startTime)} - ${fmt(p.endTime)}';
+    return '${p.startTime.day}/${p.startTime.month} ${fmt(p.startTime)}';
   }
 }
 
@@ -2316,6 +2334,29 @@ class MyPostsPage extends StatelessWidget {
                           ),
                         ],
                       ),
+                      // Show lat/lng if available
+                      Builder(
+                        builder: (context) {
+                          final location = slot.baseLocation ?? slot.fromLocation;
+                          final coords = _extractLatLng(location);
+                          if (coords != null) {
+                            return Padding(
+                              padding: const EdgeInsets.only(top: 4),
+                              child: Row(
+                                children: [
+                                  Icon(Icons.location_on, size: 12, color: Colors.grey[600]),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    'Lat: ${coords['lat']!.toStringAsFixed(6)}, Lng: ${coords['lng']!.toStringAsFixed(6)}',
+                                    style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+                                  ),
+                                ],
+                              ),
+                            );
+                          }
+                          return const SizedBox.shrink();
+                        },
+                      ),
                       if (slot.notes?.isNotEmpty == true)
                         Text(
                           slot.notes!,
@@ -2362,7 +2403,7 @@ class MyPostsPage extends StatelessWidget {
       return '$h:$m';
     }
 
-    return '${start.day}/${start.month} ${fmt(start)} - ${fmt(end)}';
+    return '${start.day}/${start.month} ${fmt(start)}';
   }
 
   String _serviceLabel(ServiceType type) {
@@ -3276,6 +3317,34 @@ class PostsPage extends StatefulWidget {
   State<PostsPage> createState() => _PostsPageState();
 }
 
+enum SortOption {
+  priceHighToLow,
+  priceLowToHigh,
+  ratingHighToLow,
+  bookingsHighToLow,
+  newest,
+  oldest,
+}
+
+extension SortOptionExtension on SortOption {
+  String get displayName {
+    switch (this) {
+      case SortOption.priceHighToLow:
+        return 'Price: High to Low';
+      case SortOption.priceLowToHigh:
+        return 'Price: Low to High';
+      case SortOption.ratingHighToLow:
+        return 'Rating: High to Low';
+      case SortOption.bookingsHighToLow:
+        return 'Most Booked';
+      case SortOption.newest:
+        return 'Newest First';
+      case SortOption.oldest:
+        return 'Oldest First';
+    }
+  }
+}
+
 class _PostsPageState extends State<PostsPage> {
   ServiceType?
   _selectedServiceType; // null = show all, otherwise filter by service type
@@ -3287,6 +3356,9 @@ class _PostsPageState extends State<PostsPage> {
   // Pickup mode filter
   PickupMode?
   _selectedPickupMode; // null = both, otherwise filter by pickup mode
+
+  // Sort option
+  SortOption _sortOption = SortOption.newest;
 
   // Location filters (based on route type)
   String? _filterFromLocation;
@@ -3358,6 +3430,12 @@ class _PostsPageState extends State<PostsPage> {
             title: const Text('Posts'),
             backgroundColor: Theme.of(context).colorScheme.inversePrimary,
             actions: [
+              // Sort button
+              IconButton(
+                icon: const Icon(Icons.sort),
+                tooltip: 'Sort',
+                onPressed: () => _showSortBottomSheet(context),
+              ),
               // Debug button to show repository status
               IconButton(
                 icon: const Icon(Icons.info_outline),
@@ -3694,6 +3772,40 @@ class _PostsPageState extends State<PostsPage> {
     );
   }
 
+  void _showSortBottomSheet(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Sort By',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 16),
+            ...SortOption.values.map((option) => ListTile(
+              leading: Icon(
+                _sortOption == option ? Icons.check_circle : Icons.circle_outlined,
+                color: _sortOption == option ? Colors.blue : Colors.grey,
+              ),
+              title: Text(option.displayName),
+              selected: _sortOption == option,
+              onTap: () {
+                setState(() => _sortOption = option);
+                Navigator.pop(context);
+              },
+            )),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildProviderPostsList() {
     return ValueListenableBuilder<Map<String, int>>(
       valueListenable: BookingRepository.instance.remainingCapacityBySlotId,
@@ -3947,18 +4059,18 @@ class _PostsPageState extends State<PostsPage> {
     final List<SlotFeedItem> repoItems;
 
     if (_showUserPosts) {
-      // User Posts tab - show ONLY user posts from ONLINE vehicles
-      final currentUserName =
-          ProfileRepository.instance.profile.value.profileName;
+      // User Posts tab - show ONLY OTHER users' posts (not current user's own posts)
+      // Providers can accept these requests
       repoItems = UserSlotRepository.instance.allSlots
           .where(
-            (e) => UserVehicleRepository.instance.isOnline(e.vehicle.id),
-          ) // Only show posts from online vehicles
+            (e) => UserVehicleRepository.instance.isOnline(e.vehicle.id) &&
+                e.vehicle.userId != currentUser.id, // Exclude current user's own posts
+          )
           .map(
             (e) => SlotFeedItem(
               slot: e.slot,
               vehicle: e.vehicle,
-              providerName: currentUserName, // Use current profile name
+              providerName: e.vehicle.userName, // Use the post creator's name
               providerAvatar: '',
               providerRating: 5.0,
               isOffer: false,
@@ -3966,7 +4078,7 @@ class _PostsPageState extends State<PostsPage> {
             ),
           )
           .toList();
-      debugPrint('📊 User posts mapped: ${repoItems.length}');
+      debugPrint('📊 User posts mapped (excluding own): ${repoItems.length}');
     } else {
       // Provider Posts tab - show ONLY provider posts from ONLINE vehicles
       final currentUser = AuthRepository.instance.currentUser;
@@ -4188,9 +4300,36 @@ class _PostsPageState extends State<PostsPage> {
             })
             .toList(growable: false);
 
-    if (!_nearestEnabled) return distanceFiltered;
+    if (!_nearestEnabled) return _applySorting(distanceFiltered);
 
     return _sortByDistance(distanceFiltered);
+  }
+
+  List<SlotFeedItem> _applySorting(List<SlotFeedItem> items) {
+    final sorted = List<SlotFeedItem>.from(items);
+    
+    switch (_sortOption) {
+      case SortOption.priceHighToLow:
+        sorted.sort((a, b) => b.slot.price.compareTo(a.slot.price));
+        break;
+      case SortOption.priceLowToHigh:
+        sorted.sort((a, b) => a.slot.price.compareTo(b.slot.price));
+        break;
+      case SortOption.ratingHighToLow:
+        sorted.sort((a, b) => b.vehicle.averageRating.compareTo(a.vehicle.averageRating));
+        break;
+      case SortOption.bookingsHighToLow:
+        sorted.sort((a, b) => b.vehicle.totalBookings.compareTo(a.vehicle.totalBookings));
+        break;
+      case SortOption.newest:
+        sorted.sort((a, b) => b.slot.createdAt.compareTo(a.slot.createdAt));
+        break;
+      case SortOption.oldest:
+        sorted.sort((a, b) => a.slot.createdAt.compareTo(b.slot.createdAt));
+        break;
+    }
+    
+    return sorted;
   }
 
   List<SlotFeedItem> _sortByDistance(List<SlotFeedItem> items) {
@@ -5701,7 +5840,7 @@ class _RequestsBodyState extends State<_RequestsBody> {
             if (post != null) ...[
               const SizedBox(height: 8),
               Text(
-                '${_getServiceTypeName(post.serviceType)} · ${_fmtDateTime(post.startTime)} → ${_fmtDateTime(post.endTime)}',
+                '${_getServiceTypeName(post.serviceType)} · ${_fmtDateTime(post.startTime)}',
                 style: TextStyle(fontSize: 13, color: Colors.grey[700]),
               ),
               if (post.fromLocation != null && post.toLocation != null)
@@ -5871,10 +6010,20 @@ class _RequestsBodyState extends State<_RequestsBody> {
     final status = _statusLabel(b.status);
     final color = _statusColor(b.status);
     Slot? bookingSlot;
+    // Try to find slot in both provider and user repositories
     for (final e in SlotRepository.instance.allSlots) {
       if (e.slot.id == b.slotId) {
         bookingSlot = e.slot;
         break;
+      }
+    }
+    // If not found in provider slots, check user slots
+    if (bookingSlot == null) {
+      for (final e in UserSlotRepository.instance.allSlots) {
+        if (e.slot.id == b.slotId) {
+          bookingSlot = e.slot;
+          break;
+        }
       }
     }
     final Slot? slotForMap = b.status == BookingStatus.accepted
@@ -5957,14 +6106,99 @@ class _RequestsBodyState extends State<_RequestsBody> {
             ),
             const SizedBox(height: 4),
             if (bookingSlot != null) ...[
-              Text(
-                'Start: ${_fmtDateTime(bookingSlot.startTime)}',
-                style: TextStyle(color: Colors.grey[700]),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                'End:   ${_fmtDateTime(bookingSlot.endTime)}',
-                style: TextStyle(color: Colors.grey[700]),
+              // GPS Type and Location
+              Builder(
+                builder: (context) {
+                  // Find vehicle for this booking
+                  Vehicle? vehicle;
+                  for (final e in VehicleRepository.instance.allVehicles) {
+                    if (e.id == bookingSlot!.vehicleId) {
+                      vehicle = e;
+                      break;
+                    }
+                  }
+                  if (vehicle == null) {
+                    for (final e in UserVehicleRepository.instance.allVehicles) {
+                      if (e.id == bookingSlot!.vehicleId) {
+                        vehicle = e;
+                        break;
+                      }
+                    }
+                  }
+                  
+                  if (vehicle == null) return const SizedBox.shrink();
+                  
+                  final IconData gpsIcon;
+                  final String gpsLabel;
+                  final Color gpsColor;
+                  
+                  switch (vehicle.gpsMode) {
+                    case VehicleGpsMode.deviceLive:
+                      gpsIcon = Icons.gps_fixed;
+                      gpsLabel = 'Live GPS';
+                      gpsColor = Colors.green;
+                      break;
+                    case VehicleGpsMode.externalLink:
+                      gpsIcon = Icons.link;
+                      gpsLabel = 'External GPS';
+                      gpsColor = Colors.blue;
+                      break;
+                    case VehicleGpsMode.manual:
+                      gpsIcon = Icons.edit_location_alt;
+                      gpsLabel = 'Manual Location';
+                      gpsColor = Colors.orange;
+                      break;
+                  }
+                  
+                  double? lat;
+                  double? lng;
+                  
+                  if (vehicle.gpsMode == VehicleGpsMode.manual) {
+                    lat = vehicle.manualLat;
+                    lng = vehicle.manualLng;
+                  } else {
+                    lat = vehicle.lastKnownLat;
+                    lng = vehicle.lastKnownLng;
+                  }
+                  
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(gpsIcon, size: 14, color: gpsColor),
+                          const SizedBox(width: 6),
+                          Text(
+                            gpsLabel,
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: gpsColor,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (lat != null && lng != null) ...[
+                        const SizedBox(height: 4),
+                        Row(
+                          children: [
+                            const Icon(Icons.location_on, size: 14, color: Colors.grey),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Text(
+                                'Lat: ${lat.toStringAsFixed(6)}, Lng: ${lng.toStringAsFixed(6)}',
+                                style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                      const SizedBox(height: 8),
+                    ],
+                  );
+                },
               ),
             ] else
               Text(
@@ -5993,14 +6227,6 @@ class _RequestsBodyState extends State<_RequestsBody> {
                     icon: const Icon(Icons.map_outlined),
                   ),
                 ],
-              ),
-            ],
-            if (bookingSlot != null) ...[
-              const SizedBox(height: 8),
-              _BookingTimingSection(
-                booking: b,
-                slot: bookingSlot,
-                isRiderView: isRiderView,
               ),
             ],
             if (b.status == BookingStatus.accepted ||
@@ -6161,14 +6387,6 @@ class _RequestsBodyState extends State<_RequestsBody> {
                                   ),
                                 ],
                               ),
-                              if (b.countdownEndTime != null) ...[
-                                const SizedBox(height: 4),
-                                CountdownText(
-                                  endTime: b.countdownEndTime!,
-                                  startTime: bookingSlot?.startTime,
-                                  bookingId: b.id,
-                                ),
-                              ],
                             ],
                           ],
                         ),
@@ -6189,9 +6407,63 @@ class _RequestsBodyState extends State<_RequestsBody> {
                 ),
                 // After end time: user can extend or request refund
                 if (bookingSlot != null) ...[
+                  const SizedBox(height: 10),
+                  // Start and End times at the bottom
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: Colors.grey[50],
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.grey[300]!),
+                    ),
+                    child: Column(
+                      children: [
+                        Row(
+                          children: [
+                            const Icon(Icons.access_time, size: 16, color: Colors.blue),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                'Start: ${_fmtDateTime(bookingSlot.startTime)}',
+                                style: const TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        Row(
+                          children: [
+                            const Icon(Icons.event_available, size: 16, color: Colors.green),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                'End:   ${_fmtDateTime(bookingSlot.endTime)}',
+                                style: const TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 6),
                   _AutoRefundSection(
                     booking: b,
                     slot: bookingSlot,
+                    isRiderView: isRiderView,
+                  ),
+                  const SizedBox(height: 6),
+                  // Timing section with countdown as small hint at the very bottom
+                  _BookingTimingSection(
+                    booking: b,
+                    slot: bookingSlot,
+                    isRiderView: isRiderView,
                   ),
                 ],
                 // Add review button for completed trips (user view)
@@ -6372,31 +6644,23 @@ class _RequestsBodyState extends State<_RequestsBody> {
                     ),
                   )
                 else if (bookingSlot != null && DateTime.now().isAfter(bookingSlot.endTime))
-                  // After end time: ask user to extend or enter OTP
+                  // After end time: OTP entry for provider
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: Colors.orange.withValues(alpha: 0.1),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: Colors.orange.withValues(alpha: 0.4)),
-                        ),
-                        child: const Row(
-                          children: [
-                            Icon(Icons.access_time, color: Colors.orange),
-                            SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                'Service time ended. Ask the user to extend time or provide OTP to complete.',
-                                style: TextStyle(fontSize: 13),
-                              ),
+                      Row(
+                        children: [
+                          Icon(Icons.timer_off_outlined, size: 12, color: Colors.grey[600]),
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: Text(
+                              'Trip time over - Ask extension from user',
+                              style: TextStyle(fontSize: 11, color: Colors.grey[600]),
                             ),
-                          ],
-                        ),
+                          ),
+                        ],
                       ),
-                      const SizedBox(height: 10),
+                      const SizedBox(height: 8),
                       Row(
                         children: [
                           Expanded(
@@ -6851,10 +7115,12 @@ class _ExtendTimeDialogState extends State<_ExtendTimeDialog> {
 class _AutoRefundSection extends StatefulWidget {
   final Booking booking;
   final Slot slot;
+  final bool isRiderView;
 
   const _AutoRefundSection({
     required this.booking,
     required this.slot,
+    required this.isRiderView,
   });
 
   @override
@@ -6884,9 +7150,10 @@ class _AutoRefundSectionState extends State<_AutoRefundSection> {
     final hasEnded = now.isAfter(widget.slot.endTime);
     final booking = widget.booking;
 
-    // Don't show if already completed or refunded
+    // Don't show if already completed, refunded, or rejected
     if (booking.status == BookingStatus.completed ||
-        booking.status == BookingStatus.refunded) {
+        booking.status == BookingStatus.refunded ||
+        booking.status == BookingStatus.rejected) {
       return const SizedBox.shrink();
     }
 
@@ -6895,92 +7162,78 @@ class _AutoRefundSectionState extends State<_AutoRefundSection> {
       return const SizedBox.shrink();
     }
 
-    return Column(
-      children: [
-        const SizedBox(height: 10),
-        Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: Colors.orange.withValues(alpha: 0.08),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: Colors.orange.withValues(alpha: 0.35)),
+    // Provider view: Show message to ask user for extension
+    if (!widget.isRiderView) {
+      return Row(
+        children: [
+          Icon(Icons.timer_off_outlined, size: 12, color: Colors.grey[600]),
+          const SizedBox(width: 4),
+          Expanded(
+            child: Text(
+              'Trip time over - Ask extension from user',
+              style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+            ),
           ),
-          child: const Row(
-            children: [
-              Icon(Icons.timer_off_outlined, color: Colors.orange),
-              SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  'Service time has ended. Extend time or request a refund.',
-                  style: TextStyle(fontSize: 13),
+        ],
+      );
+    }
+
+    // User view: Show refund option
+    return Row(
+      children: [
+        Icon(Icons.timer_off_outlined, size: 12, color: Colors.grey[600]),
+        const SizedBox(width: 4),
+        Text(
+          'Service time ended',
+          style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+        ),
+        const Spacer(),
+        InkWell(
+          onTap: () async {
+            final confirm = await showDialog<bool>(
+              context: context,
+              builder: (ctx) => AlertDialog(
+                title: const Text('Request Refund'),
+                content: const Text(
+                  'The service time has ended. Do you want to request a refund?',
                 ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(ctx, false),
+                    child: const Text('Cancel'),
+                  ),
+                  FilledButton(
+                    onPressed: () => Navigator.pop(ctx, true),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: Colors.red,
+                    ),
+                    child: const Text('Refund'),
+                  ),
+                ],
+              ),
+            );
+            if (confirm != true || !context.mounted) return;
+            await BookingRepository.instance.markRefunded(booking.id);
+            if (context.mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Refund requested'),
+                  backgroundColor: Colors.orange,
+                ),
+              );
+            }
+          },
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.undo, size: 12, color: Colors.red[700]),
+              const SizedBox(width: 4),
+              Text(
+                'Refund',
+                style: TextStyle(fontSize: 11, color: Colors.red[700], fontWeight: FontWeight.w600),
               ),
             ],
           ),
-        ),
-        const SizedBox(height: 8),
-        Row(
-          children: [
-            Expanded(
-              child: OutlinedButton.icon(
-                icon: const Icon(Icons.more_time),
-                label: const Text('Extend Time'),
-                onPressed: () {
-                  showDialog(
-                    context: context,
-                    builder: (ctx) => _ExtendTimeDialog(
-                      booking: booking,
-                      slot: widget.slot,
-                    ),
-                  );
-                },
-              ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: OutlinedButton.icon(
-                icon: const Icon(Icons.undo, color: Colors.red),
-                label: const Text('Refund', style: TextStyle(color: Colors.red)),
-                style: OutlinedButton.styleFrom(
-                  side: const BorderSide(color: Colors.red),
-                ),
-                onPressed: () async {
-                  final confirm = await showDialog<bool>(
-                    context: context,
-                    builder: (ctx) => AlertDialog(
-                      title: const Text('Request Refund'),
-                      content: const Text(
-                        'The service time has ended. Do you want to request a refund?',
-                      ),
-                      actions: [
-                        TextButton(
-                          onPressed: () => Navigator.pop(ctx, false),
-                          child: const Text('Cancel'),
-                        ),
-                        FilledButton(
-                          onPressed: () => Navigator.pop(ctx, true),
-                          style: FilledButton.styleFrom(
-                            backgroundColor: Colors.red,
-                          ),
-                          child: const Text('Refund'),
-                        ),
-                      ],
-                    ),
-                  );
-                  if (confirm != true || !context.mounted) return;
-                  await BookingRepository.instance.markRefunded(booking.id);
-                  if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Refund requested'),
-                        backgroundColor: Colors.orange,
-                      ),
-                    );
-                  }
-                },
-              ),
-            ),
-          ],
         ),
       ],
     );
@@ -7037,48 +7290,35 @@ class _BookingTimingSectionState extends State<_BookingTimingSection> {
     final start = widget.slot.startTime;
     final end = widget.slot.endTime;
 
-    Color bgColor;
     IconData icon;
     String label;
 
     if (now.isBefore(start)) {
       final diff = start.difference(now);
-      bgColor = Colors.blue;
       icon = Icons.schedule;
       label = 'Starts in ${_fmt(diff)}';
     } else if (now.isBefore(end)) {
       final diff = end.difference(now);
-      bgColor = Colors.green;
       icon = Icons.play_circle_outline;
-      label = 'In Progress · ends in ${_fmt(diff)}';
+      label = 'Trip time · ends in ${_fmt(diff)}';
     } else {
-      bgColor = Colors.orange;
       icon = Icons.timer_off_outlined;
       label = 'Service time ended';
     }
 
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: bgColor.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: bgColor.withValues(alpha: 0.35)),
-      ),
-      child: Row(
-        children: [
-          Icon(icon, size: 18, color: bgColor),
-          const SizedBox(width: 8),
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-              color: bgColor,
-            ),
+    // Display as small hint text
+    return Row(
+      children: [
+        Icon(icon, size: 12, color: Colors.grey[600]),
+        const SizedBox(width: 4),
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 11,
+            color: Colors.grey[600],
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }
@@ -7183,17 +7423,8 @@ class _CountdownTextState extends State<CountdownText> {
       );
     }
 
-    // In progress — counting to end time
-    return Row(
-      children: [
-        Icon(Icons.timer_outlined, size: 12, color: Colors.orange[700]),
-        const SizedBox(width: 4),
-        Text(
-          'Auto-refund in ${_fmt(_remaining)}',
-          style: TextStyle(fontSize: 11, color: Colors.orange[700]),
-        ),
-      ],
-    );
+    // In progress — counting to end time (no text, just return empty)
+    return const SizedBox.shrink();
   }
 }
 
@@ -7946,6 +8177,419 @@ class ProviderPostsListPage extends StatelessWidget {
             },
           );
         },
+      ),
+    );
+  }
+}
+
+// Payment Success Screen - Shown after successful Stripe Checkout
+class PaymentSuccessScreen extends StatefulWidget {
+  const PaymentSuccessScreen({super.key});
+
+  @override
+  State<PaymentSuccessScreen> createState() => _PaymentSuccessScreenState();
+}
+
+class _PaymentSuccessScreenState extends State<PaymentSuccessScreen> {
+  String? _bookingId;
+  bool _loading = true;
+  Booking? _booking;
+  SlotEntry? _slotEntry;
+
+  @override
+  void initState() {
+    super.initState();
+    _extractBookingIdAndLoadDetails();
+  }
+
+  Future<void> _extractBookingIdAndLoadDetails() async {
+    // Extract booking_id from URL query parameters
+    final uri = Uri.base;
+    _bookingId = uri.queryParameters['booking_id'];
+    
+    if (_bookingId != null) {
+      // Try to find the booking in local storage
+      _booking = BookingRepository.instance.getBookingById(_bookingId!);
+
+      // Try to find the slot details
+      if (_booking != null) {
+        final allSlots = SlotRepository.instance.allSlots;
+        try {
+          _slotEntry = allSlots.firstWhere(
+            (s) => s.slot.id == _booking!.slotId,
+          );
+        } catch (_) {
+          // Slot not found in provider slots, try user slots
+          final allUserSlots = UserSlotRepository.instance.allSlots;
+          try {
+            _slotEntry = allUserSlots.firstWhere(
+              (s) => s.slot.id == _booking!.slotId,
+            );
+          } catch (_) {
+            // Slot not found
+          }
+        }
+      }
+    }
+    
+    setState(() {
+      _loading = false;
+    });
+  }
+
+  String _formatDateTime(DateTime dateTime) {
+    final now = DateTime.now();
+    final difference = dateTime.difference(now);
+    
+    if (difference.inDays == 0) {
+      return 'Today at ${dateTime.hour.toString().padLeft(2, '0')}:${dateTime.minute.toString().padLeft(2, '0')}';
+    } else if (difference.inDays == 1) {
+      return 'Tomorrow at ${dateTime.hour.toString().padLeft(2, '0')}:${dateTime.minute.toString().padLeft(2, '0')}';
+    } else {
+      return '${dateTime.day}/${dateTime.month}/${dateTime.year} at ${dateTime.hour.toString().padLeft(2, '0')}:${dateTime.minute.toString().padLeft(2, '0')}';
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Payment Successful'),
+        backgroundColor: Colors.green,
+        foregroundColor: Colors.white,
+      ),
+      body: Center(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24.0),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                width: 100,
+                height: 100,
+                decoration: const BoxDecoration(
+                  color: Colors.green,
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.check,
+                  size: 60,
+                  color: Colors.white,
+                ),
+              ),
+              const SizedBox(height: 24),
+              const Text(
+                'Payment Successful!',
+                style: TextStyle(
+                  fontSize: 24,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'Your booking has been confirmed.',
+                style: TextStyle(
+                  fontSize: 16,
+                  color: Colors.grey,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              if (_bookingId != null) ...[
+                const SizedBox(height: 24),
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.grey[100],
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          const Icon(Icons.confirmation_number, size: 16, color: Colors.grey),
+                          const SizedBox(width: 8),
+                          const Text(
+                            'Booking ID',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        _bookingId!,
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      if (_slotEntry != null) ...[
+                        const Divider(height: 24),
+                        Row(
+                          children: [
+                            const Icon(Icons.access_time, size: 16, color: Colors.grey),
+                            const SizedBox(width: 8),
+                            const Text(
+                              'Trip Start Time',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          _formatDateTime(_slotEntry!.slot.startTime),
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        Row(
+                          children: [
+                            const Icon(Icons.event_available, size: 16, color: Colors.grey),
+                            const SizedBox(width: 8),
+                            const Text(
+                              'Trip End Time',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          _formatDateTime(_slotEntry!.slot.endTime),
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const Divider(height: 24),
+                        Row(
+                          children: [
+                            const Icon(Icons.directions_car, size: 16, color: Colors.grey),
+                            const SizedBox(width: 8),
+                            const Text(
+                              'Vehicle',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          _slotEntry!.vehicle.name,
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
+              const SizedBox(height: 24),
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.blue[50],
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.blue[200]!),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.info_outline, color: Colors.blue[700], size: 20),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        'The provider will receive an OTP to confirm the service start.',
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: Colors.blue[900],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 32),
+              ElevatedButton(
+                onPressed: () {
+                  Navigator.pushNamedAndRemoveUntil(
+                    context,
+                    '/main',
+                    (route) => false,
+                  );
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.green,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 48,
+                    vertical: 16,
+                  ),
+                  minimumSize: const Size(double.infinity, 50),
+                ),
+                child: const Text('Go to Home'),
+              ),
+              const SizedBox(height: 12),
+              OutlinedButton(
+                onPressed: () {
+                  Navigator.pushNamedAndRemoveUntil(
+                    context,
+                    '/main',
+                    (route) => false,
+                  );
+                },
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 48,
+                    vertical: 16,
+                  ),
+                  minimumSize: const Size(double.infinity, 50),
+                ),
+                child: const Text('View My Bookings'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// Payment Cancel Screen - Shown when user cancels Stripe Checkout
+class PaymentCancelScreen extends StatefulWidget {
+  const PaymentCancelScreen({super.key});
+
+  @override
+  State<PaymentCancelScreen> createState() => _PaymentCancelScreenState();
+}
+
+class _PaymentCancelScreenState extends State<PaymentCancelScreen> {
+  String? _bookingId;
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _extractBookingId();
+  }
+
+  void _extractBookingId() {
+    final uri = Uri.base;
+    _bookingId = uri.queryParameters['booking_id'];
+    setState(() {
+      _loading = false;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Payment Cancelled'),
+        backgroundColor: Colors.orange,
+        foregroundColor: Colors.white,
+      ),
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24.0),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                width: 100,
+                height: 100,
+                decoration: const BoxDecoration(
+                  color: Colors.orange,
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.close,
+                  size: 60,
+                  color: Colors.white,
+                ),
+              ),
+              const SizedBox(height: 24),
+              const Text(
+                'Payment Cancelled',
+                style: TextStyle(
+                  fontSize: 24,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'Your payment was not completed.',
+                style: TextStyle(
+                  fontSize: 16,
+                  color: Colors.grey,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              if (_bookingId != null) ...[
+                const SizedBox(height: 16),
+                const Text(
+                  'The booking has been cancelled and no charges were made.',
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: Colors.grey,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ],
+              const SizedBox(height: 32),
+              ElevatedButton(
+                onPressed: () {
+                  Navigator.pushNamedAndRemoveUntil(
+                    context,
+                    '/main',
+                    (route) => false,
+                  );
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.blue,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 48,
+                    vertical: 16,
+                  ),
+                ),
+                child: const Text('Go to Home'),
+              ),
+              const SizedBox(height: 12),
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(context);
+                },
+                child: const Text('Try Again'),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

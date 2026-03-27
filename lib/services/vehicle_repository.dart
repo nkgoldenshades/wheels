@@ -144,24 +144,12 @@ class VehicleRepository {
 
   Future<void> addVehicle(Vehicle vehicle) async {
     try {
-      // Add to Supabase (match the real public.vehicles schema)
-      final photos = <String>[];
-      if (vehicle.profileImage != null && vehicle.profileImage!.trim().isNotEmpty) {
-        photos.add(vehicle.profileImage!.trim());
-      }
-      photos.addAll(vehicle.galleryImages.where((e) => e.trim().isNotEmpty));
-
-      final payload = <String, dynamic>{
-        'id': vehicle.id,
-        'user_id': vehicle.userId,
-        'name': vehicle.name,
-        'type': vehicle.type,
-        'year': vehicle.year,
-        'capabilities': vehicle.capabilities.map((e) => e.name).toList(),
-        'photos': photos,
-        'created_at': vehicle.createdAt.toIso8601String(),
-        'updated_at': DateTime.now().toIso8601String(),
-      };
+      // Add to Supabase - send complete vehicle data
+      final payload = vehicle.toJson();
+      
+      // Ensure required fields are present
+      payload['created_at'] = vehicle.createdAt.toIso8601String();
+      payload['updated_at'] = DateTime.now().toIso8601String();
 
       debugPrint(
         '🚗 Supabase vehicle insert payload (provider): id=${payload['id']} user_id=${payload['user_id']}',

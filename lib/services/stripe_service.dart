@@ -163,9 +163,7 @@ class StripeService {
           'amount': amount,
           'currency': currency,
           'commission_amount': applicationFee,
-          // success/cancel URLs — update to your actual domain
-          'success_url': 'https://vaultwheels.web.app/#/payment-success',
-          'cancel_url': 'https://vaultwheels.web.app/#/payment-cancel',
+          // Backend will add booking_id to these URLs automatically
         }),
       );
 

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:latlong2/latlong.dart';
 import '../services/location_autocomplete_service.dart';
+import 'map_location_picker.dart';
 
 class LocationAutocompleteField extends StatefulWidget {
   final TextEditingController controller;
@@ -195,7 +197,7 @@ class _LocationAutocompleteFieldState
                   borderRadius: BorderRadius.circular(8),
                   child: ConstrainedBox(
                     constraints: BoxConstraints(
-                      maxHeight: _suggestions.isEmpty ? 80 : 280,
+                      maxHeight: _suggestions.isEmpty ? 120 : 300,
                       minHeight: 0,
                     ),
                     child: Container(
@@ -210,7 +212,7 @@ class _LocationAutocompleteFieldState
                           padding: EdgeInsets.zero,
                           shrinkWrap: true,
                           physics: const BouncingScrollPhysics(),
-                          itemCount: _suggestions.length + 2, // +2 for current location and manual options
+                          itemCount: _suggestions.length + 3, // +3 for current location, map picker, and manual options
                           separatorBuilder: (_, _) => const Divider(height: 1, thickness: 0.5),
                           itemBuilder: (context, index) {
                     // First item: Use Current Location
@@ -241,8 +243,36 @@ class _LocationAutocompleteFieldState
                       );
                     }
                     
-                    // Second item: Enter Manually
+                    // Second item: Pick on Map
                     if (index == 1) {
+                      return InkWell(
+                        onTapDown: (_) => _tapInOverlayInProgress = true,
+                        onTap: () => _pickOnMap(),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          child: Row(
+                            children: [
+                              const Icon(
+                                Icons.map,
+                                size: 16,
+                                color: Colors.green,
+                              ),
+                              const SizedBox(width: 12),
+                              const Text(
+                                'Pick on Map',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    }
+                    
+                    // Third item: Enter Manually
+                    if (index == 2) {
                       return InkWell(
                         onTapDown: (_) => _tapInOverlayInProgress = true,
                         onTap: () => _enterManually(),
@@ -270,7 +300,7 @@ class _LocationAutocompleteFieldState
                     }
                     
                     // Rest: Location suggestions
-                    final suggestion = _suggestions[index - 2];
+                    final suggestion = _suggestions[index - 3];
                     final geo = suggestion.geo;
                     final flag = geo != null ? _flagEmoji(geo.countryCode) : '';
                     final district = geo?.district ?? geo?.stateDistrict;
@@ -458,6 +488,68 @@ class _LocationAutocompleteFieldState
     }
   }
 
+  void _pickOnMap() async {
+    if (!mounted) return;
+    _tapInOverlayInProgress = false;
+    _safeRemoveOverlay();
+
+    // Get initial location for map
+    LatLng? initialLocation;
+    if (_selectedLocation != null && 
+        _selectedLocation!.lat != 0 && 
+        _selectedLocation!.lon != 0) {
+      initialLocation = LatLng(_selectedLocation!.lat, _selectedLocation!.lon);
+    }
+
+    // Show map picker
+    final result = await Navigator.push<Map<String, dynamic>>(
+      context,
+      MaterialPageRoute(
+        builder: (context) => MapLocationPicker(
+          initialLocation: initialLocation,
+          initialAddress: _selectedLocation?.displayName,
+        ),
+      ),
+    );
+
+    if (result == null || !mounted) return;
+
+    final lat = result['lat'] as double;
+    final lon = result['lon'] as double;
+    final address = result['address'] as String;
+
+    // Create map-picked suggestion
+    final mapSuggestion = LocationSuggestion(
+      displayName: address,
+      lat: lat,
+      lon: lon,
+      type: 'map',
+    );
+
+    setState(() {
+      _suggestions = [];
+      _selectedLocation = mapSuggestion;
+      widget.controller.text = _getShortName(address);
+    });
+
+    // Remove focus to close dropdown
+    _focusNode.unfocus();
+    _safeRemoveOverlay();
+
+    // Notify parent
+    widget.onLocationSelected?.call(mapSuggestion);
+
+    // Show confirmation
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('✅ Location selected from map'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+    }
+  }
+
   void _enterManually() async {
     if (!mounted) return;
     _tapInOverlayInProgress = false;
@@ -585,8 +677,10 @@ class _LocationAutocompleteFieldState
                   ? Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        if (_selectedLocation != null && _selectedLocation!.type != 'manual')
+                        if (_selectedLocation != null && _selectedLocation!.type != 'manual' && _selectedLocation!.type != 'map')
                           const Icon(Icons.check_circle, color: Colors.green, size: 20),
+                        if (_selectedLocation != null && _selectedLocation!.type == 'map')
+                          const Icon(Icons.map, color: Colors.green, size: 20),
                         if (_selectedLocation != null && _selectedLocation!.type == 'manual')
                           const Icon(Icons.edit, color: Colors.orange, size: 20),
                         IconButton(
@@ -637,6 +731,7 @@ class _ManualLocationDialogState extends State<_ManualLocationDialog> {
   late final TextEditingController _locationController;
   late final TextEditingController _latController;
   late final TextEditingController _lonController;
+  bool _loadingLocation = false;
 
   @override
   void initState() {
@@ -644,6 +739,54 @@ class _ManualLocationDialogState extends State<_ManualLocationDialog> {
     _locationController = TextEditingController(text: widget.initialLocation);
     _latController = TextEditingController();
     _lonController = TextEditingController();
+    
+    // Automatically get current location
+    _getCurrentLocation();
+  }
+
+  Future<void> _getCurrentLocation() async {
+    setState(() {
+      _loadingLocation = true;
+    });
+
+    try {
+      // Request location permission
+      final permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        final requested = await Geolocator.requestPermission();
+        if (requested == LocationPermission.denied || 
+            requested == LocationPermission.deniedForever) {
+          if (mounted) {
+            setState(() {
+              _loadingLocation = false;
+            });
+          }
+          return; // User denied permission
+        }
+      }
+
+      // Get current position
+      final position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+      );
+
+      // Update text fields with current location
+      if (mounted) {
+        setState(() {
+          _latController.text = position.latitude.toStringAsFixed(6);
+          _lonController.text = position.longitude.toStringAsFixed(6);
+          _loadingLocation = false;
+        });
+      }
+    } catch (e) {
+      // Silently fail if location is not available
+      debugPrint('Failed to get current location: $e');
+      if (mounted) {
+        setState(() {
+          _loadingLocation = false;
+        });
+      }
+    }
   }
 
   @override
@@ -695,12 +838,34 @@ class _ManualLocationDialogState extends State<_ManualLocationDialog> {
               autofocus: true,
             ),
             const SizedBox(height: 16),
-            const Text(
-              'GPS Coordinates (Required)',
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.bold,
-              ),
+            Row(
+              children: [
+                const Text(
+                  'GPS Coordinates (Required)',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const Spacer(),
+                if (_loadingLocation)
+                  const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                else
+                  TextButton.icon(
+                    onPressed: _getCurrentLocation,
+                    icon: const Icon(Icons.my_location, size: 16),
+                    label: const Text('Use Current', style: TextStyle(fontSize: 12)),
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                  ),
+              ],
             ),
             const SizedBox(height: 8),
             TextField(

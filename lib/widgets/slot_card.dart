@@ -505,6 +505,20 @@ class SlotCard extends StatelessWidget {
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
           ),
+          if (coords != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Row(
+                children: [
+                  Icon(Icons.location_on, size: 11, color: Colors.grey[600]),
+                  const SizedBox(width: 4),
+                  Text(
+                    'Lat: ${coords.$1.toStringAsFixed(6)}, Lng: ${coords.$2.toStringAsFixed(6)}',
+                    style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+                  ),
+                ],
+              ),
+            ),
         ],
       );
     }
@@ -544,6 +558,19 @@ class SlotCard extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Row(
+                  children: [
+                    Icon(Icons.location_on, size: 11, color: Colors.grey[600]),
+                    const SizedBox(width: 4),
+                    Text(
+                      'Lat: ${coords.$1.toStringAsFixed(6)}, Lng: ${coords.$2.toStringAsFixed(6)}',
+                      style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+                    ),
+                  ],
+                ),
+              ),
             ],
           );
         },
