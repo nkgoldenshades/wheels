@@ -159,53 +159,43 @@ class AuthRepository {
     final firebaseUser = _firebaseAuth.currentUser;
     
     if (firebaseUser == null) {
-      debugPrint('⚠️  No Firebase user to sync');
+      debugPrint('⚠️ No Firebase user to sync');
       return;
     }
 
     try {
-      final supabase = Supabase.instance.client;
       final uid = firebaseUser.uid;
-
       debugPrint('🔄 Syncing Firebase user to Supabase: $uid');
 
-      // CRITICAL: Wait for Firebase token to be ready
-      // Force refresh to ensure fresh token
+      // Force token refresh so the accessToken callback has a valid user
       await firebaseUser.getIdToken(true);
       debugPrint('🔑 Token refreshed');
+      
+      // Small delay to ensure Supabase client picks up the new token
+      await Future.delayed(const Duration(milliseconds: 500));
 
-      // Check if user already exists with short timeout
+      final supabase = Supabase.instance.client;
+
+      // Check if user already exists
       final existingUser = await supabase
           .from('users')
           .select()
           .eq('id', uid)
-          .maybeSingle()
-          .timeout(
-            const Duration(seconds: 3),
-            onTimeout: () {
-              debugPrint('⚠️  Supabase query timed out - skipping sync');
-              return null;
-            },
-          );
+          .maybeSingle();
 
       if (existingUser != null) {
         debugPrint('✅ User already exists in Supabase');
         return;
       }
 
-      // Insert new user with short timeout
+      // Insert new user
       await supabase.from('users').insert({
         'id': uid,
+        'name': firebaseUser.displayName ?? 'User',
         'email': firebaseUser.email,
-        'profile_name': firebaseUser.displayName ?? 'User',
         'phone': firebaseUser.phoneNumber,
         'avatar_url': firebaseUser.photoURL,
-      }).timeout(
-        const Duration(seconds: 3),
-        onTimeout: () {
-          debugPrint('⚠️  Supabase insert timed out - skipping sync');
-        },
-      );
+      });
 
       debugPrint('✅ User synced to Supabase: $uid');
     } catch (e) {

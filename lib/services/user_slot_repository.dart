@@ -1,8 +1,10 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/slot.dart';
 import '../models/slot_entry.dart';
+import 'auth_repository.dart';
 import 'user_vehicle_repository.dart';
 
 /// Separate slot repository for "My Posts" section
@@ -99,6 +101,9 @@ class UserSlotRepository {
     _buildSlotEntries();
     await _saveSlots();
     debugPrint('✅ User slot created locally: ${slot.id}');
+    
+    // Sync to Supabase
+    await _syncSlotToSupabase(slot);
   }
 
   Future<void> updateSlot(Slot slot) async {
@@ -114,6 +119,9 @@ class UserSlotRepository {
     _buildSlotEntries();
     await _saveSlots();
     debugPrint('✅ User slot updated locally: ${slot.id}');
+    
+    // Sync to Supabase
+    await _syncSlotToSupabase(slot, isUpdate: true);
   }
 
   Future<void> deleteSlot(String id) async {
@@ -121,5 +129,76 @@ class UserSlotRepository {
     _buildSlotEntries();
     await _saveSlots();
     debugPrint('✅ User slot deleted locally: $id');
+    
+    // Delete from Supabase
+    await _deleteSlotFromSupabase(id);
+  }
+
+  Future<void> _syncSlotToSupabase(Slot slot, {bool isUpdate = false}) async {
+    try {
+      final supabase = Supabase.instance.client;
+      final currentUser = AuthRepository.instance.currentUser;
+      
+      if (currentUser == null) {
+        debugPrint('⚠️ No user logged in - skipping Supabase sync');
+        return;
+      }
+
+      final data = {
+        'id': slot.id,
+        'user_id': currentUser.id,
+        'provider_id': currentUser.id,
+        'vehicle_id': slot.vehicleId,
+        'service_type': slot.serviceType.name,
+        'slot_type': slot.slotType.name,
+        'from_location': slot.fromLocation,
+        'to_location': slot.toLocation,
+        'base_location': slot.baseLocation,
+        'radius': slot.radius,
+        'start_time': slot.startTime.toIso8601String(),
+        'end_time': slot.endTime.toIso8601String(),
+        'price': slot.price,
+        'capacity': slot.capacity,
+        'notes': slot.notes,
+        'images': slot.images,
+        'is_available': slot.isAvailable,
+        'pickup_option': slot.pickupOption.name,
+        'requires_approval': slot.requiresApproval,
+        'max_weight': slot.maxWeight,
+        'max_length': slot.maxLength,
+        'max_width': slot.maxWidth,
+        'max_height': slot.maxHeight,
+        'lease_duration': slot.leaseDuration,
+        'security_deposit': slot.securityDeposit,
+        'mileage_limit': slot.mileageLimit,
+        'fuel_policy': slot.fuelPolicy,
+        'insurance_included': slot.insuranceIncluded,
+        'lease_terms': slot.leaseTerms,
+        'with_operator': slot.withOperator,
+        'updated_at': DateTime.now().toIso8601String(),
+      };
+
+      if (!isUpdate) {
+        data['created_at'] = DateTime.now().toIso8601String();
+      }
+
+      await supabase.from('slots').upsert(data);
+
+      debugPrint('✅ User slot synced to Supabase: ${slot.id}');
+    } catch (e) {
+      debugPrint('❌ Failed to sync user slot to Supabase: $e');
+    }
+  }
+
+  Future<void> _deleteSlotFromSupabase(String id) async {
+    try {
+      final supabase = Supabase.instance.client;
+      
+      await supabase.from('slots').delete().eq('id', id);
+
+      debugPrint('✅ User slot deleted from Supabase: $id');
+    } catch (e) {
+      debugPrint('❌ Failed to delete user slot from Supabase: $e');
+    }
   }
 }

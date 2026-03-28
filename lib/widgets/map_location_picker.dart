@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
-import 'package:latlong2/latlong.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:geodesy/geodesy.dart';
+import 'dart:async';
 import '../services/location_autocomplete_service.dart';
 
 /// Uber/Ola style map picker - drag map to select location
@@ -25,6 +26,7 @@ class _MapLocationPickerState extends State<MapLocationPicker> {
   String _currentAddress = 'Loading address...';
   bool _isLoadingAddress = false;
   bool _isLoadingLocation = false;
+  Timer? _debounceTimer;
 
   @override
   void initState() {
@@ -122,10 +124,25 @@ class _MapLocationPickerState extends State<MapLocationPicker> {
 
   void _onMapMoveEnd() {
     final center = _mapController.camera.center;
+    
+    // Only update if moved significantly (>10 meters)
+    final geodesy = Geodesy();
+    final distance = geodesy.distanceBetweenTwoGeoPoints(
+      LatLng(_centerPosition.latitude, _centerPosition.longitude),
+      center,
+    );
+    
+    if (distance < 10) return; // Ignore small movements
+    
     setState(() {
       _centerPosition = center;
     });
-    _updateAddress(center);
+    
+    // Debounce address updates
+    _debounceTimer?.cancel();
+    _debounceTimer = Timer(const Duration(milliseconds: 500), () {
+      _updateAddress(center);
+    });
   }
 
   void _confirmLocation() {

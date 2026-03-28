@@ -108,8 +108,8 @@ void main() async {
         }
 
         try {
-          // Get Firebase ID token (cached if valid, fresh if expired)
-          final token = await user.getIdToken(false);
+          // Get Firebase ID token (force refresh to ensure it's valid)
+          final token = await user.getIdToken(true);
           if (kDebugMode) {
             print('🔑 Firebase UID: ${user.uid}');
             print(

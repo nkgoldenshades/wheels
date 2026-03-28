@@ -1046,17 +1046,20 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
                                     final gateway = bookingResult['gateway'] as String? ?? 'stripe';
                                     final isWebRedirect = bookingResult['web_redirect'] == true;
 
+                                    debugPrint('📱 Payment result: gateway=$gateway, webRedirect=$isWebRedirect, otp=$otp');
+
                                     // Web redirect: payment is pending, user was sent to checkout
                                     if (isWebRedirect) {
+                                      // Don't create local booking yet - wait for payment completion
                                       Navigator.pop(context);
                                       ScaffoldMessenger.of(context).showSnackBar(
                                         SnackBar(
                                           content: Text(
-                                            '🔗 Redirected to ${gateway.contains('razorpay') ? 'Razorpay' : 'Stripe'} checkout. '
-                                            'Complete payment there — your booking will be confirmed automatically.',
+                                            '🔗 Opening ${gateway.contains('razorpay') ? 'Razorpay' : 'Stripe'} checkout...\n'
+                                            'Complete payment there. Your booking will be confirmed after payment.',
                                           ),
-                                          backgroundColor: Colors.blue,
-                                          duration: const Duration(seconds: 8),
+                                          backgroundColor: Colors.orange,
+                                          duration: const Duration(seconds: 6),
                                         ),
                                       );
                                       return;
