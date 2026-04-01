@@ -8,7 +8,7 @@ import '../../services/vehicle_repository.dart';
 import '../vehicle/vehicle_list_screen.dart';
 
 /// Unified My Posts page - shows all your personal vehicle-based posts
-/// Uses SEPARATE repositories from provider section (UserVehicleRepository, UserSlotRepository)
+/// Uses SEPARATE repositories from provider section (CustomerVehicleRepository, CustomerSlotRepository)
 class MyPostsUnifiedPage extends StatefulWidget {
   const MyPostsUnifiedPage({super.key});
 

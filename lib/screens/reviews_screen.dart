@@ -3,6 +3,7 @@ import '../models/review.dart';
 import '../services/review_repository.dart';
 import '../services/profile_repository.dart';
 import '../services/auth_repository.dart';
+import '../services/vehicle_repository.dart';
 
 class ReviewsScreen extends StatefulWidget {
   final String userId;
@@ -23,6 +24,8 @@ class _ReviewsScreenState extends State<ReviewsScreen> {
   String _query = '';
   DateTime? _fromDate;
   DateTime? _toDate;
+  bool _showVerifiedOnly = false;
+  bool _showExpertsOnly = false;
 
   @override
   void dispose() {
@@ -69,13 +72,14 @@ class _ReviewsScreenState extends State<ReviewsScreen> {
 
           final averageRating = ReviewRepository.instance.getAverageRating(widget.userId);
 
-          final filtered = _query.isEmpty && _fromDate == null && _toDate == null
-              ? userReviews
-              : userReviews.where((r) {
+          final filtered = userReviews.where((r) {
+                  // Search filter
                   if (_query.isNotEmpty &&
                       !(r.comment ?? '').toLowerCase().contains(_query.toLowerCase())) {
                     return false;
                   }
+                  
+                  // Date filters
                   if (_fromDate != null && r.createdAt.isBefore(_fromDate!)) {
                     return false;
                   }
@@ -83,6 +87,27 @@ class _ReviewsScreenState extends State<ReviewsScreen> {
                       r.createdAt.isAfter(_toDate!.add(const Duration(days: 1)))) {
                     return false;
                   }
+                  
+                  // Verified users filter - check if reviewer has verified vehicles
+                  if (_showVerifiedOnly) {
+                    final reviewerVehicles = VehicleRepository.instance.allVehicles
+                        .where((v) => v.userId == r.reviewerId && v.isVerifiedToggle)
+                        .toList();
+                    if (reviewerVehicles.isEmpty) {
+                      return false;
+                    }
+                  }
+                  
+                  // Expert providers filter
+                  if (_showExpertsOnly) {
+                    final reviewerVehicles = VehicleRepository.instance.allVehicles
+                        .where((v) => v.userId == r.reviewerId && v.isExpertToggle)
+                        .toList();
+                    if (reviewerVehicles.isEmpty) {
+                      return false;
+                    }
+                  }
+                  
                   return true;
                 }).toList();
 
@@ -187,7 +212,45 @@ class _ReviewsScreenState extends State<ReviewsScreen> {
                 ),
               ),
 
-              if (_query.isNotEmpty || _fromDate != null)
+              // Trust filters
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                child: Wrap(
+                  spacing: 8,
+                  children: [
+                    FilterChip(
+                      label: const Text('Verified Users Only', style: TextStyle(fontSize: 12)),
+                      selected: _showVerifiedOnly,
+                      onSelected: (selected) => setState(() => _showVerifiedOnly = selected),
+                      avatar: Icon(
+                        Icons.verified_user,
+                        size: 16,
+                        color: _showVerifiedOnly ? Colors.white : Colors.blue,
+                      ),
+                      selectedColor: Colors.blue,
+                      labelStyle: TextStyle(
+                        color: _showVerifiedOnly ? Colors.white : Colors.black87,
+                      ),
+                    ),
+                    FilterChip(
+                      label: const Text('Expert Providers Only', style: TextStyle(fontSize: 12)),
+                      selected: _showExpertsOnly,
+                      onSelected: (selected) => setState(() => _showExpertsOnly = selected),
+                      avatar: Icon(
+                        Icons.workspace_premium,
+                        size: 16,
+                        color: _showExpertsOnly ? Colors.white : Colors.orange,
+                      ),
+                      selectedColor: Colors.orange,
+                      labelStyle: TextStyle(
+                        color: _showExpertsOnly ? Colors.white : Colors.black87,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              if (_query.isNotEmpty || _fromDate != null || _showVerifiedOnly || _showExpertsOnly)
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                   child: Align(

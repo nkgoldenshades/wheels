@@ -119,6 +119,7 @@ class SeatLayout {
   final int rows;
   final int cols;
   final Map<String, LayoutCell> cells;
+  final List<String> images;
 
   const SeatLayout({
     required this.id,
@@ -126,6 +127,7 @@ class SeatLayout {
     required this.rows,
     required this.cols,
     required this.cells,
+    this.images = const [],
   });
 
   SeatLayout copyWith({
@@ -133,6 +135,7 @@ class SeatLayout {
     int? rows,
     int? cols,
     Map<String, LayoutCell>? cells,
+    List<String>? images,
   }) {
     return SeatLayout(
       id: id,
@@ -140,6 +143,7 @@ class SeatLayout {
       rows: rows ?? this.rows,
       cols: cols ?? this.cols,
       cells: cells ?? this.cells,
+      images: images ?? this.images,
     );
   }
 
@@ -150,6 +154,7 @@ class SeatLayout {
       'rows': rows,
       'cols': cols,
       'cells': cells.map((key, value) => MapEntry(key, value.toJson())),
+      'images': images,
     };
   }
 
@@ -164,6 +169,7 @@ class SeatLayout {
       rows: json['rows'],
       cols: json['cols'],
       cells: Map<String, LayoutCell>.from(cells),
+      images: List<String>.from(json['images'] ?? []),
     );
   }
 }

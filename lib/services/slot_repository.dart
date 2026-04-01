@@ -117,10 +117,13 @@ class SlotRepository {
         return;
       }
 
+      // Generate short 6-char reference code from timestamp
+      final refCode = slot.id.toString().substring(slot.id.toString().length - 6);
+
       await supabase.from('slots').insert({
         'id': slot.id,
         'user_id': currentUser.id,
-        'provider_id': currentUser.id,
+        'ref_code': refCode, // Short code shown to users (e.g. "791379")
         'vehicle_id': slot.vehicleId,
         'service_type': slot.serviceType.name,
         'slot_type': slot.slotType.name,
@@ -151,7 +154,7 @@ class SlotRepository {
         'created_at': DateTime.now().toIso8601String(),
       });
 
-      debugPrint('✅ Slot synced to Supabase: ${slot.id}');
+      debugPrint('✅ Slot synced to Supabase: ${slot.id} (ref: $refCode)');
     } catch (e) {
       debugPrint('❌ Failed to sync slot to Supabase: $e');
       // Don't throw - allow slot creation to succeed even if Supabase sync fails

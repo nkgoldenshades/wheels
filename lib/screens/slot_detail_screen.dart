@@ -12,9 +12,9 @@ import '../services/booking_repository.dart';
 import '../services/seat_layout_repository.dart';
 import '../services/app_preferences.dart';
 import '../services/vehicle_repository.dart';
-import '../services/user_vehicle_repository.dart';
+import '../services/customer_vehicle_repository.dart';
 import '../services/slot_repository.dart' as slot_repo;
-import '../services/user_slot_repository.dart';
+import '../services/customer_slot_repository.dart';
 import '../models/slot_entry.dart';
 import '../services/review_repository.dart';
 import 'reviews_screen.dart';
@@ -47,7 +47,7 @@ class SlotDetailScreen extends StatelessWidget {
       valueListenable: slot_repo.SlotRepository.instance.slotsListenable,
       builder: (context, s1, c1) {
         return ValueListenableBuilder<List<SlotEntry>>(
-          valueListenable: UserSlotRepository.instance.slotsListenable,
+          valueListenable: CustomerSlotRepository.instance.slotsListenable,
           builder: (context, s2, c2) {
             return _buildContent(context);
           },
@@ -64,16 +64,16 @@ class SlotDetailScreen extends StatelessWidget {
         final resolvedSlot = slot_repo.SlotRepository.instance.allSlotsRaw
                 .cast<Slot?>()
                 .firstWhere((s) => s?.id == slot.id, orElse: () => null) ??
-            UserSlotRepository.instance.allSlotsRaw
+            CustomerSlotRepository.instance.allSlotsRaw
                 .cast<Slot?>()
                 .firstWhere((s) => s?.id == slot.id, orElse: () => null) ??
             slot;
 
         // Try to find vehicle in both repositories
         final resolvedVehicle = VehicleRepository.instance.getById(resolvedSlot.vehicleId) ??
-            UserVehicleRepository.instance.getById(resolvedSlot.vehicleId) ??
+            CustomerVehicleRepository.instance.getById(resolvedSlot.vehicleId) ??
             VehicleRepository.instance.getById(vehicle.id) ??
-            UserVehicleRepository.instance.getById(vehicle.id) ??
+            CustomerVehicleRepository.instance.getById(vehicle.id) ??
             vehicle;
 
         debugPrint(
@@ -99,12 +99,12 @@ class SlotDetailScreen extends StatelessWidget {
                     final existsInProviderRepo = slot_repo.SlotRepository.instance.allSlotsRaw
                         .any((s) => s.id == updated.id);
                     final existsInUserRepo =
-                        UserSlotRepository.instance.getById(updated.id) != null;
+                        CustomerSlotRepository.instance.getById(updated.id) != null;
 
                     if (existsInProviderRepo) {
                       await slot_repo.SlotRepository.instance.updateSlot(updated);
                     } else if (existsInUserRepo) {
-                      await UserSlotRepository.instance.updateSlot(updated);
+                      await CustomerSlotRepository.instance.updateSlot(updated);
                     } else {
                       await slot_repo.SlotRepository.instance.updateSlot(updated);
                     }

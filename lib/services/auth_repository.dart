@@ -330,4 +330,46 @@ class AuthRepository {
         return e.message ?? 'Authentication failed';
     }
   }
+
+  /// TEST FUNCTION: Check what JWT claims Supabase receives
+  /// Call this after login to see what's in the JWT
+  Future<void> testJWTClaims() async {
+    try {
+      debugPrint('🔍 Testing JWT claims...');
+      
+      // Get Firebase token first
+      final firebaseUser = _firebaseAuth.currentUser;
+      if (firebaseUser == null) {
+        debugPrint('❌ No Firebase user logged in');
+        return;
+      }
+      
+      final firebaseToken = await firebaseUser.getIdToken(true);
+      debugPrint('🔑 Firebase UID: ${firebaseUser.uid}');
+      debugPrint('🔑 Firebase Token (first 50 chars): ${firebaseToken?.substring(0, 50)}...');
+      
+      // Call Supabase function to get JWT claims
+      final supabase = Supabase.instance.client;
+      final response = await supabase.rpc('get_jwt_claims');
+      
+      debugPrint('📦 JWT Claims received by Supabase:');
+      debugPrint(response.toString());
+      
+      // Check if 'sub' exists
+      if (response != null && response is Map) {
+        if (response.containsKey('sub')) {
+          debugPrint('✅ Found "sub" claim: ${response['sub']}');
+        } else if (response.containsKey('user_id')) {
+          debugPrint('⚠️ Found "user_id" instead of "sub": ${response['user_id']}');
+        } else {
+          debugPrint('❌ No user identifier found in JWT!');
+          debugPrint('Available keys: ${response.keys.toList()}');
+        }
+      } else {
+        debugPrint('❌ JWT claims is null or not a Map');
+      }
+    } catch (e) {
+      debugPrint('❌ Error testing JWT claims: $e');
+    }
+  }
 }

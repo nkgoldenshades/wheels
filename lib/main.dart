@@ -35,8 +35,8 @@ import 'screens/verification/profile_photo_verification_screen.dart';
 import 'screens/verification/document_verification_screen.dart';
 import 'screens/verification/web_camera_screen.dart';
 import 'services/seat_layout_repository.dart';
-import 'services/user_vehicle_repository.dart';
-import 'services/user_slot_repository.dart';
+import 'services/customer_vehicle_repository.dart';
+import 'services/customer_slot_repository.dart';
 import 'services/user_post_repository.dart';
 import 'services/user_post_acceptance_repository.dart';
 import 'models/user_post_acceptance.dart';
@@ -93,32 +93,27 @@ void main() async {
       options: DefaultFirebaseOptions.currentPlatform,
     );
 
-    // Initialize Supabase (for database) with Firebase Auth integration
+    // Initialize Supabase with Firebase JWT validation
     await Supabase.initialize(
       url: SupabaseConfig.url,
       anonKey: SupabaseConfig.anonKey,
-      // CRITICAL: Pass Firebase JWT to Supabase on every request
-      // This makes auth.uid() return Firebase UID as TEXT
-      // Note: No authOptions needed - accessToken callback is sufficient
+      // CRITICAL: Pass Firebase JWT to Supabase for RLS security
       accessToken: () async {
         final user = firebase_auth.FirebaseAuth.instance.currentUser;
         if (user == null) {
           if (kDebugMode) print('🔑 No Firebase user - returning null token');
           return null;
         }
-
+        
         try {
-          // Get Firebase ID token (force refresh to ensure it's valid)
           final token = await user.getIdToken(true);
           if (kDebugMode) {
             print('🔑 Firebase UID: ${user.uid}');
-            print(
-              '🔑 Access token provided to Supabase: ${token?.substring(0, 20)}...',
-            );
+            print('🔑 Sending Firebase JWT to Supabase');
           }
           return token;
         } catch (e) {
-          if (kDebugMode) print('❌ Failed to get Firebase ID token: $e');
+          if (kDebugMode) print('❌ Failed to get Firebase token: $e');
           return null;
         }
       },
@@ -129,8 +124,8 @@ void main() async {
     await ProfileRepository.instance.init();
     await VehicleRepository.instance.init();
     await SlotRepository.instance.init();
-    await UserVehicleRepository.instance.init();
-    await UserSlotRepository.instance.init();
+    await CustomerVehicleRepository.instance.init();
+    await CustomerSlotRepository.instance.init();
     await UserPostRepository.instance.init();
     await UserPostAcceptanceRepository.instance.init();
     await SeatLayoutRepository.instance.init();
@@ -1412,15 +1407,8 @@ class PlansScreen extends StatelessWidget {
               'Priority customer support',
             ],
             isRecommended: false,
-            onSelect: () {
-              AppPreferences.instance.setSubscriptionPlan(
-                SubscriptionPlan.expert,
-              );
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Expert plan selected')),
-              );
-              Navigator.pop(context);
-            },
+            isComingSoon: true, // Set to coming soon
+            onSelect: null, // No action for coming soon
           ),
         ],
       ),
@@ -1453,19 +1441,23 @@ class _PlanCard extends StatelessWidget {
   final String priceLabel;
   final List<String> bullets;
   final bool isRecommended;
-  final VoidCallback onSelect;
+  final VoidCallback? onSelect; // Made nullable for coming soon
+  final bool isComingSoon; // Added coming soon flag
 
   const _PlanCard({
     required this.title,
     required this.priceLabel,
     required this.bullets,
     required this.isRecommended,
-    required this.onSelect,
+    this.onSelect, // Made optional
+    this.isComingSoon = false, // Default to false
   });
 
   @override
   Widget build(BuildContext context) {
-    final color = isRecommended ? Colors.blue : Colors.grey;
+    final color = isComingSoon 
+        ? Colors.orange 
+        : (isRecommended ? Colors.blue : Colors.grey);
     return Card(
       elevation: 2,
       child: Padding(
@@ -1515,6 +1507,17 @@ class _PlanCard extends StatelessWidget {
                 ),
               ),
             ],
+            if (isComingSoon) ...[
+              const SizedBox(height: 8),
+              Text(
+                'Coming Soon',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: Colors.orange[700],
+                ),
+              ),
+            ],
             const SizedBox(height: 12),
             ...bullets.map(
               (b) => Padding(
@@ -1532,8 +1535,14 @@ class _PlanCard extends StatelessWidget {
             SizedBox(
               width: double.infinity,
               child: FilledButton(
-                onPressed: onSelect,
-                child: const Text('Choose'),
+                onPressed: isComingSoon ? null : onSelect,
+                style: isComingSoon 
+                    ? FilledButton.styleFrom(
+                        backgroundColor: Colors.grey[300],
+                        foregroundColor: Colors.grey[600],
+                      )
+                    : null,
+                child: Text(isComingSoon ? 'Coming Soon' : 'Choose'),
               ),
             ),
           ],
@@ -1571,6 +1580,24 @@ Future<void> _openExternalMapForSlot(BuildContext context, Slot slot) async {
     'api': '1',
     'travelmode': 'driving',
   });
+
+  final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+  if (!ok && context.mounted) {
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Could not open maps')));
+  }
+}
+
+// Open Google Maps with lat/lng coordinates
+Future<void> _openGoogleMapsLatLng(
+  BuildContext context,
+  double lat,
+  double lng,
+) async {
+  final uri = Uri.parse(
+    'https://www.google.com/maps/search/?api=1&query=$lat,$lng',
+  );
 
   final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
   if (!ok && context.mounted) {
@@ -3420,9 +3447,9 @@ class _PostsPageState extends State<PostsPage> {
     return AnimatedBuilder(
       animation: Listenable.merge([
         SlotRepository.instance.slotsListenable,
-        UserSlotRepository.instance.slotsListenable,
+        CustomerSlotRepository.instance.slotsListenable,
         _vehicleRepository.onlineStatusListenable,
-        UserVehicleRepository.instance.onlineStatusListenable,
+        CustomerVehicleRepository.instance.onlineStatusListenable,
       ]),
       builder: (context, _) {
         return Scaffold(
@@ -3441,11 +3468,11 @@ class _PostsPageState extends State<PostsPage> {
                 icon: const Icon(Icons.info_outline),
                 onPressed: () {
                   final providerSlots = SlotRepository.instance.allSlots.length;
-                  final userSlots = UserSlotRepository.instance.allSlots.length;
+                  final userSlots = CustomerSlotRepository.instance.allSlots.length;
                   final providerVehicles =
                       VehicleRepository.instance.allVehicles.length;
                   final userVehicles =
-                      UserVehicleRepository.instance.allVehicles.length;
+                      CustomerVehicleRepository.instance.allVehicles.length;
 
                   showDialog(
                     context: context,
@@ -3458,8 +3485,8 @@ class _PostsPageState extends State<PostsPage> {
                           Text('Provider Vehicles: $providerVehicles'),
                           Text('Provider Posts: $providerSlots'),
                           const SizedBox(height: 8),
-                          Text('User Vehicles: $userVehicles'),
-                          Text('User Posts: $userSlots'),
+                          Text('Customer Vehicles: $userVehicles'),
+                          Text('Customer Posts: $userSlots'),
                           const SizedBox(height: 8),
                           Text('Total Posts: ${providerSlots + userSlots}'),
                         ],
@@ -3592,7 +3619,7 @@ class _PostsPageState extends State<PostsPage> {
                                   controller: _searchController,
                                   decoration: InputDecoration(
                                     hintText: _showUserPosts
-                                        ? 'Search user requests'
+                                        ? 'Search customer requests'
                                         : 'Search by location',
                                     prefixIcon: const Icon(Icons.search),
                                     suffixIcon: _searchController.text.isEmpty
@@ -3647,7 +3674,7 @@ class _PostsPageState extends State<PostsPage> {
                               borderRadius: BorderRadius.circular(8),
                             ),
                             child: Text(
-                              'Providers Posts',
+                              'Provider Posts',
                               textAlign: TextAlign.center,
                               style: TextStyle(
                                 color: !_showUserPosts
@@ -3675,7 +3702,7 @@ class _PostsPageState extends State<PostsPage> {
                               borderRadius: BorderRadius.circular(8),
                             ),
                             child: Text(
-                              'Users Posts',
+                              'Customer Posts',
                               textAlign: TextAlign.center,
                               style: TextStyle(
                                 color: _showUserPosts
@@ -3816,7 +3843,7 @@ class _PostsPageState extends State<PostsPage> {
           'Provider slots: ${SlotRepository.instance.allSlots.length}',
         );
         debugPrint(
-          'User slots: ${UserSlotRepository.instance.allSlots.length}',
+          'User slots: ${CustomerSlotRepository.instance.allSlots.length}',
         );
         debugPrint('Total slot items: ${allSlotItems.length}');
 
@@ -3930,7 +3957,7 @@ class _PostsPageState extends State<PostsPage> {
 
         debugPrint('=== USER POSTS DEBUG ===');
         debugPrint(
-          'User slots (looking for services): ${UserSlotRepository.instance.allSlots.length}',
+          'User slots (looking for services): ${CustomerSlotRepository.instance.allSlots.length}',
         );
         debugPrint('Filtered user slot items: ${allSlotItems.length}');
         debugPrint('========================');
@@ -4061,9 +4088,9 @@ class _PostsPageState extends State<PostsPage> {
     if (_showUserPosts) {
       // User Posts tab - show ONLY OTHER users' posts (not current user's own posts)
       // Providers can accept these requests
-      repoItems = UserSlotRepository.instance.allSlots
+      repoItems = CustomerSlotRepository.instance.allSlots
           .where(
-            (e) => UserVehicleRepository.instance.isOnline(e.vehicle.id) &&
+            (e) => CustomerVehicleRepository.instance.isOnline(e.vehicle.id) &&
                 e.vehicle.userId != currentUser.id, // Exclude current user's own posts
           )
           .map(
@@ -5211,7 +5238,7 @@ class _PostsPageState extends State<PostsPage> {
   Set<String> _allLocationNames({required String field}) {
     final allSlots = [
       ...SlotRepository.instance.allSlots.map((e) => e.slot),
-      ...UserSlotRepository.instance.allSlots.map((e) => e.slot),
+      ...CustomerSlotRepository.instance.allSlots.map((e) => e.slot),
     ];
     final names = <String>{};
     for (final slot in allSlots) {
@@ -5461,6 +5488,7 @@ class _RequestsBodyState extends State<_RequestsBody> {
   final Map<String, TextEditingController> _otpControllers = {};
   final TextEditingController _searchController = TextEditingController();
   String _query = '';
+  final Set<BookingStatus> _statusFilters = {}; // Empty = show all
 
   @override
   void initState() {
@@ -5515,7 +5543,7 @@ class _RequestsBodyState extends State<_RequestsBody> {
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Text(
-                        'User',
+                        'Customer',
                         textAlign: TextAlign.center,
                         style: TextStyle(
                           color: _isRiderView ? Colors.white : Colors.grey,
@@ -5559,7 +5587,7 @@ class _RequestsBodyState extends State<_RequestsBody> {
           child: TextField(
             controller: _searchController,
             decoration: InputDecoration(
-              hintText: 'Search by name, status...',
+              hintText: 'Search by name, status, time...',
               prefixIcon: const Icon(Icons.search),
               suffixIcon: _query.isNotEmpty
                   ? IconButton(
@@ -5576,6 +5604,81 @@ class _RequestsBodyState extends State<_RequestsBody> {
               contentPadding: const EdgeInsets.symmetric(vertical: 10),
             ),
             onChanged: (v) => setState(() => _query = v.trim().toLowerCase()),
+          ),
+        ),
+        const SizedBox(height: 8),
+        // Status filter chips
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                FilterChip(
+                  label: const Text('Active', style: TextStyle(fontSize: 12)),
+                  selected: _statusFilters.contains(BookingStatus.accepted),
+                  onSelected: (selected) {
+                    setState(() {
+                      if (selected) {
+                        _statusFilters.add(BookingStatus.accepted);
+                      } else {
+                        _statusFilters.remove(BookingStatus.accepted);
+                      }
+                    });
+                  },
+                  selectedColor: Colors.green.withValues(alpha: 0.3),
+                  checkmarkColor: Colors.green,
+                ),
+                const SizedBox(width: 8),
+                FilterChip(
+                  label: const Text('Completed', style: TextStyle(fontSize: 12)),
+                  selected: _statusFilters.contains(BookingStatus.completed),
+                  onSelected: (selected) {
+                    setState(() {
+                      if (selected) {
+                        _statusFilters.add(BookingStatus.completed);
+                      } else {
+                        _statusFilters.remove(BookingStatus.completed);
+                      }
+                    });
+                  },
+                  selectedColor: Colors.blue.withValues(alpha: 0.3),
+                  checkmarkColor: Colors.blue,
+                ),
+                const SizedBox(width: 8),
+                FilterChip(
+                  label: const Text('Refunded', style: TextStyle(fontSize: 12)),
+                  selected: _statusFilters.contains(BookingStatus.refunded),
+                  onSelected: (selected) {
+                    setState(() {
+                      if (selected) {
+                        _statusFilters.add(BookingStatus.refunded);
+                      } else {
+                        _statusFilters.remove(BookingStatus.refunded);
+                      }
+                    });
+                  },
+                  selectedColor: Colors.orange.withValues(alpha: 0.3),
+                  checkmarkColor: Colors.orange,
+                ),
+                const SizedBox(width: 8),
+                FilterChip(
+                  label: const Text('Pending', style: TextStyle(fontSize: 12)),
+                  selected: _statusFilters.contains(BookingStatus.pending),
+                  onSelected: (selected) {
+                    setState(() {
+                      if (selected) {
+                        _statusFilters.add(BookingStatus.pending);
+                      } else {
+                        _statusFilters.remove(BookingStatus.pending);
+                      }
+                    });
+                  },
+                  selectedColor: Colors.amber.withValues(alpha: 0.3),
+                  checkmarkColor: Colors.amber,
+                ),
+              ],
+            ),
           ),
         ),
         const SizedBox(height: 8),
@@ -5627,6 +5730,11 @@ class _RequestsBodyState extends State<_RequestsBody> {
                           if (b.userId != currentUser.id) return false;
                         } else {
                           if (b.providerId != currentUser.id && b.providerId != 'user1') return false;
+                        }
+                        
+                        // Status filter
+                        if (_statusFilters.isNotEmpty && !_statusFilters.contains(b.status)) {
+                          return false;
                         }
                         
                         // Date range filter
@@ -6019,7 +6127,7 @@ class _RequestsBodyState extends State<_RequestsBody> {
     }
     // If not found in provider slots, check user slots
     if (bookingSlot == null) {
-      for (final e in UserSlotRepository.instance.allSlots) {
+      for (final e in CustomerSlotRepository.instance.allSlots) {
         if (e.slot.id == b.slotId) {
           bookingSlot = e.slot;
           break;
@@ -6118,7 +6226,7 @@ class _RequestsBodyState extends State<_RequestsBody> {
                     }
                   }
                   if (vehicle == null) {
-                    for (final e in UserVehicleRepository.instance.allVehicles) {
+                    for (final e in CustomerVehicleRepository.instance.allVehicles) {
                       if (e.id == bookingSlot!.vehicleId) {
                         vehicle = e;
                         break;
@@ -6191,6 +6299,13 @@ class _RequestsBodyState extends State<_RequestsBody> {
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                               ),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.map, size: 18, color: Colors.blue),
+                              tooltip: 'Open in Google Maps',
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(),
+                              onPressed: () => _openGoogleMapsLatLng(context, lat!, lng!),
                             ),
                           ],
                         ),
@@ -6966,7 +7081,7 @@ class _RequestsBodyState extends State<_RequestsBody> {
       return vehicle.userName;
     } catch (_) {
       try {
-        final vehicle = UserVehicleRepository.instance.allVehicles.firstWhere(
+        final vehicle = CustomerVehicleRepository.instance.allVehicles.firstWhere(
           (v) => v.userId == providerId,
         );
         return vehicle.userName;
@@ -7715,7 +7830,7 @@ class ProfilePage extends StatefulWidget {
 }
 
 class _ProfilePageState extends State<ProfilePage> {
-  bool _isUserMode = true;
+  bool _isCustomerMode = true;
 
   @override
   Widget build(BuildContext context) {
@@ -7800,7 +7915,7 @@ class _ProfilePageState extends State<ProfilePage> {
                 ],
               ),
               const SizedBox(height: 24),
-              // User/Rider Toggle
+              // Customer/Provider Toggle
               Container(
                 decoration: BoxDecoration(
                   color: Colors.grey[100],
@@ -7812,22 +7927,22 @@ class _ProfilePageState extends State<ProfilePage> {
                       child: GestureDetector(
                         onTap: () {
                           setState(() {
-                            _isUserMode = true;
+                            _isCustomerMode = true;
                           });
                         },
                         child: Container(
                           padding: const EdgeInsets.symmetric(vertical: 12),
                           decoration: BoxDecoration(
-                            color: _isUserMode
+                            color: _isCustomerMode
                                 ? Colors.blue
                                 : Colors.transparent,
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: Text(
-                            'User',
+                            'Customer',
                             textAlign: TextAlign.center,
                             style: TextStyle(
-                              color: _isUserMode ? Colors.white : Colors.grey,
+                              color: _isCustomerMode ? Colors.white : Colors.grey,
                               fontWeight: FontWeight.bold,
                             ),
                           ),
@@ -7838,13 +7953,13 @@ class _ProfilePageState extends State<ProfilePage> {
                       child: GestureDetector(
                         onTap: () {
                           setState(() {
-                            _isUserMode = false;
+                            _isCustomerMode = false;
                           });
                         },
                         child: Container(
                           padding: const EdgeInsets.symmetric(vertical: 12),
                           decoration: BoxDecoration(
-                            color: !_isUserMode
+                            color: !_isCustomerMode
                                 ? Colors.blue
                                 : Colors.transparent,
                             borderRadius: BorderRadius.circular(8),
@@ -7853,7 +7968,7 @@ class _ProfilePageState extends State<ProfilePage> {
                             'Provider',
                             textAlign: TextAlign.center,
                             style: TextStyle(
-                              color: !_isUserMode ? Colors.white : Colors.grey,
+                              color: !_isCustomerMode ? Colors.white : Colors.grey,
                               fontWeight: FontWeight.bold,
                             ),
                           ),
@@ -7865,7 +7980,7 @@ class _ProfilePageState extends State<ProfilePage> {
               ),
               const SizedBox(height: 24),
               // Mode-specific content
-              if (_isUserMode) ...[
+              if (_isCustomerMode) ...[
                 ListTile(
                   leading: const Icon(Icons.directions_car_filled),
                   title: const Text('Needed Vehicles'),
@@ -7971,7 +8086,7 @@ class _ProfilePageState extends State<ProfilePage> {
           );
         },
       ),
-      floatingActionButton: _isUserMode
+      floatingActionButton: _isCustomerMode
           ? FloatingActionButton.extended(
               onPressed: () {
                 Navigator.push(
@@ -7996,7 +8111,7 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 }
 
-// User Posts List Page - Shows all posts from UserSlotRepository
+// User Posts List Page - Shows all posts from CustomerSlotRepository
 class UserPostsListPage extends StatelessWidget {
   const UserPostsListPage({super.key});
 
@@ -8008,7 +8123,7 @@ class UserPostsListPage extends StatelessWidget {
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
       ),
       body: ValueListenableBuilder<List<SlotEntry>>(
-        valueListenable: UserSlotRepository.instance.slotsListenable,
+        valueListenable: CustomerSlotRepository.instance.slotsListenable,
         builder: (context, slots, _) {
           if (slots.isEmpty) {
             return Center(
@@ -8220,7 +8335,7 @@ class _PaymentSuccessScreenState extends State<PaymentSuccessScreen> {
           );
         } catch (_) {
           // Slot not found in provider slots, try user slots
-          final allUserSlots = UserSlotRepository.instance.allSlots;
+          final allUserSlots = CustomerSlotRepository.instance.allSlots;
           try {
             _slotEntry = allUserSlots.firstWhere(
               (s) => s.slot.id == _booking!.slotId,

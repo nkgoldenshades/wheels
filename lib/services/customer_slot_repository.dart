@@ -5,14 +5,14 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/slot.dart';
 import '../models/slot_entry.dart';
 import 'auth_repository.dart';
-import 'user_vehicle_repository.dart';
+import 'customer_vehicle_repository.dart';
 
 /// Separate slot repository for "My Posts" section
 /// This keeps user's personal posts separate from provider posts
-class UserSlotRepository {
-  UserSlotRepository._();
+class CustomerSlotRepository {
+  CustomerSlotRepository._();
 
-  static final UserSlotRepository instance = UserSlotRepository._();
+  static final CustomerSlotRepository instance = CustomerSlotRepository._();
 
   static const String _userSlotsKey = 'user_slots';
 
@@ -26,7 +26,7 @@ class UserSlotRepository {
     await _loadSlots();
     
     // Listen to vehicle changes to rebuild slot entries
-    UserVehicleRepository.instance.vehiclesListenable.addListener(_buildSlotEntries);
+    CustomerVehicleRepository.instance.vehiclesListenable.addListener(_buildSlotEntries);
     
     _initialized = true;
   }
@@ -34,7 +34,7 @@ class UserSlotRepository {
   void _buildSlotEntries() {
     final entries = <SlotEntry>[];
     for (final slot in _slots.value) {
-      final vehicle = UserVehicleRepository.instance.getById(slot.vehicleId);
+      final vehicle = CustomerVehicleRepository.instance.getById(slot.vehicleId);
       if (vehicle != null) {
         entries.add(SlotEntry(slot: slot, vehicle: vehicle));
       }
@@ -91,7 +91,7 @@ class UserSlotRepository {
   }
 
   Future<void> addSlot(Slot slot) async {
-    final vehicle = UserVehicleRepository.instance.getById(slot.vehicleId);
+    final vehicle = CustomerVehicleRepository.instance.getById(slot.vehicleId);
     if (vehicle == null) {
       debugPrint('❌ Vehicle not found for slot: ${slot.vehicleId}');
       return;
@@ -107,7 +107,7 @@ class UserSlotRepository {
   }
 
   Future<void> updateSlot(Slot slot) async {
-    final vehicle = UserVehicleRepository.instance.getById(slot.vehicleId);
+    final vehicle = CustomerVehicleRepository.instance.getById(slot.vehicleId);
     if (vehicle == null) {
       debugPrint('❌ Vehicle not found for slot: ${slot.vehicleId}');
       return;
@@ -144,10 +144,13 @@ class UserSlotRepository {
         return;
       }
 
+      // Generate short 6-char reference code from timestamp
+      final refCode = slot.id.toString().substring(slot.id.toString().length - 6);
+
       final data = {
         'id': slot.id,
         'user_id': currentUser.id,
-        'provider_id': currentUser.id,
+        'ref_code': refCode, // Short code shown to users
         'vehicle_id': slot.vehicleId,
         'service_type': slot.serviceType.name,
         'slot_type': slot.slotType.name,
@@ -184,7 +187,7 @@ class UserSlotRepository {
 
       await supabase.from('slots').upsert(data);
 
-      debugPrint('✅ User slot synced to Supabase: ${slot.id}');
+      debugPrint('✅ User slot synced to Supabase: ${slot.id} (ref: $refCode)');
     } catch (e) {
       debugPrint('❌ Failed to sync user slot to Supabase: $e');
     }

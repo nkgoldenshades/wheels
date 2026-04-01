@@ -1096,7 +1096,17 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
                                     );
 
                                     if (localBooking != null && context.mounted) {
-                                      Navigator.pop(context);
+                                      Navigator.pop(
+                                        context,
+                                        BookingConfirmResult(
+                                          seatKeys: seatKeysOrdered,
+                                          userGenders: genders,
+                                          userNames: names,
+                                          userAges: ages,
+                                          userPhones: phones,
+                                          userEmails: emails,
+                                        ),
+                                      );
                                       
                                       // Go to Requests tab
                                       mainTabIndex.value = 1;

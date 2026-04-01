@@ -1,8 +1,10 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/seat_layout.dart';
+import 'auth_repository.dart';
 
 class SeatLayoutRepository {
   SeatLayoutRepository._();
@@ -57,6 +59,9 @@ class SeatLayoutRepository {
   }) async {
     layoutsByOwnerId.value = {...layoutsByOwnerId.value, ownerId: layout};
     await _persist();
+    
+    // Sync to Supabase
+    await _syncLayoutToSupabase(ownerId, layout);
   }
 
   Future<void> remove(String ownerId) async {
@@ -64,5 +69,41 @@ class SeatLayoutRepository {
     next.remove(ownerId);
     layoutsByOwnerId.value = next;
     await _persist();
+    
+    // Delete from Supabase
+    await _deleteLayoutFromSupabase(ownerId);
+  }
+
+  Future<void> _syncLayoutToSupabase(String ownerId, SeatLayout layout) async {
+    try {
+      final supabase = Supabase.instance.client;
+      final currentUser = AuthRepository.instance.currentUser;
+      
+      if (currentUser == null) return;
+
+      await supabase.from('seat_layouts').upsert({
+        'id': layout.id,
+        'user_id': currentUser.id,
+        'name': layout.name,
+        'layout_data': layout.toJson(),
+        'created_at': DateTime.now().toIso8601String(),
+      });
+
+      debugPrint('✅ Seat layout synced to Supabase: ${layout.id}');
+    } catch (e) {
+      debugPrint('❌ Failed to sync seat layout to Supabase: $e');
+    }
+  }
+
+  Future<void> _deleteLayoutFromSupabase(String ownerId) async {
+    try {
+      final supabase = Supabase.instance.client;
+      
+      await supabase.from('seat_layouts').delete().eq('user_id', ownerId);
+
+      debugPrint('✅ Seat layout deleted from Supabase');
+    } catch (e) {
+      debugPrint('❌ Failed to delete seat layout from Supabase: $e');
+    }
   }
 }

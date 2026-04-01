@@ -1,7 +1,9 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:image_picker/image_picker.dart';
 import '../vehicle/vehicle_list_screen.dart';
 import '../../models/service_type.dart';
 import '../../models/slot_type.dart';
@@ -10,7 +12,7 @@ import '../../models/vehicle.dart';
 import '../../models/slot.dart';
 import '../../models/pickup_mode.dart';
 import '../../services/slot_repository.dart';
-import '../../services/user_slot_repository.dart';
+import '../../services/customer_slot_repository.dart';
 import '../../services/content_filter_service.dart';
 import '../../controllers/seat_layout_controller.dart';
 import '../../models/seat_layout.dart';
@@ -83,6 +85,10 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
 
   // Notes
   final _notesController = TextEditingController();
+
+  // Images
+  final List<String> _selectedImages = [];
+  final ImagePicker _imagePicker = ImagePicker();
 
   // Working mode (only for working service)
   String _workingMode = 'On-site';
@@ -375,6 +381,39 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     return '${d.day}/${d.month} ${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
   }
 
+  Future<void> _pickImage() async {
+    if (_selectedImages.length >= 4) {
+      _showError('Maximum 4 images allowed');
+      return;
+    }
+
+    try {
+      final XFile? image = await _imagePicker.pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 1024,
+        maxHeight: 1024,
+        imageQuality: 80,
+      );
+
+      if (image != null) {
+        final bytes = await File(image.path).readAsBytes();
+        final base64Image = base64Encode(bytes);
+        
+        setState(() {
+          _selectedImages.add(base64Image);
+        });
+      }
+    } catch (e) {
+      _showError('Failed to pick image: ${e.toString()}');
+    }
+  }
+
+  void _removeImage(int index) {
+    setState(() {
+      _selectedImages.removeAt(index);
+    });
+  }
+
   Future<void> _postSlot() async {
     if (!_validateForm()) return;
     
@@ -485,7 +524,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         notes: _notesController.text.trim().isEmpty
             ? null
             : _notesController.text.trim(),
-        images: const [],
+        images: List<String>.from(_selectedImages),
         createdAt: DateTime.now(),
         pickupOption: _pickupMode,
         maxWeight: widget.serviceType == ServiceType.parcel
@@ -519,7 +558,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       );
 
       if (widget.isUserMode) {
-        await UserSlotRepository.instance.addSlot(slot);
+        await CustomerSlotRepository.instance.addSlot(slot);
       } else {
         await SlotRepository.instance.addSlot(slot);
       }
@@ -1810,6 +1849,113 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
             border: OutlineInputBorder(),
           ),
         ),
+        const SizedBox(height: 20),
+        
+        // Images Section
+        const Text(
+          '📷 Images (Optional)',
+          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 8),
+        
+        // Image Grid
+        if (_selectedImages.isNotEmpty) ...[
+          GridView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 2,
+              crossAxisSpacing: 8,
+              mainAxisSpacing: 8,
+              childAspectRatio: 1,
+            ),
+            itemCount: _selectedImages.length,
+            itemBuilder: (context, index) {
+              return Stack(
+                children: [
+                  Container(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.grey.shade300),
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: Image.memory(
+                        base64Decode(_selectedImages[index]),
+                        width: double.infinity,
+                        height: double.infinity,
+                        fit: BoxFit.cover,
+                      ),
+                    ),
+                  ),
+                  Positioned(
+                    top: 4,
+                    right: 4,
+                    child: GestureDetector(
+                      onTap: () => _removeImage(index),
+                      child: Container(
+                        padding: const EdgeInsets.all(4),
+                        decoration: const BoxDecoration(
+                          color: Colors.red,
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(
+                          Icons.close,
+                          color: Colors.white,
+                          size: 16,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
+          const SizedBox(height: 12),
+        ],
+        
+        // Add Image Button
+        if (_selectedImages.length < 4)
+          GestureDetector(
+            onTap: _pickImage,
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                border: Border.all(
+                  color: Colors.grey.shade300,
+                  style: BorderStyle.solid,
+                ),
+                borderRadius: BorderRadius.circular(8),
+                color: Colors.grey.shade50,
+              ),
+              child: Column(
+                children: [
+                  Icon(
+                    Icons.add_photo_alternate_outlined,
+                    size: 32,
+                    color: Colors.grey.shade600,
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Add Images (${_selectedImages.length}/4)',
+                    style: TextStyle(
+                      color: Colors.grey.shade600,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Tap to select from gallery',
+                    style: TextStyle(
+                      color: Colors.grey.shade500,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
       ],
     );
   }

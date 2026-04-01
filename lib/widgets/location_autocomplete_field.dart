@@ -643,11 +643,13 @@ class _LocationAutocompleteFieldState
   }
 
   double _getTextFieldWidth() {
+    if (!mounted) return 300.0; // Return default if unmounted
     final RenderBox? renderBox = context.findRenderObject() as RenderBox?;
     return renderBox?.size.width ?? 300;
   }
 
   double _getTextFieldHeight() {
+    if (!mounted) return 56.0; // Return default if unmounted
     final RenderBox? renderBox = context.findRenderObject() as RenderBox?;
     return renderBox?.size.height ?? 56;
   }

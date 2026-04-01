@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/review.dart';
 
 class ReviewRepository {
@@ -64,7 +65,31 @@ class ReviewRepository {
 
     reviews.value = [review, ...reviews.value];
     await _persist();
+    
+    // Sync to Supabase
+    await _syncReviewToSupabase(review);
+    
     return review;
+  }
+
+  Future<void> _syncReviewToSupabase(Review review) async {
+    try {
+      final supabase = Supabase.instance.client;
+      
+      await supabase.from('reviews').insert({
+        'id': review.id,
+        'booking_id': review.bookingId,
+        'reviewer_id': review.reviewerId,
+        'reviewee_id': review.revieweeId,
+        'rating': review.rating,
+        'comment': review.comment,
+        'created_at': review.createdAt.toIso8601String(),
+      });
+
+      debugPrint('✅ Review synced to Supabase: ${review.id}');
+    } catch (e) {
+      debugPrint('❌ Failed to sync review to Supabase: $e');
+    }
   }
 
   /// Check if user has already reviewed a booking

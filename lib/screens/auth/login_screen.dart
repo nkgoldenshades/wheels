@@ -40,6 +40,9 @@ class _LoginScreenState extends State<LoginScreen> {
         password: password,
       );
       
+      // TEST: Check JWT claims after login
+      await AuthRepository.instance.testJWTClaims();
+      
       if (!mounted) return;
       Navigator.pushReplacementNamed(context, '/main');
     } catch (e) {

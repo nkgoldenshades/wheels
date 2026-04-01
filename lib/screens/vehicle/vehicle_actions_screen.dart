@@ -15,8 +15,8 @@ import '../../services/booking_repository.dart';
 import '../../services/review_repository.dart';
 import '../../services/slot_repository.dart';
 import '../../services/vehicle_repository.dart';
-import '../../services/user_vehicle_repository.dart';
-import '../../services/user_slot_repository.dart';
+import '../../services/customer_vehicle_repository.dart';
+import '../../services/customer_slot_repository.dart';
 import '../reviews_screen.dart';
 import '../slot_detail_screen.dart';
 import '../add_flow/create_post_screen.dart';
@@ -56,7 +56,7 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
   }
 
   dynamic get _vehicleRepo => widget.isUserMode 
-      ? UserVehicleRepository.instance
+      ? CustomerVehicleRepository.instance
       : widget.vehicleRepository!;
 
   @override
@@ -71,7 +71,7 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
   Widget build(BuildContext context) {
     return ValueListenableBuilder(
       valueListenable: widget.isUserMode
-          ? UserVehicleRepository.instance.vehiclesListenable
+          ? CustomerVehicleRepository.instance.vehiclesListenable
           : widget.vehicleRepository!.vehiclesListenable,
       builder: (context, _, child) {
         final vehicle = _vehicleRepo.getById(widget.vehicleId);
@@ -110,11 +110,11 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
           ),
           body: ValueListenableBuilder(
             valueListenable: widget.isUserMode
-                ? UserSlotRepository.instance.slotsListenable
+                ? CustomerSlotRepository.instance.slotsListenable
                 : SlotRepository.instance.slotsListenable,
             builder: (context, _, child) {
               final entries = widget.isUserMode
-                  ? UserSlotRepository.instance.allSlots
+                  ? CustomerSlotRepository.instance.allSlots
                       .where((e) => e.slot.vehicleId == vehicle.id)
                       .toList()
                   : SlotRepository.instance.getSlotEntriesByVehicleId(vehicle.id);
@@ -235,7 +235,7 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                 );
                 if (confirm != true || !context.mounted) return;
                 if (widget.isUserMode) {
-                  await UserSlotRepository.instance.deleteSlot(entry.slot.id);
+                  await CustomerSlotRepository.instance.deleteSlot(entry.slot.id);
                 } else {
                   await SlotRepository.instance.deleteSlot(entry.slot.id);
                 }
@@ -602,7 +602,7 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                             operatorPhoto: operatorPhoto,
                           );
                           if (widget.isUserMode) {
-                            await UserVehicleRepository.instance.updateVehicle(updated);
+                            await CustomerVehicleRepository.instance.updateVehicle(updated);
                           } else {
                             await widget.vehicleRepository!.updateVehicle(updated);
                           }
@@ -1338,7 +1338,7 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
           break;
       }
       if (widget.isUserMode) {
-        UserVehicleRepository.instance.updateVehicle(updatedVehicle);
+        CustomerVehicleRepository.instance.updateVehicle(updatedVehicle);
       } else {
         await widget.vehicleRepository!.updateVehicle(updatedVehicle);
       }
@@ -1434,7 +1434,7 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
           ? updatedVehicle.copyWith(isVerifiedToggle: true)
           : updatedVehicle;
       if (widget.isUserMode) {
-        UserVehicleRepository.instance.updateVehicle(withBadge);
+        CustomerVehicleRepository.instance.updateVehicle(withBadge);
       } else {
         await widget.vehicleRepository!.updateVehicle(withBadge);
       }
@@ -1490,7 +1490,7 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
               builder: (context, allBookings, _) {
                 // Get all slots for this vehicle
                 final vehicleSlotIds = (widget.isUserMode
-                        ? UserSlotRepository.instance.allSlots
+                        ? CustomerSlotRepository.instance.allSlots
                         : SlotRepository.instance.allSlots)
                     .where((e) => e.slot.vehicleId == vehicle.id)
                     .map((e) => e.slot.id)
@@ -1926,7 +1926,7 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
     );
 
     if (widget.isUserMode) {
-      UserVehicleRepository.instance.updateVehicle(updated);
+      CustomerVehicleRepository.instance.updateVehicle(updated);
     } else {
       widget.vehicleRepository!.updateVehicle(updated);
     }
@@ -2326,7 +2326,7 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
     // Get slot IDs that belong to this specific vehicle
     final vehicleSlotIds = {
       ...SlotRepository.instance.getSlotsByVehicleId(vehicle.id).map((s) => s.id),
-      ...UserSlotRepository.instance.allSlotsRaw
+      ...CustomerSlotRepository.instance.allSlotsRaw
           .where((s) => s.vehicleId == vehicle.id)
           .map((s) => s.id),
     };

@@ -5,10 +5,10 @@ import 'auth_repository.dart';
 
 /// Separate vehicle repository for "My Posts" section
 /// This keeps user's personal vehicles separate from provider vehicles
-class UserVehicleRepository {
-  UserVehicleRepository._();
+class CustomerVehicleRepository {
+  CustomerVehicleRepository._();
 
-  static final UserVehicleRepository instance = UserVehicleRepository._();
+  static final CustomerVehicleRepository instance = CustomerVehicleRepository._();
 
   final _supabase = Supabase.instance.client;
   final ValueNotifier<List<Vehicle>> vehiclesListenable = ValueNotifier([]);

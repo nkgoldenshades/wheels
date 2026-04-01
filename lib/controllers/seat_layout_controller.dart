@@ -100,6 +100,29 @@ class SeatLayoutController extends ChangeNotifier {
     notifyListeners();
   }
 
+  void updateImages(List<String> images) {
+    _layout = _layout.copyWith(images: images);
+    notifyListeners();
+  }
+
+  void addImage(String base64Image) {
+    final currentImages = List<String>.from(_layout.images);
+    if (currentImages.length < 4) {
+      currentImages.add(base64Image);
+      _layout = _layout.copyWith(images: currentImages);
+      notifyListeners();
+    }
+  }
+
+  void removeImage(int index) {
+    final currentImages = List<String>.from(_layout.images);
+    if (index >= 0 && index < currentImages.length) {
+      currentImages.removeAt(index);
+      _layout = _layout.copyWith(images: currentImages);
+      notifyListeners();
+    }
+  }
+
   void fillAllSeats(int price) {
     final nextCells = Map<String, LayoutCell>.from(_layout.cells);
     for (int r = 0; r < _layout.rows; r++) {

@@ -6,8 +6,8 @@ import '../../models/service_type.dart';
 import '../../models/vehicle.dart';
 import '../../services/slot_repository.dart';
 import '../../services/vehicle_repository.dart';
-import '../../services/user_vehicle_repository.dart';
-import '../../services/user_slot_repository.dart';
+import '../../services/customer_vehicle_repository.dart';
+import '../../services/customer_slot_repository.dart';
 import 'add_vehicle_screen.dart';
 import 'vehicle_actions_screen.dart';
 
@@ -19,7 +19,7 @@ class VehicleListScreen extends StatelessWidget {
     : vehicleRepository = vehicleRepository ?? (isUserMode ? null : VehicleRepository.instance);
   
   VehicleRepository get _vehicleRepo => isUserMode 
-      ? UserVehicleRepository.instance as VehicleRepository
+      ? CustomerVehicleRepository.instance as VehicleRepository
       : vehicleRepository!;
 
   Uint8List? _tryDecodePhoto(String? photo) {
@@ -49,7 +49,7 @@ class VehicleListScreen extends StatelessWidget {
 
           if (created == null) return;
           if (isUserMode) {
-            UserVehicleRepository.instance.addVehicle(created);
+            CustomerVehicleRepository.instance.addVehicle(created);
           } else {
             await _vehicleRepo.addVehicle(created);
           }
@@ -60,18 +60,18 @@ class VehicleListScreen extends StatelessWidget {
       body: AnimatedBuilder(
         animation: Listenable.merge([
           isUserMode 
-              ? UserVehicleRepository.instance.vehiclesListenable
+              ? CustomerVehicleRepository.instance.vehiclesListenable
               : _vehicleRepo.vehiclesListenable,
           isUserMode 
-              ? UserSlotRepository.instance.slotsListenable
+              ? CustomerSlotRepository.instance.slotsListenable
               : SlotRepository.instance.slotsListenable,
           isUserMode
-              ? UserVehicleRepository.instance.onlineStatusListenable
+              ? CustomerVehicleRepository.instance.onlineStatusListenable
               : _vehicleRepo.onlineStatusListenable,
         ]),
         builder: (context, _) {
           final vehicles = isUserMode 
-              ? UserVehicleRepository.instance.allVehicles
+              ? CustomerVehicleRepository.instance.allVehicles
               : _vehicleRepo.allVehicles;
           if (vehicles.isEmpty) {
             return const Center(
@@ -93,10 +93,10 @@ class VehicleListScreen extends StatelessWidget {
               final v = vehicles[index];
               final yearText = v.year != null ? ' ${v.year}' : '';
               final isOnline = isUserMode 
-                  ? UserVehicleRepository.instance.isOnline(v.id)
+                  ? CustomerVehicleRepository.instance.isOnline(v.id)
                   : _vehicleRepo.isOnline(v.id);
               final servicesCount = isUserMode
-                  ? UserSlotRepository.instance.allSlots
+                  ? CustomerSlotRepository.instance.allSlots
                       .where((e) => e.slot.vehicleId == v.id)
                       .length
                   : SlotRepository.instance.getSlotsByVehicleId(v.id).length;
@@ -139,7 +139,7 @@ class VehicleListScreen extends StatelessWidget {
 
                     if (confirmed == true) {
                       if (isUserMode) {
-                        UserVehicleRepository.instance.deleteVehicle(v.id);
+                        CustomerVehicleRepository.instance.deleteVehicle(v.id);
                       } else {
                         await _vehicleRepo.removeVehicle(v.id);
                       }
@@ -224,7 +224,7 @@ class VehicleListScreen extends StatelessWidget {
                               value: isOnline,
                               onChanged: (value) {
                                 if (isUserMode) {
-                                  UserVehicleRepository.instance.setOnline(v.id, value);
+                                  CustomerVehicleRepository.instance.setOnline(v.id, value);
                                 } else {
                                   _vehicleRepo.setOnline(v.id, value);
                                 }
