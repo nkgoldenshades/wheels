@@ -1,17 +1,23 @@
+import 'dart:async';
 import 'package:flutter/foundation.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
 import 'app_preferences.dart';
 import 'profile_name_registry.dart';
-import 'auth_repository.dart';
+import 'auth_repository.dart' as auth;
 
 class ProfileInfo {
+  final String id; // Firebase UID
   final String profileName;
+  final String? email;
   final int? age;
   final String? phone;
   final String? aadhaar;
   final String? pan;
   final String? avatarUrl;
   final String? businessType;
+  final DateTime? createdAt;
+  final DateTime? updatedAt;
 
   // Bank details (for receiving payments)
   final String? bankAccountHolder;
@@ -32,14 +38,25 @@ class ProfileInfo {
   final bool panVerified;
   final bool dlVerified;
 
+  // Payment provider fields
+  final String paymentProvider; // 'stripe' or 'razorpay'
+  final String? stripeAccountId;
+  final String? razorpayAccountId;
+  final double walletBalance;
+  final String? country;
+
   const ProfileInfo({
+    required this.id,
     required this.profileName,
+    this.email,
     this.age,
     this.phone,
     this.aadhaar,
     this.pan,
     this.avatarUrl,
     this.businessType,
+    this.createdAt,
+    this.updatedAt,
     this.bankAccountHolder,
     this.bankAccountNumber,
     this.bankName,
@@ -53,10 +70,75 @@ class ProfileInfo {
     this.aadhaarVerified = false,
     this.panVerified = false,
     this.dlVerified = false,
+    this.paymentProvider = 'razorpay',
+    this.stripeAccountId,
+    this.razorpayAccountId,
+    this.walletBalance = 0.0,
+    this.country,
   });
 
+  // Create from Supabase JSON
+  factory ProfileInfo.fromJson(Map<String, dynamic> json) {
+    return ProfileInfo(
+      id: json['id'] as String,
+      profileName: json['full_name'] as String? ?? 'Unknown User',
+      email: json['email'] as String?,
+      phone: json['phone_number'] as String?,
+      avatarUrl: json['profile_photo_url'] as String?,
+      businessType: json['business_type'] as String?,
+      createdAt: json['created_at'] != null 
+          ? DateTime.parse(json['created_at'] as String)
+          : null,
+      updatedAt: json['updated_at'] != null
+          ? DateTime.parse(json['updated_at'] as String)
+          : null,
+      // Map document fields
+      aadhaar: json['national_id_number'] as String?,
+      aadhaarVerified: json['national_id_verified'] as bool? ?? false,
+      aadhaarFrontImage: json['national_id_front_url'] as String?,
+      aadhaarBackImage: json['national_id_back_url'] as String?,
+      pan: json['tax_id_number'] as String?,
+      panVerified: json['tax_id_verified'] as bool? ?? false,
+      panFrontImage: json['tax_id_front_url'] as String?,
+      dlVerified: json['driving_license_verified'] as bool? ?? false,
+      dlFrontImage: json['driving_license_front_url'] as String?,
+      dlBackImage: json['driving_license_back_url'] as String?,
+      // Payment provider fields
+      paymentProvider: json['payment_provider'] as String? ?? 'razorpay',
+      stripeAccountId: json['stripe_account_id'] as String?,
+      razorpayAccountId: json['razorpay_account_id'] as String?,
+      walletBalance: (json['wallet_balance'] as num?)?.toDouble() ?? 0.0,
+      country: json['country'] as String?,
+    );
+  }
+
+  // Convert to Supabase JSON
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'full_name': profileName,
+      'email': email,
+      'phone_number': phone,
+      'profile_photo_url': avatarUrl,
+      'business_type': businessType ?? 'solo',
+      'national_id_number': aadhaar,
+      'national_id_verified': aadhaarVerified,
+      'national_id_front_url': aadhaarFrontImage,
+      'national_id_back_url': aadhaarBackImage,
+      'tax_id_number': pan,
+      'tax_id_verified': panVerified,
+      'tax_id_front_url': panFrontImage,
+      'driving_license_verified': dlVerified,
+      'driving_license_front_url': dlFrontImage,
+      'driving_license_back_url': dlBackImage,
+    };
+  }
+
   ProfileInfo copyWith({
+    String? id,
     String? profileName,
+    String? email,
+    bool setEmailNull = false,
     int? age,
     bool setAgeNull = false,
     String? phone,
@@ -69,6 +151,8 @@ class ProfileInfo {
     bool setAvatarNull = false,
     String? businessType,
     bool setBusinessTypeNull = false,
+    DateTime? createdAt,
+    DateTime? updatedAt,
     String? bankAccountHolder,
     bool setBankAccountHolderNull = false,
     String? bankAccountNumber,
@@ -92,9 +176,19 @@ class ProfileInfo {
     bool? aadhaarVerified,
     bool? panVerified,
     bool? dlVerified,
+    String? paymentProvider,
+    String? stripeAccountId,
+    bool setStripeAccountIdNull = false,
+    String? razorpayAccountId,
+    bool setRazorpayAccountIdNull = false,
+    double? walletBalance,
+    String? country,
+    bool setCountryNull = false,
   }) {
     return ProfileInfo(
+      id: id ?? this.id,
       profileName: profileName ?? this.profileName,
+      email: setEmailNull ? null : email ?? this.email,
       age: setAgeNull ? null : age ?? this.age,
       phone: setPhoneNull ? null : phone ?? this.phone,
       aadhaar: setAadhaarNull ? null : aadhaar ?? this.aadhaar,
@@ -103,6 +197,8 @@ class ProfileInfo {
       businessType: setBusinessTypeNull
           ? null
           : businessType ?? this.businessType,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
       bankAccountHolder: setBankAccountHolderNull
           ? null
           : bankAccountHolder ?? this.bankAccountHolder,
@@ -128,6 +224,11 @@ class ProfileInfo {
       aadhaarVerified: aadhaarVerified ?? this.aadhaarVerified,
       panVerified: panVerified ?? this.panVerified,
       dlVerified: dlVerified ?? this.dlVerified,
+      paymentProvider: paymentProvider ?? this.paymentProvider,
+      stripeAccountId: setStripeAccountIdNull ? null : stripeAccountId ?? this.stripeAccountId,
+      razorpayAccountId: setRazorpayAccountIdNull ? null : razorpayAccountId ?? this.razorpayAccountId,
+      walletBalance: walletBalance ?? this.walletBalance,
+      country: setCountryNull ? null : country ?? this.country,
     );
   }
 }
@@ -136,120 +237,97 @@ class ProfileRepository {
   ProfileRepository._();
 
   static final ProfileRepository instance = ProfileRepository._();
+  
+  // Get Supabase client
+  SupabaseClient get _supabase => Supabase.instance.client;
 
-  static const String _storageKeyProfileName = 'profile_profile_name';
-  static const String _storageKeyProfileAge = 'profile_age';
-  static const String _storageKeyProfilePhone = 'profile_phone';
-  static const String _storageKeyProfileAadhaar = 'profile_aadhaar';
-  static const String _storageKeyProfilePan = 'profile_pan';
-  static const String _storageKeyBusinessType = 'profile_business_type';
-
+  // Current profile state
+  ProfileInfo? _currentProfile;
   final ValueNotifier<ProfileInfo> profile = ValueNotifier<ProfileInfo>(
-    const ProfileInfo(profileName: 'John Doe'),
+    const ProfileInfo(id: '', profileName: 'Loading...'),
   );
 
   Future<void> init() async {
-    await ProfileNameRegistry.instance.init();
-    await _loadCore();
-    final avatar = AppPreferences.instance.avatarBase64.value;
-    if (avatar != null && avatar.trim().isNotEmpty) {
-      profile.value = profile.value.copyWith(avatarUrl: avatar);
-    }
-
-    // Load document images from SharedPreferences
-    await _loadDocuments();
-    
-    // Register current profile name if user is logged in
-    final currentUser = AuthRepository.instance.currentUser;
-    if (currentUser != null && profile.value.profileName.isNotEmpty) {
-      await ProfileNameRegistry.instance.registerName(
-        currentUser.id,
-        profile.value.profileName,
-      );
-    }
-  }
-
-  Future<void> _loadCore() async {
-    final prefs = await SharedPreferences.getInstance();
-    final profileName = prefs.getString(_storageKeyProfileName);
-    final age = prefs.getInt(_storageKeyProfileAge);
-    final phone = prefs.getString(_storageKeyProfilePhone);
-    final aadhaar = prefs.getString(_storageKeyProfileAadhaar);
-    final pan = prefs.getString(_storageKeyProfilePan);
-    final businessType = prefs.getString(_storageKeyBusinessType);
-
-    profile.value = profile.value.copyWith(
-      profileName: (profileName == null || profileName.trim().isEmpty)
-          ? null
-          : profileName,
-      age: age,
-      setAgeNull: age == null,
-      phone: (phone == null || phone.trim().isEmpty) ? null : phone,
-      setPhoneNull: phone == null,
-      aadhaar: (aadhaar == null || aadhaar.trim().isEmpty) ? null : aadhaar,
-      setAadhaarNull: aadhaar == null,
-      pan: (pan == null || pan.trim().isEmpty) ? null : pan,
-      setPanNull: pan == null,
-      businessType: (businessType == null || businessType.trim().isEmpty)
-          ? null
-          : businessType,
-      setBusinessTypeNull: businessType == null,
-    );
-  }
-
-  Future<void> _saveCore(ProfileInfo info) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_storageKeyProfileName, info.profileName);
-    if (info.age == null) {
-      await prefs.remove(_storageKeyProfileAge);
-    } else {
-      await prefs.setInt(_storageKeyProfileAge, info.age!);
-    }
-    if (info.phone == null || info.phone!.trim().isEmpty) {
-      await prefs.remove(_storageKeyProfilePhone);
-    } else {
-      await prefs.setString(_storageKeyProfilePhone, info.phone!);
-    }
-    if (info.aadhaar == null || info.aadhaar!.trim().isEmpty) {
-      await prefs.remove(_storageKeyProfileAadhaar);
-    } else {
-      await prefs.setString(_storageKeyProfileAadhaar, info.aadhaar!);
-    }
-    if (info.pan == null || info.pan!.trim().isEmpty) {
-      await prefs.remove(_storageKeyProfilePan);
-    } else {
-      await prefs.setString(_storageKeyProfilePan, info.pan!);
-    }
-    if (info.businessType == null || info.businessType!.trim().isEmpty) {
-      await prefs.remove(_storageKeyBusinessType);
-    } else {
-      await prefs.setString(_storageKeyBusinessType, info.businessType!);
+    try {
+      if (kDebugMode) print('🔧 ProfileRepository init starting...');
+      await ProfileNameRegistry.instance.init();
+      
+      // Listen to Firebase auth state changes (CORRECT approach)
+      firebase_auth.FirebaseAuth.instance.authStateChanges().listen((firebaseUser) async {
+        if (firebaseUser != null) {
+          if (kDebugMode) print('✅ Firebase user ready: ${firebaseUser.uid}');
+          try {
+            await loadProfile(firebaseUser.uid);
+            if (kDebugMode) print('✅ Profile loaded for authenticated user');
+          } catch (e) {
+            if (kDebugMode) print('⚠️ Profile not found, creating default: $e');
+            // Create default profile if doesn't exist
+            final defaultProfile = ProfileInfo(
+              id: firebaseUser.uid,
+              profileName: firebaseUser.email?.split('@').first ?? 'User',
+              email: firebaseUser.email,
+              businessType: 'solo',
+            );
+            await saveProfile(defaultProfile);
+            if (kDebugMode) print('✅ Default profile created');
+          }
+        } else {
+          if (kDebugMode) print('⚠️ No Firebase user - setting guest profile');
+          profile.value = const ProfileInfo(id: '', profileName: 'Guest User');
+        }
+      });
+      
+      if (kDebugMode) print('✅ ProfileRepository init completed');
+    } catch (e) {
+      if (kDebugMode) print('❌ ProfileRepository init error: $e');
+      // Set fallback profile
+      profile.value = const ProfileInfo(id: '', profileName: 'Guest User');
     }
   }
 
-  Future<void> _loadDocuments() async {
-    final prefs = await SharedPreferences.getInstance();
+  Future<ProfileInfo> loadProfile(String userId) async {
+    try {
+      if (kDebugMode) print('🔍 Loading profile for user: $userId');
+      
+      final response = await _supabase
+          .from('profiles')
+          .select()
+          .eq('id', userId)
+          .maybeSingle(); // Use maybeSingle() instead of single()
+      
+      if (response == null) {
+        throw Exception('Profile not found for user: $userId');
+      }
+      
+      if (kDebugMode) print('📊 Profile data received: $response');
+      
+      final profileInfo = ProfileInfo.fromJson(response);
+      profile.value = profileInfo;
+      _currentProfile = profileInfo;
+      
+      if (kDebugMode) print('✅ Profile loaded successfully: ${profileInfo.profileName}');
+      return profileInfo;
+    } catch (e) {
+      if (kDebugMode) print('❌ Failed to load profile: $e');
+      rethrow;
+    }
+  }
 
-    final aadhaarFront = prefs.getString('document_aadhaar_front');
-    final aadhaarBack = prefs.getString('document_aadhaar_back');
-    final panFront = prefs.getString('document_pan_front');
-    final dlFront = prefs.getString('document_dl_front');
-    final dlBack = prefs.getString('document_dl_back');
-
-    final aadhaarVerified = prefs.getBool('document_aadhaar_verified') ?? false;
-    final panVerified = prefs.getBool('document_pan_verified') ?? false;
-    final dlVerified = prefs.getBool('document_dl_verified') ?? false;
-
-    profile.value = profile.value.copyWith(
-      aadhaarFrontImage: aadhaarFront,
-      aadhaarBackImage: aadhaarBack,
-      panFrontImage: panFront,
-      dlFrontImage: dlFront,
-      dlBackImage: dlBack,
-      aadhaarVerified: aadhaarVerified,
-      panVerified: panVerified,
-      dlVerified: dlVerified,
-    );
+  Future<void> saveProfile(ProfileInfo profileInfo) async {
+    try {
+      await _supabase
+          .from('profiles')
+          .upsert(profileInfo.toJson())
+          .eq('id', profileInfo.id);
+      
+      profile.value = profileInfo;
+      _currentProfile = profileInfo;
+      
+      if (kDebugMode) print('✅ Saved profile for user: ${profileInfo.id}');
+    } catch (e) {
+      if (kDebugMode) print('❌ Failed to save profile: $e');
+      rethrow;
+    }
   }
 
   Future<void> saveDocument(
@@ -258,64 +336,69 @@ class ProfileRepository {
     String base64Image, {
     bool isVerified = false,
   }) async {
-    final prefs = await SharedPreferences.getInstance();
-    final key = 'document_${documentType}_$side';
-    await prefs.setString(key, base64Image);
-
-    // Update verification status if verified
-    if (isVerified) {
-      await prefs.setBool('document_${documentType}_verified', true);
+    final currentProfile = _currentProfile ?? profile.value;
+    if (currentProfile.id.isEmpty) {
+      throw Exception('No profile loaded');
     }
 
-    // Update profile value
+    ProfileInfo updatedProfile;
+    
+    // Update profile with document data
     switch (documentType) {
       case 'aadhaar':
         if (side == 'front') {
-          profile.value = profile.value.copyWith(
+          updatedProfile = currentProfile.copyWith(
             aadhaarFrontImage: base64Image,
-            aadhaarVerified: isVerified ? true : profile.value.aadhaarVerified,
+            aadhaarVerified: isVerified ? true : currentProfile.aadhaarVerified,
           );
         } else {
-          profile.value = profile.value.copyWith(
+          updatedProfile = currentProfile.copyWith(
             aadhaarBackImage: base64Image,
-            aadhaarVerified: isVerified ? true : profile.value.aadhaarVerified,
+            aadhaarVerified: isVerified ? true : currentProfile.aadhaarVerified,
           );
         }
         break;
       case 'pan':
-        profile.value = profile.value.copyWith(
+        updatedProfile = currentProfile.copyWith(
           panFrontImage: base64Image,
-          panVerified: isVerified ? true : profile.value.panVerified,
+          panVerified: isVerified ? true : currentProfile.panVerified,
         );
         break;
       case 'dl':
         if (side == 'front') {
-          profile.value = profile.value.copyWith(
+          updatedProfile = currentProfile.copyWith(
             dlFrontImage: base64Image,
-            dlVerified: isVerified ? true : profile.value.dlVerified,
+            dlVerified: isVerified ? true : currentProfile.dlVerified,
           );
         } else {
-          profile.value = profile.value.copyWith(
+          updatedProfile = currentProfile.copyWith(
             dlBackImage: base64Image,
-            dlVerified: isVerified ? true : profile.value.dlVerified,
+            dlVerified: isVerified ? true : currentProfile.dlVerified,
           );
         }
         break;
+      default:
+        throw Exception('Unknown document type: $documentType');
     }
+
+    await saveProfile(updatedProfile);
   }
 
   String? getDocument(String documentType, String side) {
+    final currentProfile = _currentProfile ?? profile.value;
+    if (currentProfile.id.isEmpty) return null;
+    
     switch (documentType) {
       case 'aadhaar':
         return side == 'front'
-            ? profile.value.aadhaarFrontImage
-            : profile.value.aadhaarBackImage;
+            ? currentProfile.aadhaarFrontImage
+            : currentProfile.aadhaarBackImage;
       case 'pan':
-        return profile.value.panFrontImage;
+        return currentProfile.panFrontImage;
       case 'dl':
         return side == 'front'
-            ? profile.value.dlFrontImage
-            : profile.value.dlBackImage;
+            ? currentProfile.dlFrontImage
+            : currentProfile.dlBackImage;
       default:
         return null;
     }
@@ -323,11 +406,21 @@ class ProfileRepository {
 
   Future<void> setLocalAvatarBase64(String? base64) async {
     await AppPreferences.instance.setAvatarBase64(base64);
-    await update(avatarUrl: base64, setAvatarNull: base64 == null);
+    
+    final currentProfile = _currentProfile ?? profile.value;
+    if (currentProfile.id.isNotEmpty) {
+      final updatedProfile = currentProfile.copyWith(
+        avatarUrl: base64,
+        setAvatarNull: base64 == null,
+      );
+      await saveProfile(updatedProfile);
+    }
   }
 
   Future<void> update({
     String? profileName,
+    String? email,
+    bool setEmailNull = false,
     int? age,
     bool setAgeNull = false,
     String? phone,
@@ -341,9 +434,14 @@ class ProfileRepository {
     String? businessType,
     bool setBusinessTypeNull = false,
   }) async {
+    final currentProfile = _currentProfile ?? profile.value;
+    if (currentProfile.id.isEmpty) {
+      throw Exception('No profile loaded');
+    }
+
     // If updating profile name, check uniqueness
     if (profileName != null && profileName.trim().isNotEmpty) {
-      final currentUser = AuthRepository.instance.currentUser;
+      final currentUser = auth.AuthRepository.instance.currentUser;
       if (currentUser != null) {
         final isAvailable = await ProfileNameRegistry.instance.updateName(
           currentUser.id,
@@ -356,8 +454,10 @@ class ProfileRepository {
       }
     }
     
-    profile.value = profile.value.copyWith(
+    final updatedProfile = currentProfile.copyWith(
       profileName: profileName,
+      email: email,
+      setEmailNull: setEmailNull,
       age: age,
       setAgeNull: setAgeNull,
       phone: phone,
@@ -372,6 +472,78 @@ class ProfileRepository {
       setBusinessTypeNull: setBusinessTypeNull,
     );
 
-    await _saveCore(profile.value);
+    await saveProfile(updatedProfile);
+  }
+
+  // Payment provider update methods
+  Future<void> updatePaymentProvider(String provider) async {
+    final currentProfile = _currentProfile ?? profile.value;
+    if (currentProfile.id.isEmpty) {
+      throw Exception('No profile loaded');
+    }
+
+    final updatedProfile = currentProfile.copyWith(
+      paymentProvider: provider,
+    );
+
+    await saveProfile(updatedProfile);
+  }
+
+  Future<void> updateStripeAccount(String accountId) async {
+    final currentProfile = _currentProfile ?? profile.value;
+    if (currentProfile.id.isEmpty) {
+      throw Exception('No profile loaded');
+    }
+
+    final updatedProfile = currentProfile.copyWith(
+      stripeAccountId: accountId,
+    );
+
+    await saveProfile(updatedProfile);
+  }
+
+  Future<void> updateRazorpayAccount(String accountId) async {
+    final currentProfile = _currentProfile ?? profile.value;
+    if (currentProfile.id.isEmpty) {
+      throw Exception('No profile loaded');
+    }
+
+    final updatedProfile = currentProfile.copyWith(
+      razorpayAccountId: accountId,
+    );
+
+    await saveProfile(updatedProfile);
+  }
+
+  Future<void> updateWalletBalance(double balance) async {
+    final currentProfile = _currentProfile ?? profile.value;
+    if (currentProfile.id.isEmpty) {
+      throw Exception('No profile loaded');
+    }
+
+    final updatedProfile = currentProfile.copyWith(
+      walletBalance: balance,
+    );
+
+    await saveProfile(updatedProfile);
+  }
+
+  Future<void> updateCountry(String country) async {
+    final currentProfile = _currentProfile ?? profile.value;
+    if (currentProfile.id.isEmpty) {
+      throw Exception('No profile loaded');
+    }
+
+    // Auto-set payment provider based on country
+    final paymentProvider = (country == 'IN' || country == 'India') 
+        ? 'razorpay' 
+        : 'stripe';
+
+    final updatedProfile = currentProfile.copyWith(
+      country: country,
+      paymentProvider: paymentProvider,
+    );
+
+    await saveProfile(updatedProfile);
   }
 }

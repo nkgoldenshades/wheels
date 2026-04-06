@@ -14,7 +14,12 @@ class Passenger {
   });
 
   Map<String, dynamic> toJson() {
-    return {'id': id, 'name': name, 'age': age, 'gender': gender.index};
+    return {
+      'id': id,
+      'name': name,
+      'age': age,
+      'gender': gender.name, // Use name instead of index for consistency
+    };
   }
 
   factory Passenger.fromJson(Map<String, dynamic> json) {
@@ -22,7 +27,9 @@ class Passenger {
       id: json['id'],
       name: json['name'],
       age: json['age'],
-      gender: SeatGender.values[json['gender'] as int],
+      gender: json['gender'] is String
+          ? SeatGender.values.firstWhere((e) => e.name == json['gender'])
+          : SeatGender.values[json['gender'] as int], // Backward compatibility
     );
   }
 

@@ -23,7 +23,7 @@ class _MyPostsUnifiedPageState extends State<MyPostsUnifiedPage>
 
   bool _isInsuranceValidNow(Vehicle vehicle) {
     if (!vehicle.insuranceVerified) return false;
-    final exp = vehicle.insuranceExpiryDate;
+    final exp = vehicle.insuranceExpiry;
     if (exp == null) return true;
     return exp.isAfter(DateTime.now());
   }

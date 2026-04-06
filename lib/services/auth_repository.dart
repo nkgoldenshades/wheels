@@ -178,7 +178,7 @@ class AuthRepository {
 
       // Check if user already exists
       final existingUser = await supabase
-          .from('users')
+          .from('profiles')
           .select()
           .eq('id', uid)
           .maybeSingle();
@@ -189,12 +189,13 @@ class AuthRepository {
       }
 
       // Insert new user
-      await supabase.from('users').insert({
+      await supabase.from('profiles').insert({
         'id': uid,
-        'name': firebaseUser.displayName ?? 'User',
+        'full_name': firebaseUser.displayName ?? 'User',
         'email': firebaseUser.email,
-        'phone': firebaseUser.phoneNumber,
-        'avatar_url': firebaseUser.photoURL,
+        'phone_number': firebaseUser.phoneNumber,
+        'profile_photo_url': firebaseUser.photoURL,
+        'business_type': 'solo',
       });
 
       debugPrint('✅ User synced to Supabase: $uid');

@@ -1,4 +1,4 @@
- 
+﻿ 
 import 'dart:async';
 import 'dart:math' as math;
 import 'dart:convert';
@@ -13,7 +13,6 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:image_picker/image_picker.dart';
 import 'firebase_options.dart';
 import 'models/seat_layout.dart';
 import 'models/service_type.dart';
@@ -31,9 +30,6 @@ import 'services/booking_repository.dart';
 import 'services/slot_repository.dart';
 import 'services/vehicle_repository.dart';
 import 'services/auth_repository.dart';
-import 'screens/verification/profile_photo_verification_screen.dart';
-import 'screens/verification/document_verification_screen.dart';
-import 'screens/verification/web_camera_screen.dart';
 import 'services/seat_layout_repository.dart';
 import 'services/customer_vehicle_repository.dart';
 import 'services/customer_slot_repository.dart';
@@ -55,6 +51,9 @@ import 'screens/auth/splash_screen.dart';
 import 'screens/auth/login_screen.dart';
 import 'screens/auth/register_screen.dart';
 import 'screens/reviews_screen.dart';
+import 'screens/ai_chat_page.dart';
+import 'widgets/voice_ai_overlay.dart';
+import 'services/voice_ai_service.dart';
 import 'app_tab_controller.dart';
 
 // Global Supabase client
@@ -87,13 +86,51 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   String? startupError;
+  
+  // Helper function to wrap repository inits with timeout
+  Future<void> initWithTimeout(Future<void> future, String name) async {
+    try {
+      if (kDebugMode) print('⏳ Starting $name...');
+      await future.timeout(
+        const Duration(seconds: 5), // Reduced timeout
+        onTimeout: () {
+          throw TimeoutException('$name initialization timed out', const Duration(seconds: 5));
+        },
+      );
+      if (kDebugMode) print('✅ $name initialized');
+    } catch (e) {
+      if (kDebugMode) print('⚠️ $name init failed/timed out: $e');
+      // Don't rethrow — let app continue
+    }
+  }
+  
+  // Start app immediately, initialize services in background
+  if (kDebugMode) print('🚀 Starting app immediately...');
+  runApp(MyApp(startupError: startupError));
+  
+  // Initialize services in background (non-blocking)
+  _initializeServicesInBackground(initWithTimeout);
+}
+
+// Background initialization that doesn't block app startup
+void _initializeServicesInBackground(Future<void> Function(Future<void>, String) initWithTimeout) async {
   try {
-    // Initialize Firebase (for authentication)
+    if (kDebugMode) print('🔧 Starting background initialization...');
+    
+    // Initialize Firebase (for authentication) - with better error handling
+    if (kDebugMode) print('⏳ Starting Firebase...');
     await Firebase.initializeApp(
       options: DefaultFirebaseOptions.currentPlatform,
+    ).timeout(
+      const Duration(seconds: 30),
+      onTimeout: () {
+        throw TimeoutException('Firebase initialization timed out', const Duration(seconds: 30));
+      },
     );
+    if (kDebugMode) print('✅ Firebase initialized');
 
     // Initialize Supabase with Firebase JWT validation
+    if (kDebugMode) print('⏳ Starting Supabase...');
     await Supabase.initialize(
       url: SupabaseConfig.url,
       anonKey: SupabaseConfig.anonKey,
@@ -117,31 +154,68 @@ void main() async {
           return null;
         }
       },
+    ).timeout(
+      const Duration(seconds: 30),
+      onTimeout: () {
+        throw TimeoutException('Supabase initialization timed out', const Duration(seconds: 30));
+      },
     );
+    if (kDebugMode) print('✅ Supabase initialized');
 
-    await AuthRepository.instance.init();
-    await AppPreferences.instance.init();
-    await ProfileRepository.instance.init();
-    await VehicleRepository.instance.init();
-    await SlotRepository.instance.init();
-    await CustomerVehicleRepository.instance.init();
-    await CustomerSlotRepository.instance.init();
-    await UserPostRepository.instance.init();
-    await UserPostAcceptanceRepository.instance.init();
-    await SeatLayoutRepository.instance.init();
-    await BookingRepository.instance.init();
-    await PassengerRepository.instance.init();
-
-    // Initialize Stripe for payments
-    await StripeService.instance.init();
+    // Initialize core services with timeout protection
+    await initWithTimeout(AuthRepository.instance.init(), 'AuthRepository');
+    await initWithTimeout(AppPreferences.instance.init(), 'AppPreferences');
     
-    // Initialize Review system
-    await ReviewRepository.instance.init();
-  } catch (e) {
-    startupError = 'App init failed: $e';
-  }
+    // Initialize ProfileRepository with timeout protection (already had timeout)
+    if (kDebugMode) print('⏳ Starting ProfileRepository...');
+    try {
+      await ProfileRepository.instance.init().timeout(
+        const Duration(seconds: 30),
+        onTimeout: () {
+          if (kDebugMode) print('⏰ ProfileRepository init timed out');
+          throw TimeoutException('ProfileRepository initialization timed out', const Duration(seconds: 30));
+        },
+      );
+      if (kDebugMode) print('✅ ProfileRepository initialized');
+    } catch (e) {
+      if (kDebugMode) print('❌ ProfileRepository init failed: $e');
+      // Continue with app initialization even if profile fails
+    }
+    
+    // Initialize all other repositories with timeout protection
+    await initWithTimeout(VehicleRepository.instance.init(), 'VehicleRepository');
+    await initWithTimeout(SlotRepository.instance.init(), 'SlotRepository');
+    await initWithTimeout(CustomerVehicleRepository.instance.init(), 'CustomerVehicleRepository');
+    await initWithTimeout(CustomerSlotRepository.instance.init(), 'CustomerSlotRepository');
+    await initWithTimeout(UserPostRepository.instance.init(), 'UserPostRepository');
+    await initWithTimeout(UserPostAcceptanceRepository.instance.init(), 'UserPostAcceptanceRepository');
+    await initWithTimeout(SeatLayoutRepository.instance.init(), 'SeatLayoutRepository');
+    await initWithTimeout(BookingRepository.instance.init(), 'BookingRepository');
+    await initWithTimeout(PassengerRepository.instance.init(), 'PassengerRepository');
+    await initWithTimeout(ReviewRepository.instance.init(), 'ReviewRepository');
 
-  runApp(MyApp(startupError: startupError));
+    // Test Supabase connection (only in debug mode)
+    if (kDebugMode) {
+      debugPrint('🔗 Supabase connection configured');
+      debugPrint('📍 URL: ${SupabaseConfig.url}');
+      debugPrint('🔑 Auth: Firebase JWT → Supabase RLS');
+    }
+
+    // Initialize Stripe for payments with timeout
+    await initWithTimeout(StripeService.instance.init(), 'StripeService');
+    
+    // Initialize Voice AI service with timeout (this was the last call - likely culprit!)
+    await initWithTimeout(VoiceAIService().initialize(), 'VoiceAIService');
+    
+    if (kDebugMode) print('🎉 All services initialized successfully!');
+    
+  } catch (e, stackTrace) {
+    if (kDebugMode) {
+      print('❌ Background initialization error: $e');
+      print('📍 Stack trace: $stackTrace');
+      print('ℹ️ App will continue running with limited functionality');
+    }
+  }
 }
 
 class EditUserPostPage extends StatefulWidget {
@@ -572,238 +646,15 @@ Future<void> _pickAndSaveAvatar(BuildContext context) async {
   if (uploadType == null || !context.mounted) return;
 
   // Step 2: Pick image from gallery
-  final picker = ImagePicker();
-  final file = await picker.pickImage(
-    source: ImageSource.gallery,
-    maxWidth: 512,
-    maxHeight: 512,
-    imageQuality: 85,
+  // Note: ImagePicker not available on Windows - using placeholder
+  if (!context.mounted) return;
+  
+  ScaffoldMessenger.of(context).showSnackBar(
+    const SnackBar(
+      content: Text('Image picker not available on this platform. Use web version for full functionality.'),
+      backgroundColor: Colors.orange,
+    ),
   );
-
-  if (file == null) return;
-
-  try {
-    final uploadedBytes = await file.readAsBytes();
-
-    if (!context.mounted) return;
-
-    // If normal upload, save directly without verification
-    if (uploadType == 'normal') {
-      final base64 = base64Encode(uploadedBytes);
-      await ProfileRepository.instance.setLocalAvatarBase64(base64);
-
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Row(
-            children: [
-              Icon(Icons.check_circle, color: Colors.white),
-              SizedBox(width: 8),
-              Text('Profile photo uploaded successfully!'),
-            ],
-          ),
-          backgroundColor: Colors.green,
-        ),
-      );
-      return;
-    }
-
-    // Verified upload - show confirmation dialog
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Verify This Photo?'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: Image.memory(
-                uploadedBytes,
-                width: 200,
-                height: 200,
-                fit: BoxFit.cover,
-              ),
-            ),
-            const SizedBox(height: 16),
-            const Text(
-              'Next, we\'ll verify this is really you using liveness detection.',
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 14),
-            ),
-            const SizedBox(height: 8),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.blue.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: const Column(
-                children: [
-                  Text(
-                    '📸 You\'ll need to:',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  SizedBox(height: 4),
-                  Text(
-                    '• Show your face to camera',
-                    style: TextStyle(fontSize: 12),
-                  ),
-                  Text('• Turn left and right', style: TextStyle(fontSize: 12)),
-                  Text(
-                    '• Smile for verification',
-                    style: TextStyle(fontSize: 12),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Start Verification'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirm != true || !context.mounted) return;
-
-    // Step 3: Live verification with face matching
-    final result = await Navigator.push<Map<String, dynamic>>(
-      context,
-      MaterialPageRoute(
-        builder: (context) => kIsWeb
-            ? const WebCameraVerificationScreen(
-                title: 'Verify Your Face',
-                isProfilePhoto: true,
-              )
-            : ProfilePhotoVerificationScreen(
-                referencePhotoBytes: uploadedBytes,
-              ),
-      ),
-    );
-
-    if (result == null || !context.mounted) return;
-
-    // Step 4: Check if face matched
-    final faceMatched = result['faceMatched'] ?? false;
-    final matchScore = result['matchScore'] ?? 0.0;
-
-    if (!faceMatched) {
-      // Face didn't match - show error
-      showDialog(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Row(
-            children: [
-              Icon(Icons.error_outline, color: Colors.red),
-              SizedBox(width: 8),
-              Text('Verification Failed'),
-            ],
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text(
-                'The live photo doesn\'t match the uploaded photo.',
-                style: TextStyle(fontSize: 16),
-              ),
-              const SizedBox(height: 16),
-              Text(
-                'Match score: ${matchScore.toStringAsFixed(1)}%\n'
-                'Required: 25%',
-                style: const TextStyle(fontSize: 14, color: Colors.grey),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 16),
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.orange.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: const Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      '💡 Tips:',
-                      style: TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                    SizedBox(height: 4),
-                    Text(
-                      '• Use a clear, recent photo',
-                      style: TextStyle(fontSize: 12),
-                    ),
-                    Text(
-                      '• Ensure good lighting',
-                      style: TextStyle(fontSize: 12),
-                    ),
-                    Text(
-                      '• Face the camera directly',
-                      style: TextStyle(fontSize: 12),
-                    ),
-                    Text(
-                      '• Remove glasses/mask if in photo',
-                      style: TextStyle(fontSize: 12),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () {
-                Navigator.pop(context);
-                // Retry the whole flow
-                _pickAndSaveAvatar(context);
-              },
-              child: const Text('Try Again'),
-            ),
-          ],
-        ),
-      );
-      return;
-    }
-
-    // Step 5: Face matched - save the uploaded photo
-    final base64 = base64Encode(uploadedBytes);
-    await ProfileRepository.instance.setLocalAvatarBase64(base64);
-
-    if (!context.mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Row(
-          children: [
-            const Icon(Icons.verified_user, color: Colors.white),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                'Profile photo verified! ✓\nMatch score: ${matchScore.toStringAsFixed(1)}%',
-              ),
-            ),
-          ],
-        ),
-        backgroundColor: Colors.green,
-        duration: const Duration(seconds: 3),
-      ),
-    );
-  } catch (e) {
-    if (!context.mounted) return;
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text('Could not upload photo: $e')));
-  }
 }
 
 Widget _buildDocumentUploadCard(
@@ -979,278 +830,17 @@ Future<void> _uploadDocument(
   String documentType,
   String side,
 ) async {
-  // Step 1: Upload document photo from gallery
-  final picker = ImagePicker();
-  final file = await picker.pickImage(
-    source: ImageSource.gallery,
-    maxWidth: 1024,
-    maxHeight: 1024,
-    imageQuality: 85,
+  // Document upload functionality not available on Windows
+  // Use web version for full document upload functionality
+  if (!context.mounted) return;
+  
+  ScaffoldMessenger.of(context).showSnackBar(
+    const SnackBar(
+      content: Text('Document upload not available on this platform. Use web version for full functionality.'),
+      backgroundColor: Colors.orange,
+      duration: Duration(seconds: 3),
+    ),
   );
-
-  if (file == null) return;
-
-  try {
-    // Show the uploaded document preview
-    final uploadedBytes = await file.readAsBytes();
-
-    if (!context.mounted) return;
-
-    // Determine if this document has a face (PAN, Aadhaar, DL have faces; RC, Insurance don't)
-    final hasFace =
-        documentType == 'pan' ||
-        documentType == 'aadhaar' ||
-        documentType == 'dl';
-
-    // Ask user to confirm they want to verify this document
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Verify ${documentType.toUpperCase()} ($side)?'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: Image.memory(
-                uploadedBytes,
-                width: 300,
-                height: 200,
-                fit: BoxFit.contain,
-              ),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              hasFace
-                  ? 'Next, we\'ll verify this is really you using liveness detection and face matching.'
-                  : 'This document will be saved for verification.',
-              textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 14),
-            ),
-            if (hasFace) ...[
-              const SizedBox(height: 8),
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.blue.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: const Column(
-                  children: [
-                    Text(
-                      '📸 You\'ll need to:',
-                      style: TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                    SizedBox(height: 4),
-                    Text(
-                      '• Show your face to camera',
-                      style: TextStyle(fontSize: 12),
-                    ),
-                    Text(
-                      '• Turn left and right',
-                      style: TextStyle(fontSize: 12),
-                    ),
-                    Text(
-                      '• Smile for verification',
-                      style: TextStyle(fontSize: 12),
-                    ),
-                    Text(
-                      '• Match face with document',
-                      style: TextStyle(fontSize: 12),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: Text(hasFace ? 'Start Verification' : 'Save Document'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirm != true || !context.mounted) return;
-
-    // Step 2: If document has face, do live verification with face matching
-    if (hasFace) {
-      // Determine document type for verification screen
-      DocumentType docType;
-      switch (documentType) {
-        case 'aadhaar':
-          docType = DocumentType.aadhaar;
-          break;
-        case 'pan':
-          docType = DocumentType.pan;
-          break;
-        case 'dl':
-          docType = DocumentType.dl;
-          break;
-        default:
-          docType = DocumentType.aadhaar;
-      }
-
-      final result = await Navigator.push<Map<String, dynamic>>(
-        context,
-        MaterialPageRoute(
-          builder: (context) => kIsWeb
-              ? const WebCameraVerificationScreen(
-                  title: 'Verify Your Face',
-                  isProfilePhoto: false,
-                )
-              : DocumentVerificationScreen(
-                  documentType: docType,
-                  referenceDocumentBytes: uploadedBytes,
-                ),
-        ),
-      );
-
-      if (result == null || !context.mounted) return;
-
-      // Step 3: Check if face matched
-      final faceMatched = result['faceMatched'] ?? false;
-      final matchScore = result['matchScore'] ?? 0.0;
-
-      if (!faceMatched) {
-        // Face didn't match - show error
-        showDialog(
-          context: context,
-          builder: (context) => AlertDialog(
-            title: const Row(
-              children: [
-                Icon(Icons.error_outline, color: Colors.red),
-                SizedBox(width: 8),
-                Text('Verification Failed'),
-              ],
-            ),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  'The live photo doesn\'t match the ${documentType.toUpperCase()} photo.',
-                  style: const TextStyle(fontSize: 16),
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  'Match score: ${matchScore.toStringAsFixed(1)}%\n'
-                  'Required: 70%',
-                  style: const TextStyle(fontSize: 14, color: Colors.grey),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 16),
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.orange.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: const Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        '💡 Tips:',
-                        style: TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                      SizedBox(height: 4),
-                      Text(
-                        '• Use a clear document photo',
-                        style: TextStyle(fontSize: 12),
-                      ),
-                      Text(
-                        '• Ensure good lighting',
-                        style: TextStyle(fontSize: 12),
-                      ),
-                      Text(
-                        '• Face the camera directly',
-                        style: TextStyle(fontSize: 12),
-                      ),
-                      Text(
-                        '• Remove glasses/mask if in document',
-                        style: TextStyle(fontSize: 12),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('Cancel'),
-              ),
-              FilledButton(
-                onPressed: () {
-                  Navigator.pop(context);
-                  // Retry the whole flow
-                  _uploadDocument(context, documentType, side);
-                },
-                child: const Text('Try Again'),
-              ),
-            ],
-          ),
-        );
-        return;
-      }
-
-      // Step 4: Face matched - save the uploaded document
-      final base64Image = base64Encode(uploadedBytes);
-      await ProfileRepository.instance.saveDocument(
-        documentType,
-        side,
-        base64Image,
-        isVerified: true,
-      );
-
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Row(
-            children: [
-              const Icon(Icons.verified_user, color: Colors.white),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  '${documentType.toUpperCase()} ($side) verified! ✓\nMatch score: ${matchScore.toStringAsFixed(1)}%',
-                ),
-              ),
-            ],
-          ),
-          backgroundColor: Colors.green,
-          duration: const Duration(seconds: 3),
-        ),
-      );
-    } else {
-      // No face in document (RC, Insurance) - just save it
-      final base64Image = base64Encode(uploadedBytes);
-      await ProfileRepository.instance.saveDocument(
-        documentType,
-        side,
-        base64Image,
-        isVerified: false, // No face to verify
-      );
-
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            '${documentType.toUpperCase()} ($side) uploaded successfully!',
-          ),
-        ),
-      );
-    }
-  } catch (e) {
-    if (!context.mounted) return;
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text('Could not verify document: $e')));
-  }
 }
 
 class MyApp extends StatelessWidget {
@@ -2193,15 +1783,7 @@ class UserMyPostsPage extends StatelessWidget {
           );
         },
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(builder: (_) => const CreateUserPostPage()),
-          );
-        },
-        child: const Icon(Icons.add),
-      ),
+      // FloatingActionButton removed: Posts should be created inside a vehicle detail screen only
     );
   }
 
@@ -3257,7 +2839,7 @@ class _MainScreenState extends State<MainScreen> {
   final List<Widget> _pages = [
     const PostsPage(),
     const RequestsPage(),
-    const WalletPage(),
+    AIChatPage(), // AI Chat screen (not const because it has state)
     const ProfilePage(),
   ];
 
@@ -3284,33 +2866,35 @@ class _MainScreenState extends State<MainScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('VaultWheels'),
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-      ),
-      body: _pages[_currentIndex],
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _currentIndex,
-        onTap: (index) {
-          setState(() {
-            _currentIndex = index;
-          });
-          mainTabIndex.value = index;
-        },
-        type: BottomNavigationBarType.fixed,
-        items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.article), label: 'Posts'),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.request_page),
-            label: 'Requests',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.account_balance_wallet),
-            label: 'Wallet',
-          ),
-          BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Profile'),
-        ],
+    return VoiceAIOverlay(
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('VaultWheels'),
+          backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+        ),
+        body: _pages[_currentIndex],
+        bottomNavigationBar: BottomNavigationBar(
+          currentIndex: _currentIndex,
+          onTap: (index) {
+            setState(() {
+              _currentIndex = index;
+            });
+            mainTabIndex.value = index;
+          },
+          type: BottomNavigationBarType.fixed,
+          items: const [
+            BottomNavigationBarItem(icon: Icon(Icons.article), label: 'Posts'),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.request_page),
+              label: 'Requests',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.smart_toy), // AI chat icon
+              label: 'AI Chat',
+            ),
+            BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Profile'),
+          ],
+        ),
       ),
     );
   }
@@ -8089,24 +7673,108 @@ class _ProfilePageState extends State<ProfilePage> {
       floatingActionButton: _isCustomerMode
           ? FloatingActionButton.extended(
               onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (context) => VehicleListScreen()),
-                );
+                _showAddPostBottomSheet(context);
               },
               icon: const Icon(Icons.add),
               label: const Text('Create Post'),
             )
           : FloatingActionButton.extended(
               onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (context) => VehicleListScreen()),
-                );
+                _showAddPostBottomSheet(context);
               },
               icon: const Icon(Icons.add),
-              label: const Text('Add Vehicle'),
+              label: const Text('Create Post'),
             ),
+    );
+  }
+
+  void _showAddPostBottomSheet(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        // Use LayoutBuilder to adapt to screen size, and SingleChildScrollView for small screens
+        return LayoutBuilder(
+          builder: (context, constraints) {
+            final double sheetHeight = constraints.maxHeight < 420 ? constraints.maxHeight * 0.95 : 400;
+            return SizedBox(
+              height: sheetHeight,
+              child: SingleChildScrollView(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(24, 20, 24, 24),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.max,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Center(
+                        child: Container(
+                          width: 40,
+                          height: 4,
+                          decoration: BoxDecoration(
+                            color: Colors.grey.shade300,
+                            borderRadius: BorderRadius.circular(2),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+                      const Center(
+                        child: Text('Create Post', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+                      ),
+                      const SizedBox(height: 8),
+                      Center(
+                        child: Text(
+                          _isCustomerMode 
+                            ? 'Select a vehicle you need, then create posts'
+                            : 'Select your vehicle, then create posts',
+                          style: const TextStyle(fontSize: 16, color: Colors.grey),
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                      const SizedBox(height: 28),
+                      SizedBox(
+                        height: 56,
+                        child: ElevatedButton.icon(
+                          onPressed: () {
+                            Navigator.pop(ctx);
+                            Navigator.push(
+                              context, 
+                              MaterialPageRoute(
+                                builder: (_) => VehicleListScreen(isUserMode: _isCustomerMode)
+                              )
+                            );
+                          },
+                          icon: Icon(_isCustomerMode ? Icons.search : Icons.directions_car),
+                          label: Text(
+                            _isCustomerMode ? 'Choose Needed Vehicle' : 'Choose Your Vehicle',
+                            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)
+                          ),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: _isCustomerMode ? Colors.orange : Colors.blue,
+                            foregroundColor: Colors.white,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      Text(
+                        _isCustomerMode 
+                          ? '1. Select a vehicle type you need\n2. Open the vehicle\n3. Create posts for that vehicle'
+                          : '1. Select one of your vehicles\n2. Open the vehicle details\n3. Create posts for that vehicle',
+                        style: TextStyle(fontSize: 14, color: Colors.grey[600]),
+                        textAlign: TextAlign.center,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
     );
   }
 }
@@ -8143,7 +7811,7 @@ class UserPostsListPage extends StatelessWidget {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      'Create posts for services you\'re looking for',
+                      'Go to your vehicles and create posts from there',
                       style: TextStyle(color: Colors.grey[600]),
                       textAlign: TextAlign.center,
                     ),
@@ -8236,7 +7904,7 @@ class ProviderPostsListPage extends StatelessWidget {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      'Create posts for services you\'re offering',
+                      'Go to your vehicles and create posts from there',
                       style: TextStyle(color: Colors.grey[600]),
                       textAlign: TextAlign.center,
                     ),

@@ -4,7 +4,6 @@ import 'dart:convert';
 import 'dart:typed_data';
 import 'dart:math';
 
-import '../../models/service_type.dart';
 import '../../models/vehicle.dart';
 import '../../services/auth_repository.dart';
 import '../../services/profile_repository.dart';
@@ -51,10 +50,6 @@ class _AddVehicleScreenState extends State<AddVehicleScreen> {
     'Flight',
     'Other',
   ];
-
-  bool _capPassenger = true;
-  bool _capParcel = false;
-  bool _capWorking = false;
 
   // Media fields
   String? _profileImageBase64;
@@ -149,28 +144,6 @@ class _AddVehicleScreenState extends State<AddVehicleScreen> {
                   hintText: 'e.g., 2021',
                 ),
               ),
-              const SizedBox(height: 20),
-              const Text(
-                'Capabilities',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 8),
-              SwitchListTile(
-                value: _capPassenger,
-                onChanged: (v) => setState(() => _capPassenger = v),
-                title: const Text('Passenger'),
-              ),
-              SwitchListTile(
-                value: _capParcel,
-                onChanged: (v) => setState(() => _capParcel = v),
-                title: const Text('Parcel'),
-              ),
-              SwitchListTile(
-                value: _capWorking,
-                onChanged: (v) => setState(() => _capWorking = v),
-                title: const Text('Working'),
-              ),
-
               const SizedBox(height: 24),
               const Divider(),
               const SizedBox(height: 16),
@@ -707,18 +680,6 @@ class _AddVehicleScreenState extends State<AddVehicleScreen> {
   void _onSave() {
     if (!_formKey.currentState!.validate()) return;
 
-    final caps = <ServiceType>[];
-    if (_capPassenger) caps.add(ServiceType.passenger);
-    if (_capParcel) caps.add(ServiceType.parcel);
-    if (_capWorking) caps.add(ServiceType.working);
-
-    if (caps.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Select at least one capability')),
-      );
-      return;
-    }
-
     // Check if profile image is added
     if (_profileImageBase64 == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -766,7 +727,7 @@ class _AddVehicleScreenState extends State<AddVehicleScreen> {
       name: name,
       type: type,
       year: year,
-      capabilities: caps,
+      capabilities: [], // Empty - capabilities chosen when creating posts
       profileImage: _profileImageBase64,
       galleryImages: _galleryImagesBase64,
       videoUrl: _videoBase64,

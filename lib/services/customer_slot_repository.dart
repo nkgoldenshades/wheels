@@ -125,13 +125,44 @@ class CustomerSlotRepository {
   }
 
   Future<void> deleteSlot(String id) async {
-    _slots.value = _slots.value.where((s) => s.id != id).toList();
-    _buildSlotEntries();
-    await _saveSlots();
-    debugPrint('✅ User slot deleted locally: $id');
-    
-    // Delete from Supabase
-    await _deleteSlotFromSupabase(id);
+    try {
+      // Check for active bookings first
+      final activeBookings = await _getActiveBookingsForSlot(id);
+      
+      if (activeBookings.isNotEmpty) {
+        throw Exception('Cannot delete post: ${activeBookings.length} active booking(s) exist. Please wait for bookings to complete or cancel them first.');
+      }
+      
+      _slots.value = _slots.value.where((s) => s.id != id).toList();
+      _buildSlotEntries();
+      await _saveSlots();
+      debugPrint('✅ User slot deleted locally: $id');
+      
+      // Delete from Supabase
+      await _deleteSlotFromSupabase(id);
+    } catch (e) {
+      debugPrint('❌ Failed to delete user slot: $e');
+      rethrow;
+    }
+  }
+
+  /// Check if slot has active bookings that would prevent deletion
+  Future<List<Map<String, dynamic>>> _getActiveBookingsForSlot(String slotId) async {
+    try {
+      final supabase = Supabase.instance.client;
+      
+      // Query Supabase for active bookings on this slot
+      final response = await supabase
+          .from('bookings')
+          .select('id, status, user_name')
+          .eq('slot_id', slotId)
+          .not('status', 'in', '(rejected,cancelled,completed,refunded)');
+      
+      return List<Map<String, dynamic>>.from(response);
+    } catch (e) {
+      debugPrint('⚠️ Could not check active bookings, allowing deletion: $e');
+      return []; // Allow deletion if we can't check Supabase
+    }
   }
 
   Future<void> _syncSlotToSupabase(Slot slot, {bool isUpdate = false}) async {

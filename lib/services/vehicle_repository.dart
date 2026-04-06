@@ -44,25 +44,12 @@ class VehicleRepository {
 
   Future<void> _loadVehicles() async {
     try {
-      // Try loading from Supabase first
-      dynamic response;
-      try {
-        response = await _supabase
-            .from('vehicles')
-            .select()
-            .eq('is_user_vehicle', false)
-            .eq('is_online', true)
-            .order('created_at', ascending: false);
-      } on PostgrestException catch (e) {
-        if (e.code == '42703') {
-          response = await _supabase
-              .from('vehicles')
-              .select()
-              .order('created_at', ascending: false);
-        } else {
-          rethrow;
-        }
-      }
+      // Load provider vehicles from Supabase (vehicles users are offering)
+      final response = await _supabase
+          .from('vehicles')
+          .select()
+          .eq('is_active', true)
+          .order('created_at', ascending: false);
 
       _vehicles.value = (response as List)
           .map((json) => Vehicle.fromJson(json as Map<String, dynamic>))
@@ -144,15 +131,47 @@ class VehicleRepository {
 
   Future<void> addVehicle(Vehicle vehicle) async {
     try {
-      // Add to Supabase - send complete vehicle data
-      final payload = vehicle.toJson();
-      
-      // Ensure required fields are present
-      payload['created_at'] = vehicle.createdAt.toIso8601String();
-      payload['updated_at'] = DateTime.now().toIso8601String();
+      // Add to Supabase - match the real public.vehicles schema
+      final payload = <String, dynamic>{
+        'id': vehicle.id,
+        'profile_id': vehicle.userId,
+        'vehicle_type': vehicle.type,
+        'vehicle_name': vehicle.name,
+        'registration_number': vehicle.registrationNumber ?? 'TEMP-${vehicle.id.substring(0, 8)}',
+        'seating_capacity': vehicle.seatingCapacity ?? 4,
+        'vehicle_photo_url': vehicle.profileImage,
+        'gallery_images': vehicle.galleryImages.where((e) => e.trim().isNotEmpty).toList(),
+        'video_url': vehicle.videoUrl,
+        'created_at': vehicle.createdAt.toIso8601String(),
+        'updated_at': DateTime.now().toIso8601String(),
+        'is_active': true,
+        
+        // Legal documents
+        'rc_front_url': vehicle.rcFrontUrl,
+        'rc_back_url': vehicle.rcBackUrl,
+        'insurance_number': vehicle.insuranceNumber,
+        'insurance_expiry': vehicle.insuranceExpiry?.toIso8601String(),
+        'insurance_document_url': vehicle.insuranceDocumentUrl,
+        'pollution_certificate_url': vehicle.pollutionCertificateUrl,
+        'pollution_expiry': vehicle.pollutionExpiry?.toIso8601String(),
+        'fitness_certificate_url': vehicle.fitnessCertificateUrl,
+        'fitness_expiry': vehicle.fitnessExpiry?.toIso8601String(),
+        
+        // Statistics
+        'total_trips': vehicle.totalBookings,
+        'total_reviews': vehicle.totalRatings,
+        'active_posts_count': vehicle.activePostsCount,
+        'is_verified': vehicle.rcVerified,
+        'verified_at': vehicle.rcVerifiedAt?.toIso8601String(),
+        
+        // Operator info
+        'operator_name': vehicle.operatorName,
+        'operator_phone': vehicle.operatorPhone,
+        'operator_profile_photo_url': vehicle.operatorPhoto,
+      };
 
       debugPrint(
-        '🚗 Supabase vehicle insert payload (provider): id=${payload['id']} user_id=${payload['user_id']}',
+        '🚗 Supabase vehicle insert payload (provider): id=${payload['id']} profile_id=${payload['profile_id']}',
       );
 
       await _supabase.from('vehicles').insert(payload);
@@ -161,19 +180,19 @@ class VehicleRepository {
       _vehicles.value = [vehicle, ..._vehicles.value];
       await _saveVehicles();
 
-      debugPrint('✅ Vehicle created in Supabase: ${vehicle.id}');
+      debugPrint('✅ Provider vehicle created in Supabase: ${vehicle.id}');
     } catch (e) {
       if (e is PostgrestException) {
         debugPrint(
-          '❌ Failed to create vehicle in Supabase (provider): code=${e.code} message=${e.message} details=${e.details} hint=${e.hint} id=${vehicle.id} user_id=${vehicle.userId}',
+          '❌ Failed to create provider vehicle in Supabase: code=${e.code} message=${e.message} details=${e.details} hint=${e.hint} id=${vehicle.id} profile_id=${vehicle.userId}',
         );
       } else {
-        debugPrint('❌ Failed to create vehicle in Supabase: $e');
+        debugPrint('❌ Failed to create provider vehicle in Supabase: $e');
       }
       // Fallback to local only
       _vehicles.value = [vehicle, ..._vehicles.value];
       await _saveVehicles();
-      debugPrint('✅ Vehicle created locally: ${vehicle.id}');
+      debugPrint('✅ Provider vehicle created locally: ${vehicle.id}');
     }
   }
 

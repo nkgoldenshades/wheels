@@ -115,7 +115,7 @@ class SlotCard extends StatelessWidget {
 
   bool _isInsuranceValidNow() {
     if (!vehicle.insuranceVerified) return false;
-    final exp = vehicle.insuranceExpiryDate;
+    final exp = vehicle.insuranceExpiry;
     if (exp == null) return true;
     return exp.isAfter(DateTime.now());
   }

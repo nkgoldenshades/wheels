@@ -42,16 +42,39 @@ class VehicleListScreen extends StatelessWidget {
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () async {
-          final created = await Navigator.push<Vehicle>(
+          debugPrint('🔵 Opening AddVehicleScreen, isUserMode=$isUserMode');
+          
+          final vehicle = await Navigator.push<Vehicle>(
             context,
-            MaterialPageRoute(builder: (context) => AddVehicleScreen()),
+            MaterialPageRoute(builder: (context) => const AddVehicleScreen()),
           );
 
-          if (created == null) return;
-          if (isUserMode) {
-            CustomerVehicleRepository.instance.addVehicle(created);
+          debugPrint('🔵 Returned from AddVehicleScreen, vehicle=$vehicle');
+
+          if (vehicle != null) {
+            debugPrint('🔵 Saving vehicle to repository, isUserMode=$isUserMode');
+            
+            // Save the vehicle to the appropriate repository
+            if (isUserMode) {
+              debugPrint('🔵 Adding to CustomerVehicleRepository');
+              await CustomerVehicleRepository.instance.addVehicle(vehicle);
+            } else {
+              debugPrint('🔵 Adding to VehicleRepository (provider)');
+              await _vehicleRepo.addVehicle(vehicle);
+            }
+            
+            debugPrint('🔵 Vehicle saved successfully');
+            
+            if (context.mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Vehicle added successfully!'),
+                  backgroundColor: Colors.green,
+                ),
+              );
+            }
           } else {
-            await _vehicleRepo.addVehicle(created);
+            debugPrint('🔵 Vehicle is null - user cancelled or error occurred');
           }
         },
         icon: const Icon(Icons.add),

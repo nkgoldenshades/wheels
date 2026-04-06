@@ -54,10 +54,10 @@ class ServiceTypeScreen extends StatelessWidget {
       elevation: 2,
       child: InkWell(
         onTap: () async {
-          final vehicles = VehicleRepository.instance.getVehiclesByCapability(serviceType);
+          final vehicles = VehicleRepository.instance.allVehicles;
           if (vehicles.isEmpty) {
             ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('No ${serviceType.name} vehicles available')),
+              const SnackBar(content: Text('No vehicles available. Please add a vehicle first.')),
             );
             return;
           }

@@ -24,6 +24,7 @@ class CreateSlotScreen extends StatefulWidget {
 
 class _CreateSlotScreenState extends State<CreateSlotScreen> {
   SlotType _slotType = SlotType.fromTo;
+  ServiceType _serviceType = ServiceType.passenger; // Add service type selection
   
   // Controllers
   final _fromController = TextEditingController();
@@ -98,6 +99,102 @@ class _CreateSlotScreenState extends State<CreateSlotScreen> {
                 ],
               ),
             ),
+          ),
+          
+          const SizedBox(height: 24),
+          
+          // Service Type Selection
+          const Text(
+            'Service Type',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 8),
+          
+          // Service Type Options
+          Column(
+            children: [
+              InkWell(
+                onTap: () => setState(() => _serviceType = ServiceType.passenger),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4.0),
+                  child: Row(
+                    children: [
+                      Radio<ServiceType>(
+                        value: ServiceType.passenger,
+                        groupValue: _serviceType,
+                        onChanged: (value) => setState(() => _serviceType = value!),
+                      ),
+                      const Icon(Icons.people, color: Colors.blue),
+                      const SizedBox(width: 8),
+                      const Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Passenger', style: TextStyle(fontSize: 16)),
+                            Text('Transport people from one place to another', 
+                                 style: TextStyle(fontSize: 12, color: Colors.grey)),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              InkWell(
+                onTap: () => setState(() => _serviceType = ServiceType.parcel),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4.0),
+                  child: Row(
+                    children: [
+                      Radio<ServiceType>(
+                        value: ServiceType.parcel,
+                        groupValue: _serviceType,
+                        onChanged: (value) => setState(() => _serviceType = value!),
+                      ),
+                      const Icon(Icons.local_shipping, color: Colors.orange),
+                      const SizedBox(width: 8),
+                      const Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Parcel', style: TextStyle(fontSize: 16)),
+                            Text('Deliver packages and goods', 
+                                 style: TextStyle(fontSize: 12, color: Colors.grey)),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              InkWell(
+                onTap: () => setState(() => _serviceType = ServiceType.lease),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4.0),
+                  child: Row(
+                    children: [
+                      Radio<ServiceType>(
+                        value: ServiceType.lease,
+                        groupValue: _serviceType,
+                        onChanged: (value) => setState(() => _serviceType = value!),
+                      ),
+                      const Icon(Icons.car_rental, color: Colors.green),
+                      const SizedBox(width: 8),
+                      const Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Lease', style: TextStyle(fontSize: 16)),
+                            Text('Rent out vehicle with or without operator', 
+                                 style: TextStyle(fontSize: 12, color: Colors.grey)),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
           ),
           
           const SizedBox(height: 24),
@@ -423,7 +520,7 @@ class _CreateSlotScreenState extends State<CreateSlotScreen> {
       final slot = Slot(
         id: DateTime.now().millisecondsSinceEpoch.toString(),
         vehicleId: widget.vehicle.id,
-        serviceType: ServiceType.passenger,
+        serviceType: _serviceType,
         slotType: _slotType,
         fromLocation: _slotType == SlotType.fromTo 
             ? _fromController.text.trim() 

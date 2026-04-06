@@ -84,9 +84,11 @@ class _SeatLayoutBuilderScreenState extends State<SeatLayoutBuilderScreen> {
         widget.controller.addImage(base64Image);
       }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to pick image: ${e.toString()}')),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to pick image: ${e.toString()}')),
+        );
+      }
     }
   }
 

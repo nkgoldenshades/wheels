@@ -263,9 +263,6 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
     final nameCtrl = TextEditingController(text: vehicle.name);
     final typeCtrl = TextEditingController(text: vehicle.type);
     final yearCtrl = TextEditingController(text: vehicle.year?.toString() ?? '');
-    bool capPassenger = vehicle.capabilities.contains(ServiceType.passenger);
-    bool capParcel = vehicle.capabilities.contains(ServiceType.parcel);
-    bool capWorking = vehicle.capabilities.contains(ServiceType.working);
 
     final vehicleTypes = ['Car','Bike','Truck','Bus','Van','Ship','Boat','Rocket','Train','Flight','Other'];
     String? selectedType = vehicleTypes.contains(vehicle.type) ? vehicle.type : 'Other';
@@ -363,27 +360,6 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                       keyboardType: TextInputType.number,
                       decoration: const InputDecoration(
                           labelText: 'Year (optional)', border: OutlineInputBorder()),
-                    ),
-                    const SizedBox(height: 16),
-                    const Text('Capabilities',
-                        style: TextStyle(fontWeight: FontWeight.w600)),
-                    SwitchListTile(
-                      contentPadding: EdgeInsets.zero,
-                      value: capPassenger,
-                      onChanged: (v) => setModalState(() => capPassenger = v),
-                      title: const Text('Passenger'),
-                    ),
-                    SwitchListTile(
-                      contentPadding: EdgeInsets.zero,
-                      value: capParcel,
-                      onChanged: (v) => setModalState(() => capParcel = v),
-                      title: const Text('Parcel'),
-                    ),
-                    SwitchListTile(
-                      contentPadding: EdgeInsets.zero,
-                      value: capWorking,
-                      onChanged: (v) => setModalState(() => capWorking = v),
-                      title: const Text('Working / Lease'),
                     ),
                     const SizedBox(height: 16),
                     // --- Media Section ---
@@ -577,22 +553,11 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                           final type = selectedType == 'Other'
                               ? typeCtrl.text.trim()
                               : (selectedType ?? vehicle.type);
-                          final caps = <ServiceType>[
-                            if (capPassenger) ServiceType.passenger,
-                            if (capParcel) ServiceType.parcel,
-                            if (capWorking) ServiceType.working,
-                          ];
-                          if (caps.isEmpty) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('Select at least one capability')));
-                            return;
-                          }
                           final year = int.tryParse(yearCtrl.text.trim());
                           final updated = vehicle.copyWith(
                             name: name,
                             type: type,
                             year: year,
-                            capabilities: caps,
                             profileImage: profileImage,
                             galleryImages: galleryImages,
                             videoUrl: videoUrl,
@@ -660,69 +625,65 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                 Expanded(
                   child: ListView(
                     children: [
-                      if (vehicle.capabilities.contains(ServiceType.passenger))
-                ListTile(
-                  leading: const Icon(Icons.people),
-                  title: const Text('Passenger'),
-                  onTap: () {
-                    Navigator.pop(context);
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => CreatePostScreen(
-                          serviceType: ServiceType.passenger,
-                          initialVehicle: vehicle,
-                          isUserMode: widget.isUserMode,
-                        ),
+                      ListTile(
+                        leading: const Icon(Icons.people),
+                        title: const Text('Passenger'),
+                        onTap: () {
+                          Navigator.pop(context);
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => CreatePostScreen(
+                                serviceType: ServiceType.passenger,
+                                initialVehicle: vehicle,
+                                isUserMode: widget.isUserMode,
+                              ),
+                            ),
+                          );
+                        },
                       ),
-                    );
-                  },
-                ),
-              if (vehicle.capabilities.contains(ServiceType.parcel))
-                ListTile(
-                  leading: const Icon(Icons.local_shipping),
-                  title: const Text('Parcel'),
-                  onTap: () {
-                    Navigator.pop(context);
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => CreatePostScreen(
-                          serviceType: ServiceType.parcel,
-                          initialVehicle: vehicle,
-                          isUserMode: widget.isUserMode,
-                        ),
+                      ListTile(
+                        leading: const Icon(Icons.local_shipping),
+                        title: const Text('Parcel'),
+                        onTap: () {
+                          Navigator.pop(context);
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => CreatePostScreen(
+                                serviceType: ServiceType.parcel,
+                                initialVehicle: vehicle,
+                                isUserMode: widget.isUserMode,
+                              ),
+                            ),
+                          );
+                        },
                       ),
-                    );
-                  },
-                ),
-              if (vehicle.capabilities.contains(ServiceType.working)) ...[
-                ListTile(
-                  leading: const Icon(Icons.car_rental),
-                  title: const Text('Lease'),
-                  subtitle: const Text('With or without operator'),
-                  onTap: () {
-                    Navigator.pop(context);
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => CreatePostScreen(
-                          serviceType: ServiceType.lease,
-                          initialVehicle: vehicle,
-                          isUserMode: widget.isUserMode,
-                        ),
+                      ListTile(
+                        leading: const Icon(Icons.car_rental),
+                        title: const Text('Lease'),
+                        subtitle: const Text('With or without operator'),
+                        onTap: () {
+                          Navigator.pop(context);
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => CreatePostScreen(
+                                serviceType: ServiceType.lease,
+                                initialVehicle: vehicle,
+                                isUserMode: widget.isUserMode,
+                              ),
+                            ),
+                          );
+                        },
                       ),
-                    );
-                  },
+                    ],
+                  ),
                 ),
               ],
-            ],
+            ),
           ),
-        ),
-      ],
-    ),
-  ),
-);
+        );
       },
     );
   }
@@ -780,7 +741,7 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
               'Registration Certificate - Proves ownership',
               verificationStatus['RC Book']!,
               DocumentType.rc,
-              imageBase64: vehicle.rcImageBase64,
+              imageBase64: vehicle.rcFrontUrl,
               isMandatory: true,
               canVerify: canVerify,
             ),
@@ -790,8 +751,8 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
               'Vehicle Insurance - Mandatory by law',
               verificationStatus['Insurance']!,
               DocumentType.insurance,
-              imageBase64: vehicle.insuranceImageBase64,
-              expiryDate: vehicle.insuranceExpiryDate,
+              imageBase64: vehicle.insuranceDocumentUrl,
+              expiryDate: vehicle.insuranceExpiry,
               isMandatory: true,
               canVerify: canVerify,
             ),
