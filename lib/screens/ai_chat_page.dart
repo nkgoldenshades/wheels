@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:firebase_ai/firebase_ai.dart';
+import 'package:firebase_vertexai/firebase_vertexai.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/auth_repository.dart';
 // import 'package:image_picker/image_picker.dart'; // Commented out for Windows compatibility
@@ -39,8 +39,12 @@ class _AIChatPageState extends State<AIChatPage> {
 
   Future<void> _initializeFirebaseAI() async {
     try {
-      _model = FirebaseAI.googleAI().generativeModel(
-        model: 'gemini-2.5-flash-lite',
+      debugPrint('🚀 Initializing Firebase Gemini API...');
+      
+      // Use Firebase Gemini API (free tier available, no API key needed)
+      // This uses Google AI's Gemini API through Firebase
+      _model = FirebaseVertexAI.instance.generativeModel(
+        model: 'gemini-2.5-flash',  // Latest, faster, lighter model
         systemInstruction: Content.system('''
 You are a helpful AI assistant for QuickOHunt, a ride-sharing and vehicle rental app.
 
@@ -55,24 +59,24 @@ Key features of QuickOHunt:
 - GPS tracking and live location
 - Review and rating system
 
-Be conversational, helpful, and specific to ride-sharing context. Keep responses concise but informative. Always sound natural and friendly, never robotic.
+Be conversational, helpful, and specific to ride-sharing context. Keep responses concise (2-3 sentences max). Always sound natural and friendly, never robotic. Always guide users to take action inside the app.
         '''),
       );
 
       _chat = _model!.startChat();
 
-      // Test the connection with a timeout
+      // Test the connection
       final testResponse = await _chat!
           .sendMessage(Content.text('say "ready" in one word'))
           .timeout(
             const Duration(seconds: 10),
             onTimeout: () {
-              throw Exception('Connection timeout - Gemini AI is not responding');
+              throw Exception('Connection timeout');
             },
           );
       
       final testText = testResponse.text ?? '';
-      debugPrint('✅ Firebase AI test response: $testText');
+      debugPrint('✅ Firebase Gemini API test response: $testText');
 
       setState(() {
         _aiInitialized = true;
@@ -84,14 +88,14 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
         ));
       });
     } catch (e, stack) {
-      debugPrint('❌ Firebase AI initialization failed: $e');
+      debugPrint('❌ Firebase Gemini API initialization failed: $e');
       debugPrint('Stack: $stack');
       setState(() {
         _aiInitialized = false;
         _initError = e.toString();
         _messages.add(ChatMessage(
           text:
-              "⚠️ AI connection failed.\n\nError: $e\n\nPlease check:\n1. Firebase AI Logic is enabled in Firebase Console\n2. Gemini API is enabled in Google Cloud Console\n3. Your google-services.json is up to date\n\nYou can still use the app - just tap back to continue.",
+              "⚠️ AI connection failed.\n\nError: $e\n\nPlease check:\n1. 'Vertex AI in Firebase' is enabled in Firebase Console\n2. Gemini API is enabled\n3. Your Firebase project is configured correctly\n4. You have internet connection\n\nYou can still use the app - just tap back to continue.",
           isUser: false,
           timestamp: DateTime.now(),
           isError: true,
@@ -209,20 +213,19 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
   }
 
   Future<void> _sendToFirebaseAI(String userText) async {
-    // Show real error instead of fake fallback
     if (!_aiInitialized || _chat == null) {
       _addAIMessage(
-        "⚠️ AI is not connected.\n\nError: ${_initError ?? 'Unknown error during initialization.'}\n\nPlease restart the app or check Firebase Console.",
+        "⚠️ AI is not connected.\n\nError: ${_initError ?? 'Unknown error during initialization.'}\n\nPlease restart the app.",
         isError: true,
       );
       return;
     }
 
     try {
-      debugPrint('📤 Sending to Firebase AI: $userText');
+      debugPrint('📤 Sending to Firebase Gemini API: $userText');
       final response = await _chat!.sendMessage(Content.text(userText));
       final aiText = response.text?.trim();
-      debugPrint('📥 Firebase AI response: $aiText');
+      debugPrint('📥 Firebase Gemini API response: $aiText');
 
       if (aiText == null || aiText.isEmpty) {
         _addAIMessage("I received an empty response. Please try again.",
@@ -231,10 +234,9 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
         _addAIMessage(aiText);
       }
     } catch (e) {
-      // FirebaseException is not exported by firebase_ai — catch all and log
-      debugPrint('❌ Firebase AI error: $e');
+      debugPrint('❌ Firebase Gemini API error: $e');
       _addAIMessage(
-        "AI error: $e\n\nMake sure Firebase AI Logic and Gemini API are enabled in your Firebase Console.",
+        "AI error: $e\n\nPlease check your internet connection and try again.",
         isError: true,
       );
     }

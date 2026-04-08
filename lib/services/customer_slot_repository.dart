@@ -216,7 +216,7 @@ class CustomerSlotRepository {
         data['created_at'] = DateTime.now().toIso8601String();
       }
 
-      await supabase.from('slots').upsert(data);
+      await supabase.from('user_posts').upsert(data);
 
       debugPrint('✅ User slot synced to Supabase: ${slot.id} (ref: $refCode)');
     } catch (e) {
@@ -228,7 +228,7 @@ class CustomerSlotRepository {
     try {
       final supabase = Supabase.instance.client;
       
-      await supabase.from('slots').delete().eq('id', id);
+      await supabase.from('user_posts').delete().eq('id', id);
 
       debugPrint('✅ User slot deleted from Supabase: $id');
     } catch (e) {

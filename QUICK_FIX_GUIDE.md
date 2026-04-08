@@ -1,4 +1,32 @@
-# 🔥 QUICK FIX GUIDE - Database Schema Issue
+Same error still! This means the crash is happening somewhere else — not in auth_repository.dart.
+The error says FirebaseException (not FirebaseAuthException) — different class!
+Search your entire project for this pattern:
+In VS Code press Ctrl + Shift + F and search:
+on FirebaseException
+It will show you every file catching FirebaseException — that's where the crash is coming from.
+Most likely files:
+
+vehicle_repository.dart
+profile_repository.dart
+booking_repository.dart
+review_repository.dart
+
+Fix every file that has:
+dart// Wrong ❌
+} on FirebaseException catch (e) {
+  print(e.message);
+}
+Replace with:
+dart// Correct ✅
+} catch (e) {
+  debugPrint('Error: $e');
+}
+Also add this to main.dart right now as emergency fix:
+dartPlatformDispatcher.instance.onError = (error, stack) {
+  debugPrint('Global error: $error');
+  return true; // ← stops red screen
+};
+Share the search results or the files listed above and I'll fix them all at once! 👍# 🔥 QUICK FIX GUIDE - Database Schema Issue
 
 ## The Problem
 Your Supabase database has old UUID tables that conflict with Firebase TEXT UIDs.

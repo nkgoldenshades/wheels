@@ -305,7 +305,7 @@ class _LocationAutocompleteFieldState
                     final flag = geo != null ? _flagEmoji(geo.countryCode) : '';
                     final district = geo?.district ?? geo?.stateDistrict;
                     final geoParts = <String>[
-                      if (district != null) district,
+                      ?district,
                       if (geo?.state != null) geo!.state!,
                       if (geo?.postcode != null) geo!.postcode!,
                       if (geo?.country != null)

@@ -113,7 +113,7 @@ class RazorpayService {
         'name': userName,
       },
       'theme': {'color': '#1976D2'},
-      if (orderId != null) 'order_id': orderId,
+      'order_id': ?orderId,
     };
 
     try {

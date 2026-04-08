@@ -2,6 +2,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 import 'dart:convert';
+import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
@@ -55,6 +56,7 @@ import 'screens/ai_chat_page.dart';
 import 'widgets/voice_ai_overlay.dart';
 import 'services/voice_ai_service.dart';
 import 'app_tab_controller.dart';
+import 'utils/test_backend_connection.dart';
 
 // Global Supabase client
 final supabase = Supabase.instance.client;
@@ -83,87 +85,123 @@ Map<String, double>? _extractLatLng(String? raw) {
 }
 
 void main() async {
+  // Add global error handlers to prevent crashes
+  FlutterError.onError = (FlutterErrorDetails details) {
+    FlutterError.presentError(details);
+    if (kDebugMode) {
+      print('❌ Flutter Error: ${details.exception}');
+      print('Stack: ${details.stack}');
+    }
+  };
+
+  PlatformDispatcher.instance.onError = (error, stack) {
+    if (kDebugMode) {
+      print('❌ Platform Error: $error');
+      print('Stack: $stack');
+    }
+    return true; // Prevent crash
+  };
+
   WidgetsFlutterBinding.ensureInitialized();
 
-  String? startupError;
-  
-  // Helper function to wrap repository inits with timeout
-  Future<void> initWithTimeout(Future<void> future, String name) async {
+  // CRITICAL: Initialize Firebase FIRST before starting app
+  // This prevents splash screen from accessing Firebase before it's ready
+  if (kDebugMode) print('⏳ Initializing Firebase...');
+  try {
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
+    if (kDebugMode) print('✅ Firebase initialized');
+  } catch (e) {
+    // Check if already initialized
     try {
-      if (kDebugMode) print('⏳ Starting $name...');
-      await future.timeout(
-        const Duration(seconds: 5), // Reduced timeout
-        onTimeout: () {
-          throw TimeoutException('$name initialization timed out', const Duration(seconds: 5));
-        },
-      );
-      if (kDebugMode) print('✅ $name initialized');
-    } catch (e) {
-      if (kDebugMode) print('⚠️ $name init failed/timed out: $e');
-      // Don't rethrow — let app continue
+      Firebase.app();
+      if (kDebugMode) print('✅ Firebase already initialized');
+    } catch (_) {
+      if (kDebugMode) print('⚠️ Firebase unavailable: $e');
     }
   }
   
-  // Start app immediately, initialize services in background
-  if (kDebugMode) print('🚀 Starting app immediately...');
-  runApp(MyApp(startupError: startupError));
+  // Initialize AuthRepository immediately (splash screen needs it)
+  if (kDebugMode) print('⏳ Initializing AuthRepository...');
+  try {
+    await AuthRepository.instance.init();
+    if (kDebugMode) print('✅ AuthRepository initialized');
+  } catch (e) {
+    if (kDebugMode) print('⚠️ AuthRepository init failed: $e');
+  }
   
-  // Initialize services in background (non-blocking)
-  _initializeServicesInBackground(initWithTimeout);
+  // Now start app - Firebase and Auth are ready
+  if (kDebugMode) print('🚀 Starting app...');
+  runApp(const MyApp());
+  
+  // Initialize other services in background (non-blocking)
+  _initializeServicesInBackground();
 }
 
 // Background initialization that doesn't block app startup
-void _initializeServicesInBackground(Future<void> Function(Future<void>, String) initWithTimeout) async {
+void _initializeServicesInBackground() async {
   try {
     if (kDebugMode) print('🔧 Starting background initialization...');
     
-    // Initialize Firebase (for authentication) - with better error handling
-    if (kDebugMode) print('⏳ Starting Firebase...');
-    await Firebase.initializeApp(
-      options: DefaultFirebaseOptions.currentPlatform,
-    ).timeout(
-      const Duration(seconds: 30),
-      onTimeout: () {
-        throw TimeoutException('Firebase initialization timed out', const Duration(seconds: 30));
-      },
-    );
-    if (kDebugMode) print('✅ Firebase initialized');
-
+    // Helper function to wrap repository inits with timeout
+    Future<void> initWithTimeout(Future<void> future, String name) async {
+      try {
+        if (kDebugMode) print('⏳ Starting $name...');
+        await future.timeout(
+          const Duration(seconds: 5),
+          onTimeout: () {
+            throw TimeoutException('$name initialization timed out', const Duration(seconds: 5));
+          },
+        );
+        if (kDebugMode) print('✅ $name initialized');
+      } catch (e) {
+        if (kDebugMode) print('⚠️ $name init failed/timed out: $e');
+        // Don't rethrow — let app continue
+      }
+    }
+    
+    // Firebase and AuthRepository are already initialized in main(), skip them here
+    
     // Initialize Supabase with Firebase JWT validation
     if (kDebugMode) print('⏳ Starting Supabase...');
-    await Supabase.initialize(
-      url: SupabaseConfig.url,
-      anonKey: SupabaseConfig.anonKey,
-      // CRITICAL: Pass Firebase JWT to Supabase for RLS security
-      accessToken: () async {
-        final user = firebase_auth.FirebaseAuth.instance.currentUser;
-        if (user == null) {
-          if (kDebugMode) print('🔑 No Firebase user - returning null token');
-          return null;
-        }
-        
-        try {
-          final token = await user.getIdToken(true);
-          if (kDebugMode) {
-            print('🔑 Firebase UID: ${user.uid}');
-            print('🔑 Sending Firebase JWT to Supabase');
+    try {
+      await Supabase.initialize(
+        url: SupabaseConfig.url,
+        anonKey: SupabaseConfig.anonKey,
+        // CRITICAL: Pass Firebase JWT to Supabase for RLS security
+        accessToken: () async {
+          final user = firebase_auth.FirebaseAuth.instance.currentUser;
+          if (user == null) {
+            if (kDebugMode) print('🔑 No Firebase user - returning null token');
+            return null;
           }
-          return token;
-        } catch (e) {
-          if (kDebugMode) print('❌ Failed to get Firebase token: $e');
-          return null;
-        }
-      },
-    ).timeout(
-      const Duration(seconds: 30),
-      onTimeout: () {
-        throw TimeoutException('Supabase initialization timed out', const Duration(seconds: 30));
-      },
-    );
-    if (kDebugMode) print('✅ Supabase initialized');
+          
+          try {
+            final token = await user.getIdToken(true);
+            if (kDebugMode) {
+              print('🔑 Firebase UID: ${user.uid}');
+              print('🔑 Sending Firebase JWT to Supabase');
+            }
+            return token;
+          } catch (e) {
+            if (kDebugMode) print('❌ Failed to get Firebase token: $e');
+            return null;
+          }
+        },
+      ).timeout(
+        const Duration(seconds: 30),
+        onTimeout: () {
+          throw TimeoutException('Supabase initialization timed out', const Duration(seconds: 30));
+        },
+      );
+      if (kDebugMode) print('✅ Supabase initialized');
+    } catch (e) {
+      if (kDebugMode) print('❌ Supabase initialization error: $e');
+      // Continue anyway - app can work with limited functionality
+    }
 
-    // Initialize core services with timeout protection
-    await initWithTimeout(AuthRepository.instance.init(), 'AuthRepository');
+    // Initialize core services with timeout protection (AuthRepository already done)
     await initWithTimeout(AppPreferences.instance.init(), 'AppPreferences');
     
     // Initialize ProfileRepository with timeout protection (already had timeout)
@@ -199,6 +237,9 @@ void _initializeServicesInBackground(Future<void> Function(Future<void>, String)
       debugPrint('🔗 Supabase connection configured');
       debugPrint('📍 URL: ${SupabaseConfig.url}');
       debugPrint('🔑 Auth: Firebase JWT → Supabase RLS');
+      
+      // Run backend connection tests
+      await BackendConnectionTest.runAllTests();
     }
 
     // Initialize Stripe for payments with timeout
@@ -844,23 +885,10 @@ Future<void> _uploadDocument(
 }
 
 class MyApp extends StatelessWidget {
-  final String? startupError;
-  const MyApp({super.key, this.startupError});
+  const MyApp({super.key});
 
   @override
   Widget build(BuildContext context) {
-    if (startupError != null && startupError!.trim().isNotEmpty) {
-      return MaterialApp(
-        title: 'VaultWheels',
-        theme: ThemeData(
-          primarySwatch: Colors.blue,
-          useMaterial3: true,
-          brightness: Brightness.light,
-        ),
-        home: StartupErrorScreen(message: startupError!),
-      );
-    }
-
     return MaterialApp(
       title: 'VaultWheels',
       theme: ThemeData(
@@ -1165,8 +1193,8 @@ Future<void> _openExternalMapForSlot(BuildContext context, Slot slot) async {
   }
 
   final uri = Uri.https('www.google.com', '/maps/dir/', {
-    if (origin != null) 'origin': origin,
-    if (destination != null) 'destination': destination,
+    'origin': ?origin,
+    'destination': ?destination,
     'api': '1',
     'travelmode': 'driving',
   });
@@ -5073,10 +5101,19 @@ class _RequestsBodyState extends State<_RequestsBody> {
   final TextEditingController _searchController = TextEditingController();
   String _query = '';
   final Set<BookingStatus> _statusFilters = {}; // Empty = show all
+  bool _isLoading = true;
 
   @override
   void initState() {
     super.initState();
+    // Wait a bit for repositories to initialize
+    Future.delayed(const Duration(milliseconds: 500), () {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    });
   }
 
   @override
@@ -5292,7 +5329,9 @@ class _RequestsBodyState extends State<_RequestsBody> {
           ),
         if (widget.dateRange != null) const SizedBox(height: 8),
         Expanded(
-          child: ValueListenableBuilder<List<Booking>>(
+          child: _isLoading
+              ? const Center(child: CircularProgressIndicator())
+              : ValueListenableBuilder<List<Booking>>(
             valueListenable: BookingRepository.instance.bookings,
             builder: (context, bookings, _) {
               return ValueListenableBuilder<List<UserPostAcceptance>>(

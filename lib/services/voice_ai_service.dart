@@ -2,8 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:firebase_ai/firebase_ai.dart';
-import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_vertexai/firebase_vertexai.dart';
 
 class VoiceAIService extends ChangeNotifier {
   static final VoiceAIService _instance = VoiceAIService._internal();
@@ -35,12 +34,24 @@ class VoiceAIService extends ChangeNotifier {
   Future<void> initialize() async {
     if (_isInitialized) return;
     
+    // Voice AI is not supported on web - skip initialization
+    if (kIsWeb) {
+      if (kDebugMode) print('🌐 Voice AI not supported on web - skipping');
+      _isInitialized = false; // Mark as not initialized on web
+      return;
+    }
+    
     try {
-      // Request microphone permission
-      final micPermission = await Permission.microphone.request();
-      if (micPermission != PermissionStatus.granted) {
-        if (kDebugMode) print('🎤 Microphone permission denied');
-        return;
+      // Request microphone permission (mobile only)
+      try {
+        final micPermission = await Permission.microphone.request();
+        if (micPermission != PermissionStatus.granted) {
+          if (kDebugMode) print('🎤 Microphone permission denied');
+          return;
+        }
+      } catch (e) {
+        if (kDebugMode) print('⚠️ Permission handler not available: $e');
+        // Continue anyway - might work without explicit permission request
       }
 
       // Initialize speech to text
@@ -75,17 +86,25 @@ class VoiceAIService extends ChangeNotifier {
       if (kDebugMode) print('🤖 Voice AI initialized successfully');
     } catch (e) {
       if (kDebugMode) print('❌ Voice AI initialization failed: $e');
+      _isInitialized = false;
     }
   }
 
-  // Initialize Firebase AI Logic with Gemini
+  // Initialize Firebase Gemini API
   Future<void> _initializeFirebaseAI() async {
+    // Voice AI is not supported on web - skip initialization
+    if (kIsWeb) {
+      if (kDebugMode) print('🌐 Voice AI not supported on web - skipping');
+      _aiInitialized = false;
+      return;
+    }
+    
     try {
-      debugPrint('🚀 Voice AI: Starting Firebase AI initialization...');
+      debugPrint('🚀 Voice AI: Starting Firebase Gemini API initialization...');
       
-      // Use Firebase AI Logic - no API key needed, uses Firebase project configuration
-      _model = FirebaseAI.googleAI().generativeModel(
-        model: 'gemini-2.0-flash',
+      // Use Firebase Gemini API (free tier available, no API key needed)
+      _model = FirebaseVertexAI.instance.generativeModel(
+        model: 'gemini-2.5-flash',  // Latest, faster, lighter model
         systemInstruction: Content.system('''
 You are a helpful AI assistant for QuickOHunt, a ride-sharing and vehicle rental app.
 
@@ -115,15 +134,9 @@ Examples:
       _chat = _model.startChat();
       _aiInitialized = true;
       
-      debugPrint('🔥 Voice AI: Firebase AI Logic initialized with Gemini 2.0 Flash');
-    } on FirebaseException catch (e) {
-      debugPrint('❌ Voice AI Firebase initialization failed:');
-      debugPrint('   - Code: ${e.code}');
-      debugPrint('   - Message: ${e.message}');
-      debugPrint('   - Plugin: ${e.plugin}');
-      _aiInitialized = false;
+      debugPrint('🔥 Voice AI: Firebase Gemini API initialized with Gemini 2.0 Flash');
     } catch (e) {
-      debugPrint('❌ Voice AI: General Firebase AI initialization failed: $e');
+      debugPrint('❌ Voice AI initialization failed: $e');
       _aiInitialized = false;
     }
   }
@@ -144,6 +157,11 @@ Examples:
 
   // Start voice listening
   Future<void> _startListening() async {
+    if (kIsWeb) {
+      if (kDebugMode) print('🌐 Voice AI not supported on web');
+      return;
+    }
+    
     if (!_isInitialized || _isListening) return;
 
     try {
@@ -247,16 +265,9 @@ Examples:
         if (kDebugMode) print('⚠️ Voice AI: Empty response from Firebase AI, using fallback');
         return _generateAIResponse(message);
       }
-    } on FirebaseException catch (e) {
-      if (kDebugMode) {
-        print('❌ Voice AI Firebase error:');
-        print('   - Code: ${e.code}');
-        print('   - Message: ${e.message}');
-      }
-      // Fallback to basic response if Firebase AI fails
-      return _generateAIResponse(message);
     } catch (e) {
-      if (kDebugMode) print('❌ Voice AI: General error: $e');
+      // Avoid type checking on web - just log the error
+      if (kDebugMode) print('❌ Voice AI error: $e');
       // Fallback to basic response if Firebase AI fails
       return _generateAIResponse(message);
     }

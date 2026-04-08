@@ -75,6 +75,10 @@ class Vehicle {
   final String? operatorPhoto; // base64 or URL
   final String? operatorLicense; // License number for records
 
+  // Currency and country (for pricing)
+  final String currency; // INR, USD, EUR, etc.
+  final String countryCode; // IN, US, GB, etc.
+
   /// True only when all mandatory docs are verified and none expired
   bool get isFullyVerified {
     final insuranceValid = insuranceVerified &&
@@ -157,6 +161,9 @@ class Vehicle {
     this.operatorPhone,
     this.operatorPhoto,
     this.operatorLicense,
+    // Currency and country
+    this.currency = 'INR',
+    this.countryCode = 'IN',
   });
 
   Vehicle copyWith({
@@ -221,6 +228,9 @@ class Vehicle {
     String? operatorPhone,
     String? operatorPhoto,
     String? operatorLicense,
+    // Currency and country
+    String? currency,
+    String? countryCode,
   }) {
     return Vehicle(
       id: id ?? this.id,
@@ -284,6 +294,9 @@ class Vehicle {
       operatorPhone: operatorPhone ?? this.operatorPhone,
       operatorPhoto: operatorPhoto ?? this.operatorPhoto,
       operatorLicense: operatorLicense ?? this.operatorLicense,
+      // Currency and country
+      currency: currency ?? this.currency,
+      countryCode: countryCode ?? this.countryCode,
     );
   }
 
@@ -357,6 +370,8 @@ class Vehicle {
       'operator_phone': operatorPhone,
       'operator_photo': operatorPhoto,
       'operator_license': operatorLicense,
+      'currency': currency,
+      'country_code': countryCode,
     };
   }
 
@@ -460,6 +475,10 @@ class Vehicle {
       operatorPhone: json['operator_phone'] ?? json['operatorPhone'],
       operatorPhoto: json['operator_photo'] ?? json['operatorPhoto'],
       operatorLicense: json['operator_license'] ?? json['operatorLicense'],
+      
+      // Currency and country
+      currency: json['currency'] ?? 'INR',
+      countryCode: json['country_code'] ?? json['countryCode'] ?? 'IN',
     );
   }
 }

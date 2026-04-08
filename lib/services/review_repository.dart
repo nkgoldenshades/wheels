@@ -18,16 +18,51 @@ class ReviewRepository {
 
   Future<void> _load() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final reviewsData = prefs.getString(_storageKey);
-      if (reviewsData != null) {
-        final List<dynamic> jsonList = jsonDecode(reviewsData);
-        reviews.value = jsonList
-            .map((e) => Review.fromJson(e as Map<String, dynamic>))
-            .toList();
+      // First load from Supabase (source of truth)
+      await _loadFromSupabase();
+      
+      // Then load from local storage as fallback/cache
+      if (reviews.value.isEmpty) {
+        final prefs = await SharedPreferences.getInstance();
+        final reviewsData = prefs.getString(_storageKey);
+        if (reviewsData != null) {
+          final List<dynamic> jsonList = jsonDecode(reviewsData);
+          reviews.value = jsonList
+              .map((e) => Review.fromJson(e as Map<String, dynamic>))
+              .toList();
+        }
       }
     } catch (e) {
       debugPrint('Error loading reviews: $e');
+    }
+  }
+
+  Future<void> _loadFromSupabase() async {
+    try {
+      final supabase = Supabase.instance.client;
+      
+      // Load all reviews (they're public data for ratings)
+      final response = await supabase
+          .from('reviews')
+          .select()
+          .order('created_at', ascending: false);
+
+      if (response.isEmpty) {
+        debugPrint('✅ No reviews found in Supabase');
+        return;
+      }
+
+      final loadedReviews = (response as List)
+          .map((json) => Review.fromJson(json as Map<String, dynamic>))
+          .toList();
+
+      reviews.value = loadedReviews;
+      await _persist(); // Save to local storage
+      
+      debugPrint('✅ Loaded ${loadedReviews.length} reviews from Supabase');
+    } catch (e) {
+      debugPrint('❌ Failed to load reviews from Supabase: $e');
+      // Don't throw - allow app to continue with local data
     }
   }
 
@@ -76,6 +111,17 @@ class ReviewRepository {
     try {
       final supabase = Supabase.instance.client;
       
+      // Map enum to database format
+      String reviewType;
+      switch (review.type) {
+        case ReviewType.userToProvider:
+          reviewType = 'customer_to_provider';
+          break;
+        case ReviewType.providerToUser:
+          reviewType = 'provider_to_customer';
+          break;
+      }
+      
       await supabase.from('reviews').insert({
         'id': review.id,
         'booking_id': review.bookingId,
@@ -83,6 +129,7 @@ class ReviewRepository {
         'reviewee_id': review.revieweeId,
         'rating': review.rating,
         'comment': review.comment,
+        'review_type': reviewType,
         'created_at': review.createdAt.toIso8601String(),
       });
 

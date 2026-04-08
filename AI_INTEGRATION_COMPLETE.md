@@ -1,4 +1,40 @@
-# 🎉 AI Integration Complete - Natural Language Ready!
+# ⚠️ DEPRECATED - DO NOT USE THIS APPROACH
+
+This file describes an OLD approach that is INSECURE and INCORRECT.
+
+## ❌ What Was Wrong:
+
+1. Used `google_generative_ai` package directly in Flutter
+2. Required API key hardcoded in client-side code
+3. API key exposed in APK/Web bundle (security risk)
+4. No centralized control or monitoring
+
+## ✅ Correct Approach:
+
+**See:** `AI_SETUP_FIREBASE_CLOUD_FUNCTIONS.md`
+
+Use Firebase Cloud Functions to keep API keys secure server-side.
+
+---
+
+# 🎉 AI Integration Complete - Natural Language Ready! (DEPRECATED)
+
+## ⚠️ THIS APPROACH IS DEPRECATED - USE FIREBASE CLOUD FUNCTIONS INSTEAD
+
+**Why this is wrong:**
+- API keys exposed in client code
+- Security vulnerability
+- Cannot control usage/rate limits
+- Difficult to monitor
+
+**Correct approach:**
+Flutter App → Firebase Cloud Functions → Gemini AI
+
+**See the correct setup in:** `AI_SETUP_FIREBASE_CLOUD_FUNCTIONS.md`
+
+---
+
+## OLD CONTENT BELOW (FOR REFERENCE ONLY)
 
 ## ✅ TASK COMPLETED: Real AI Integration with Google Generative AI
 

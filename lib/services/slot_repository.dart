@@ -54,6 +54,35 @@ class SlotRepository {
 
   Future<void> _loadSlots() async {
     try {
+      // Load from Supabase first (source of truth)
+      final supabase = Supabase.instance.client;
+      final currentUser = AuthRepository.instance.currentUser;
+      
+      if (currentUser != null) {
+        final response = await supabase
+            .from('posts')
+            .select()
+            .eq('profile_id', currentUser.id)
+            .eq('is_active', true)
+            .order('created_at', ascending: false);
+
+        _slots.value = (response as List)
+            .map((json) => Slot.fromJson(json as Map<String, dynamic>))
+            .toList();
+        
+        _buildSlotEntries();
+        debugPrint('✅ Loaded ${_slots.value.length} slots from Supabase');
+        
+        // Save to local storage as cache
+        await _saveSlots();
+        return;
+      }
+    } catch (e) {
+      debugPrint('⚠️ Failed to load slots from Supabase, trying local: $e');
+    }
+    
+    // Fallback to local storage
+    try {
       final prefs = await SharedPreferences.getInstance();
       final jsonString = prefs.getString(_slotsKey);
       
@@ -120,9 +149,9 @@ class SlotRepository {
       // Generate short 6-char reference code from timestamp
       final refCode = slot.id.toString().substring(slot.id.toString().length - 6);
 
-      await supabase.from('slots').insert({
+      await supabase.from('posts').insert({
         'id': slot.id,
-        'user_id': currentUser.id,
+        'provider_id': currentUser.id,
         'ref_code': refCode, // Short code shown to users (e.g. "791379")
         'vehicle_id': slot.vehicleId,
         'service_type': slot.serviceType.name,
@@ -234,7 +263,7 @@ class SlotRepository {
     try {
       final supabase = Supabase.instance.client;
       
-      await supabase.from('slots').update({
+      await supabase.from('posts').update({
         'vehicle_id': slot.vehicleId,
         'service_type': slot.serviceType.name,
         'slot_type': slot.slotType.name,
@@ -275,7 +304,7 @@ class SlotRepository {
     try {
       final supabase = Supabase.instance.client;
       
-      await supabase.from('slots').delete().eq('id', slotId);
+      await supabase.from('posts').delete().eq('id', slotId);
 
       debugPrint('✅ Slot deleted from Supabase: $slotId');
     } catch (e) {

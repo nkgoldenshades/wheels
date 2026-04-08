@@ -83,9 +83,9 @@ class GeoLocation {
   /// e.g. "Chennai District, Tamil Nadu, India (IN)"
   String get summary {
     final parts = <String>[
-      if (district != null) district!,
-      if (state != null) state!,
-      if (country != null) country!,
+      ?district,
+      ?state,
+      ?country,
     ];
     final code = countryCode?.toUpperCase();
     return parts.join(', ') + (code != null ? ' ($code)' : '');
@@ -96,7 +96,7 @@ class GeoLocation {
     final parts = <String>[
       if (district != null || stateDistrict != null)
         (district ?? stateDistrict)!,
-      if (state != null) state!,
+      ?state,
     ];
     return parts.join(', ');
   }

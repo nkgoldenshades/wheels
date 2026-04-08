@@ -1,6 +1,12 @@
 import 'service_type.dart';
 import 'slot_type.dart';
 import 'pickup_mode.dart';
+import 'user_tier.dart';
+
+enum BookingMode {
+  shared, // Multiple customers (default)
+  full,   // One customer takes all (charter)
+}
 
 class Slot {
   final String id;
@@ -40,6 +46,11 @@ class Slot {
   // Operator availability
   final bool withOperator; // true = with operator, false = without operator
 
+  // FINAL BOOKING SYSTEM (Simple & Clean)
+  final BookingMode bookingMode; // 'shared' or 'full'
+  final UserTier minCustomerTier; // Minimum tier required to book
+  final double? fullVehiclePrice; // Price for full charter (if booking_mode = 'full')
+
   Slot({
     required this.id,
     required this.vehicleId,
@@ -71,6 +82,9 @@ class Slot {
     this.insuranceIncluded,
     this.leaseTerms,
     this.withOperator = false,
+    this.bookingMode = BookingMode.shared,
+    this.minCustomerTier = UserTier.basic,
+    this.fullVehiclePrice,
   });
 
   Slot copyWith({
@@ -119,6 +133,10 @@ class Slot {
     String? leaseTerms,
     bool setLeaseTermsNull = false,
     bool? withOperator,
+    BookingMode? bookingMode,
+    UserTier? minCustomerTier,
+    double? fullVehiclePrice,
+    bool setFullVehiclePriceNull = false,
   }) {
     return Slot(
       id: id ?? this.id,
@@ -155,6 +173,9 @@ class Slot {
           : (insuranceIncluded ?? this.insuranceIncluded),
       leaseTerms: setLeaseTermsNull ? null : (leaseTerms ?? this.leaseTerms),
       withOperator: withOperator ?? this.withOperator,
+      bookingMode: bookingMode ?? this.bookingMode,
+      minCustomerTier: minCustomerTier ?? this.minCustomerTier,
+      fullVehiclePrice: setFullVehiclePriceNull ? null : (fullVehiclePrice ?? this.fullVehiclePrice),
     );
   }
 
@@ -190,6 +211,9 @@ class Slot {
       'insurance_included': insuranceIncluded,
       'lease_terms': leaseTerms,
       'with_operator': withOperator,
+      'booking_mode': bookingMode.name,
+      'min_customer_tier': minCustomerTier.name,
+      'full_vehicle_price': fullVehiclePrice,
       'updated_at': DateTime.now().toIso8601String(),
     };
   }
@@ -232,6 +256,19 @@ class Slot {
       insuranceIncluded: json['insurance_included'] ?? json['insuranceIncluded'],
       leaseTerms: json['lease_terms'] ?? json['leaseTerms'],
       withOperator: json['with_operator'] ?? json['withOperator'] ?? false,
+      bookingMode: json['booking_mode'] != null || json['bookingMode'] != null
+          ? BookingMode.values.firstWhere(
+              (e) => e.name == (json['booking_mode'] ?? json['bookingMode']),
+              orElse: () => BookingMode.shared,
+            )
+          : BookingMode.shared,
+      minCustomerTier: json['min_customer_tier'] != null || json['minCustomerTier'] != null
+          ? UserTier.values.firstWhere(
+              (e) => e.name == (json['min_customer_tier'] ?? json['minCustomerTier']),
+              orElse: () => UserTier.basic,
+            )
+          : UserTier.basic,
+      fullVehiclePrice: (json['full_vehicle_price'] ?? json['fullVehiclePrice'] as num?)?.toDouble(),
     );
   }
 }

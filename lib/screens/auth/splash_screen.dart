@@ -9,15 +9,50 @@ class Splashscreen extends StatefulWidget {
 }
 
 class _SplashscreenState extends State<Splashscreen> {
+  bool _hasNavigated = false;
+
   @override
   void initState() {
     super.initState();
-
-    Future.delayed(const Duration(seconds: 1), () {
-      if (!mounted) return;
-      final next = AuthRepository.instance.isAuthenticated ? '/main' : '/login';
-      Navigator.pushReplacementNamed(context, next);
+    
+    // Listen for auth state changes - navigate as soon as ready
+    AuthRepository.instance.currentUserListenable.addListener(_onAuthStateChanged);
+    
+    // Also set a max timeout - navigate after 5 seconds regardless
+    Future.delayed(const Duration(seconds: 5), () {
+      if (!mounted || _hasNavigated) return;
+      _navigate();
     });
+  }
+
+  @override
+  void dispose() {
+    AuthRepository.instance.currentUserListenable.removeListener(_onAuthStateChanged);
+    super.dispose();
+  }
+
+  void _onAuthStateChanged() {
+    if (!mounted || _hasNavigated) return;
+    // Wait a bit to ensure initialization is complete
+    Future.delayed(const Duration(milliseconds: 500), () {
+      if (!mounted || _hasNavigated) return;
+      _navigate();
+    });
+  }
+
+  void _navigate() {
+    if (_hasNavigated) return;
+    _hasNavigated = true;
+    
+    // Remove listener to prevent multiple calls
+    AuthRepository.instance.currentUserListenable.removeListener(_onAuthStateChanged);
+    
+    final isAuthenticated = AuthRepository.instance.isAuthenticated;
+    final nextRoute = isAuthenticated ? '/main' : '/login';
+    
+    if (mounted) {
+      Navigator.pushReplacementNamed(context, nextRoute);
+    }
   }
 
   @override

@@ -147,10 +147,9 @@ class AuthRepository {
       }
       
       return user;
-    } on firebase_auth.FirebaseAuthException catch (e) {
-      throw _getErrorMessage(e);
     } catch (e) {
-      throw 'Sign up failed: $e';
+      final msg = _extractFirebaseError(e);
+      throw msg ?? 'Sign up failed: $e';
     }
   }
 
@@ -239,10 +238,9 @@ class AuthRepository {
       }
       
       return user;
-    } on firebase_auth.FirebaseAuthException catch (e) {
-      throw _getErrorMessage(e);
     } catch (e) {
-      throw 'Sign in failed: $e';
+      final msg = _extractFirebaseError(e);
+      throw msg ?? 'Sign in failed: $e';
     }
   }
 
@@ -250,8 +248,10 @@ class AuthRepository {
   Future<void> sendPasswordResetEmail(String email) async {
     try {
       await _firebaseAuth.sendPasswordResetEmail(email: email.trim());
-    } on firebase_auth.FirebaseAuthException catch (e) {
-      throw _getErrorMessage(e);
+    } catch (e) {
+      final msg = _extractFirebaseError(e);
+      if (msg != null) throw msg;
+      rethrow;
     }
   }
 
@@ -309,6 +309,29 @@ class AuthRepository {
     final avatar = u.avatarUrl ?? '';
     final phone = u.phone ?? '';
     return '${u.id}|${u.email}|$profileName|$avatar|$phone';
+  }
+
+  String? _extractFirebaseError(Object e) {
+    // Try string parsing first (works on both mobile and web)
+    final str = e.toString();
+    if (str.contains('weak-password')) return 'Password is too weak';
+    if (str.contains('email-already-in-use')) return 'Email is already registered';
+    if (str.contains('invalid-email')) return 'Invalid email address';
+    if (str.contains('user-not-found')) return 'No user found with this email';
+    if (str.contains('wrong-password')) return 'Wrong password';
+    if (str.contains('user-disabled')) return 'This account has been disabled';
+    if (str.contains('too-many-requests')) return 'Too many attempts. Try again later';
+    
+    // Fallback to typed exception (mobile only)
+    try {
+      if (e is firebase_auth.FirebaseAuthException) {
+        return _getErrorMessage(e);
+      }
+    } catch (_) {
+      // Type check failed on web - ignore
+    }
+    
+    return null;
   }
 
   String _getErrorMessage(firebase_auth.FirebaseAuthException e) {

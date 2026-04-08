@@ -158,8 +158,8 @@ class StripeService {
         body: json.encode({
           'user_id': userId,
           'provider_id': providerId,
-          if (slotId != null) 'slot_id': slotId,
-          if (postId != null) 'post_id': postId,
+          'slot_id': ?slotId,
+          'post_id': ?postId,
           'amount': amount,
           'currency': currency,
           'commission_amount': applicationFee,
@@ -276,8 +276,8 @@ class StripeService {
         body: json.encode({
           'user_id': userId,
           'provider_id': providerId,
-          if (postId != null) 'post_id': postId,
-          if (slotId != null) 'slot_id': slotId,
+          'post_id': ?postId,
+          'slot_id': ?slotId,
           'amount': amount,
           'currency': currency,
           'commission_amount': commissionAmount,

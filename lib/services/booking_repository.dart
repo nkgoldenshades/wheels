@@ -31,6 +31,13 @@ class BookingRepository {
 
   Future<void> _load() async {
     try {
+      // Clear existing bookings before loading (prevent duplicates)
+      bookings.value = [];
+      
+      // First load from Supabase (source of truth)
+      await _loadFromSupabase();
+      
+      // Then load from local storage as fallback/cache
       final prefs = await SharedPreferences.getInstance();
 
       // Load capacity
@@ -41,15 +48,25 @@ class BookingRepository {
         );
       }
 
-      // Load bookings
-      final bookingsData = prefs.getString(_storageKey);
-      if (bookingsData != null) {
-        final List<dynamic> jsonList = jsonDecode(bookingsData);
-        bookings.value = jsonList
-            .map((e) => Booking.fromJson(e as Map<String, dynamic>))
-            .toList();
+      // Load bookings from local storage ONLY if Supabase didn't load any
+      if (bookings.value.isEmpty) {
+        final bookingsData = prefs.getString(_storageKey);
+        if (bookingsData != null) {
+          final List<dynamic> jsonList = jsonDecode(bookingsData);
+          final localBookings = jsonList
+              .map((e) => Booking.fromJson(e as Map<String, dynamic>))
+              .toList();
+          
+          // Deduplicate local bookings too
+          final uniqueLocal = <String, Booking>{};
+          for (final booking in localBookings) {
+            uniqueLocal[booking.id] = booking;
+          }
+          bookings.value = uniqueLocal.values.toList();
+        }
       }
 
+      // Migrate old bookings if needed
       if (bookings.value.isNotEmpty) {
         bool needsMigration = false;
         final migratedBookings = bookings.value.map((b) {
@@ -102,6 +119,53 @@ class BookingRepository {
       }
     } catch (e) {
       debugPrint('Error loading bookings: $e');
+    }
+  }
+
+  Future<void> _loadFromSupabase() async {
+    try {
+      final supabase = Supabase.instance.client;
+      final currentUser = AuthRepository.instance.currentUser;
+      
+      if (currentUser == null) {
+        debugPrint('⚠️ No user logged in - skipping Supabase booking load');
+        return;
+      }
+
+      // Load bookings where user is either customer OR provider (CORRECT field names)
+      final response = await supabase
+          .from('bookings')
+          .select()
+          .or('profile_customer_id.eq.${currentUser.id},profile_provider_id.eq.${currentUser.id}')
+          .order('created_at', ascending: false);
+
+      if (response.isEmpty) {
+        debugPrint('✅ No bookings found in Supabase for user ${currentUser.id}');
+        return;
+      }
+
+      debugPrint('📥 Received ${(response as List).length} bookings from Supabase');
+
+      final loadedBookings = (response as List)
+          .map((json) => Booking.fromJson(json as Map<String, dynamic>))
+          .toList();
+
+      // Deduplicate by ID (in case of any duplicates)
+      final uniqueBookings = <String, Booking>{};
+      for (final booking in loadedBookings) {
+        if (uniqueBookings.containsKey(booking.id)) {
+          debugPrint('⚠️ Duplicate booking detected: ${booking.id}');
+        }
+        uniqueBookings[booking.id] = booking;
+      }
+
+      bookings.value = uniqueBookings.values.toList();
+      await _persist(); // Save to local storage
+      
+      debugPrint('✅ Loaded ${bookings.value.length} unique bookings from Supabase');
+    } catch (e) {
+      debugPrint('❌ Failed to load bookings from Supabase: $e');
+      // Don't throw - allow app to continue with local data
     }
   }
 
@@ -171,7 +235,38 @@ class BookingRepository {
     String? otp,
     double? securityDeposit,
     String? termsSnapshot,
+    BookingMode bookingMode = BookingMode.shared,
+    int? totalCapacityBooked,
   }) async {
+    // Check for full vehicle booking conflicts
+    if (bookingMode == BookingMode.full) {
+      // Check if slot already has any active bookings
+      final hasActiveBookings = bookings.value.any(
+        (b) =>
+            b.slotId == slotId &&
+            b.status != BookingStatus.rejected &&
+            b.status != BookingStatus.refunded,
+      );
+      if (hasActiveBookings) {
+        debugPrint('❌ Cannot book full vehicle - slot already has active bookings');
+        return null;
+      }
+    } else {
+      // Check if slot is locked by a full vehicle booking
+      final isLockedByFullVehicle = bookings.value.any(
+        (b) =>
+            b.slotId == slotId &&
+            b.bookingMode == BookingMode.full &&
+            b.isFullVehicleLocked &&
+            b.status != BookingStatus.rejected &&
+            b.status != BookingStatus.refunded,
+      );
+      if (isLockedByFullVehicle) {
+        debugPrint('❌ Cannot book - slot is locked by full vehicle booking');
+        return null;
+      }
+    }
+
     if (seatKey != null) {
       final exists = bookings.value.any(
         (b) =>
@@ -183,14 +278,28 @@ class BookingRepository {
     }
 
     final currentRemaining = getRemainingCapacity(slotId, defaultCapacity);
-    if (currentRemaining <= 0) {
-      return null;
+    
+    // For full vehicle bookings, check if full capacity is available
+    if (bookingMode == BookingMode.full) {
+      if (currentRemaining < defaultCapacity) {
+        debugPrint('❌ Cannot book full vehicle - not enough capacity available');
+        return null;
+      }
+      // Lock entire capacity
+      remainingCapacityBySlotId.value = {
+        ...remainingCapacityBySlotId.value,
+        slotId: 0, // Full vehicle = no remaining capacity
+      };
+    } else {
+      // Shared booking
+      if (currentRemaining <= 0) {
+        return null;
+      }
+      remainingCapacityBySlotId.value = {
+        ...remainingCapacityBySlotId.value,
+        slotId: currentRemaining - 1,
+      };
     }
-
-    remainingCapacityBySlotId.value = {
-      ...remainingCapacityBySlotId.value,
-      slotId: currentRemaining - 1,
-    };
 
     final booking = Booking(
       id: DateTime.now().microsecondsSinceEpoch.toString(),
@@ -218,6 +327,9 @@ class BookingRepository {
       paymentHeldInEscrow: stripePaymentIntentId != null,
       securityDeposit: securityDeposit,
       termsSnapshot: termsSnapshot,
+      bookingMode: bookingMode,
+      totalCapacityBooked: bookingMode == BookingMode.full ? (totalCapacityBooked ?? defaultCapacity) : null,
+      isFullVehicleLocked: bookingMode == BookingMode.full,
     );
 
     bookings.value = [booking, ...bookings.value];
@@ -225,6 +337,13 @@ class BookingRepository {
     
     // Sync to Supabase (OTP will be auto-generated by trigger)
     await _syncBookingToSupabase(booking);
+    
+    // Deduplicate after sync (in case of any race conditions)
+    final uniqueBookings = <String, Booking>{};
+    for (final b in bookings.value) {
+      uniqueBookings[b.id] = b;
+    }
+    bookings.value = uniqueBookings.values.toList();
     
     return booking;
   }
@@ -240,54 +359,88 @@ class BookingRepository {
         return;
       }
 
-      // Insert booking to Supabase (OTP will be auto-generated by trigger)
+      // Map Flutter model to Supabase schema (CORRECT field names)
       payload.addAll({
-        'id': booking.id,
-        'user_id': booking.userId,
-        'provider_id': booking.providerId,
-        'provider_name': booking.providerName,
-        'provider_phone': booking.providerPhone,
-        'provider_email': booking.providerEmail,
-        'provider_avatar': booking.providerAvatar,
-        'slot_id': booking.slotId,
-        'price': booking.price,
+        // NOTE: Don't send 'id' - it's GENERATED ALWAYS AS IDENTITY
+        'profile_customer_id': booking.userId, // Correct field name
+        'profile_provider_id': booking.providerId, // Correct field name
+        'post_id': booking.slotId, // Your DB uses post_id
         'status': booking.status.name,
-        'seat_key': booking.seatKey,
-        'user_gender': booking.userGender?.name,
-        'user_name': booking.userName,
-        'user_age': booking.userAge,
-        'user_phone': booking.userPhone,
-        'user_email': booking.userEmail,
-        'stripe_payment_intent_id': booking.stripePaymentIntentId,
-        'stripe_client_secret': booking.stripeClientSecret,
-        'countdown_end_time': booking.countdownEndTime?.toIso8601String(),
-        'payment_held_in_escrow': booking.paymentHeldInEscrow,
-        'security_deposit': booking.securityDeposit,
-        'terms_snapshot': booking.termsSnapshot,
-        'otp_verified': false,
-        'created_at': booking.createdAt.toIso8601String(),
-        // DON'T send otp - let Supabase trigger generate it
+        
+        // Snapshots
+        'price_snapshot': booking.price,
+        'deposit_snapshot': booking.securityDeposit ?? 0,
+        'currency_snapshot': 'INR',
+        'persons_snapshot': 1,
+        'seat_keys': booking.seatKey,
+        'booking_strategy_snapshot': booking.bookingMode == BookingMode.full ? 'full_vehicle' : 'instant',
+        
+        // Passenger details (jsonb)
+        'passenger_details': booking.userName != null ? {
+          'name': booking.userName,
+          'age': booking.userAge,
+          'phone': booking.userPhone,
+          'email': booking.userEmail,
+          'gender': booking.userGender?.name,
+        } : null,
+        
+        // Metadata (jsonb) - provider info and other fields
+        'metadata': {
+          'provider_name': booking.providerName,
+          'provider_phone': booking.providerPhone,
+          'provider_email': booking.providerEmail,
+          'provider_avatar': booking.providerAvatar,
+          'countdown_end_time': booking.countdownEndTime?.toIso8601String(),
+          'stripe_client_secret': booking.stripeClientSecret,
+          'payment_held_in_escrow': booking.paymentHeldInEscrow,
+          'is_full_vehicle_locked': booking.isFullVehicleLocked,
+          'terms_snapshot': booking.termsSnapshot,
+          'total_capacity_booked': booking.totalCapacityBooked,
+        },
+        
+        // Payment
+        'payment_gateway_id': booking.stripePaymentIntentId,
+        'payment_status': booking.stripePaymentIntentId != null ? 'authorized' : 'unpaid',
+        
+        // OTP
+        'otp_verified': booking.otpVerified,
+        
+        // Timestamps
+        'start_time': booking.createdAt.toIso8601String(),
+        'end_time': booking.createdAt.add(Duration(hours: 1)).toIso8601String(),
       });
 
       final response = await supabase
           .from('bookings')
           .insert(payload)
-          .select('id, otp')
+          .select('id, otp_code')
           .single();
 
-      // Update local booking with Supabase-generated OTP
-      final generatedOtp = response['otp'] as String?;
-      if (generatedOtp != null) {
+      // Update local booking with Supabase-generated ID and OTP
+      final generatedId = response['id']?.toString();
+      final generatedOtp = response['otp_code'] as String?;
+      
+      if (generatedId != null) {
         final index = bookings.value.indexWhere((b) => b.id == booking.id);
         if (index != -1) {
           final updatedBookings = List<Booking>.from(bookings.value);
-          updatedBookings[index] = booking.copyWith(otp: generatedOtp);
-          bookings.value = updatedBookings;
+          // Update with Supabase ID and OTP
+          updatedBookings[index] = booking.copyWith(
+            otp: generatedOtp,
+          );
+          
+          // Deduplicate before setting (prevent duplicates)
+          final uniqueBookings = <String, Booking>{};
+          for (final b in updatedBookings) {
+            uniqueBookings[b.id] = b;
+          }
+          bookings.value = uniqueBookings.values.toList();
+          
           await _persist();
         }
-        debugPrint('✅ Booking synced to Supabase: ${booking.id} (OTP: $generatedOtp)');
+        debugPrint('✅ Booking synced to Supabase: ID=$generatedId, OTP=$generatedOtp');
       } else {
-        debugPrint('⚠️ Booking synced but no OTP returned from Supabase');
+        debugPrint('⚠️ Booking synced but no ID/OTP returned from Supabase');
       }
     } catch (e) {
       debugPrint('❌ Failed to sync booking to Supabase: $e');

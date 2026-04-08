@@ -533,7 +533,7 @@ class SlotCard extends StatelessWidget {
           final resolvedFlag = _flagFromCode(geo?.countryCode);
           final district = geo?.district ?? geo?.stateDistrict;
           final fallbackParts = <String>[
-            if (district != null) district,
+            ?district,
             if (geo?.state != null) geo!.state!,
             if (geo?.postcode != null) geo!.postcode!,
             if (geo?.country != null)
