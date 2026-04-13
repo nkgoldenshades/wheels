@@ -20,6 +20,7 @@ class VoiceAIService extends ChangeNotifier {
   bool _isProcessing = false;
   bool _isInitialized = false;
   bool _aiInitialized = false;
+  bool _continuousMode = false; // New: Keep mic active continuously
   String _lastCommand = '';
   String _lastResponse = '';
   
@@ -27,6 +28,7 @@ class VoiceAIService extends ChangeNotifier {
   bool get isProcessing => _isProcessing;
   bool get isActive => _isListening || _isProcessing;
   bool get isInitialized => _isInitialized;
+  bool get continuousMode => _continuousMode;
   String get lastCommand => _lastCommand;
   String get lastResponse => _lastResponse;
 
@@ -148,9 +150,13 @@ Examples:
       if (!_isInitialized) return;
     }
 
-    if (_isListening) {
+    if (_isListening || _continuousMode) {
+      // Stop continuous mode
+      _continuousMode = false;
       _stopListening();
     } else {
+      // Start continuous mode
+      _continuousMode = true;
       await _startListening();
     }
   }
@@ -170,7 +176,10 @@ Examples:
       if (kDebugMode) print('🎤 Voice AI activated - listening...');
       notifyListeners();
       
-      await _flutterTts.speak('Listening...');
+      // Only speak "Listening" on first activation
+      if (_continuousMode && _lastCommand.isEmpty) {
+        await _flutterTts.speak('Continuous listening activated');
+      }
       
       await _speechToText.listen(
         onResult: (result) {
@@ -178,8 +187,8 @@ Examples:
             _processCommand(result.recognizedWords);
           }
         },
-        listenFor: const Duration(seconds: 10),
-        pauseFor: const Duration(seconds: 3),
+        listenFor: const Duration(seconds: 30), // Longer duration for continuous mode
+        pauseFor: const Duration(seconds: 2), // Shorter pause
         listenOptions: SpeechListenOptions(
           partialResults: false,
         ),
@@ -192,10 +201,11 @@ Examples:
 
   // Stop voice listening
   void _stopListening() {
-    if (!_isListening) return;
+    if (!_isListening && !_continuousMode) return;
     
     _speechToText.stop();
     _isListening = false;
+    _continuousMode = false;
     if (!_isProcessing) {
       if (kDebugMode) print('🔇 Voice AI deactivated');
     }
@@ -242,6 +252,12 @@ Examples:
     _isProcessing = false;
     if (kDebugMode) print('✅ Command processed: $command');
     notifyListeners();
+    
+    // Restart listening if continuous mode is enabled
+    if (_continuousMode) {
+      await Future.delayed(const Duration(milliseconds: 500));
+      await _startListening();
+    }
   }
 
   // Get AI response using Firebase AI Logic

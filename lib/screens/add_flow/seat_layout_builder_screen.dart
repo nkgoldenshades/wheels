@@ -272,18 +272,23 @@ class _SeatLayoutBuilderScreenState extends State<SeatLayoutBuilderScreen> {
       builder: (context) {
         return StatefulBuilder(
           builder: (context, setModalState) {
-            return Padding(
-              padding: EdgeInsets.only(
-                left: 16,
-                right: 16,
-                top: 8,
-                bottom: MediaQuery.of(context).viewInsets.bottom + 16,
+            return ConstrainedBox(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.of(context).size.height * 0.9,
               ),
-              child: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
+              child: SafeArea(
+                child: Padding(
+                  padding: EdgeInsets.only(
+                    left: 16,
+                    right: 16,
+                    top: 8,
+                    bottom: MediaQuery.of(context).viewInsets.bottom + 16,
+                  ),
+                  child: SingleChildScrollView(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
                     const Text(
                       'Grid Settings (Matrix)',
                       style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
@@ -473,9 +478,11 @@ class _SeatLayoutBuilderScreenState extends State<SeatLayoutBuilderScreen> {
                       ),
                     const SizedBox(height: 16),
                   ],
-                ),
-              ),
-            );
+                ), // Column
+              ), // SingleChildScrollView
+            ), // Padding
+          ), // SafeArea
+        ); // ConstrainedBox
           },
         );
       },

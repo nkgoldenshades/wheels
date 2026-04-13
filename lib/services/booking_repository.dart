@@ -31,25 +31,33 @@ class BookingRepository {
 
   Future<void> _load() async {
     try {
+      final prefs = await SharedPreferences.getInstance();
+      
+      // TEMPORARY: Clear local storage to force fresh load from Supabase
+      await prefs.remove(_storageKey);
+      debugPrint('🧹 Cleared local bookings storage');
+      
       // Clear existing bookings before loading (prevent duplicates)
       bookings.value = [];
       
-      // First load from Supabase (source of truth)
-      await _loadFromSupabase();
-      
-      // Then load from local storage as fallback/cache
-      final prefs = await SharedPreferences.getInstance();
-
-      // Load capacity
-      final capacityData = prefs.getString(_capacityKey);
-      if (capacityData != null) {
-        remainingCapacityBySlotId.value = Map<String, int>.from(
-          jsonDecode(capacityData),
-        );
+      // Try to load from Supabase first (source of truth)
+      bool supabaseSuccess = false;
+      try {
+        await _loadFromSupabase();
+        supabaseSuccess = bookings.value.isNotEmpty;
+        
+        if (supabaseSuccess) {
+          debugPrint('✅ Successfully loaded from Supabase');
+        }
+      } catch (e) {
+        debugPrint('❌ Supabase load failed: $e');
+        supabaseSuccess = false;
       }
-
-      // Load bookings from local storage ONLY if Supabase didn't load any
-      if (bookings.value.isEmpty) {
+      
+      // Only load from local storage if Supabase failed
+      if (!supabaseSuccess) {
+        debugPrint('⚠️ Falling back to local storage');
+        
         final bookingsData = prefs.getString(_storageKey);
         if (bookingsData != null) {
           final List<dynamic> jsonList = jsonDecode(bookingsData);
@@ -57,13 +65,24 @@ class BookingRepository {
               .map((e) => Booking.fromJson(e as Map<String, dynamic>))
               .toList();
           
-          // Deduplicate local bookings too
+          // Deduplicate local bookings
           final uniqueLocal = <String, Booking>{};
           for (final booking in localBookings) {
             uniqueLocal[booking.id] = booking;
           }
           bookings.value = uniqueLocal.values.toList();
+          debugPrint('✅ Loaded ${bookings.value.length} bookings from local storage');
+        } else {
+          debugPrint('⚠️ No local bookings found');
         }
+      }
+      
+      // Load capacity data (always from local)
+      final capacityData = prefs.getString(_capacityKey);
+      if (capacityData != null) {
+        remainingCapacityBySlotId.value = Map<String, int>.from(
+          jsonDecode(capacityData),
+        );
       }
 
       // Migrate old bookings if needed
@@ -123,50 +142,54 @@ class BookingRepository {
   }
 
   Future<void> _loadFromSupabase() async {
-    try {
-      final supabase = Supabase.instance.client;
-      final currentUser = AuthRepository.instance.currentUser;
-      
-      if (currentUser == null) {
-        debugPrint('⚠️ No user logged in - skipping Supabase booking load');
-        return;
-      }
-
-      // Load bookings where user is either customer OR provider (CORRECT field names)
-      final response = await supabase
-          .from('bookings')
-          .select()
-          .or('profile_customer_id.eq.${currentUser.id},profile_provider_id.eq.${currentUser.id}')
-          .order('created_at', ascending: false);
-
-      if (response.isEmpty) {
-        debugPrint('✅ No bookings found in Supabase for user ${currentUser.id}');
-        return;
-      }
-
-      debugPrint('📥 Received ${(response as List).length} bookings from Supabase');
-
-      final loadedBookings = (response as List)
-          .map((json) => Booking.fromJson(json as Map<String, dynamic>))
-          .toList();
-
-      // Deduplicate by ID (in case of any duplicates)
-      final uniqueBookings = <String, Booking>{};
-      for (final booking in loadedBookings) {
-        if (uniqueBookings.containsKey(booking.id)) {
-          debugPrint('⚠️ Duplicate booking detected: ${booking.id}');
-        }
-        uniqueBookings[booking.id] = booking;
-      }
-
-      bookings.value = uniqueBookings.values.toList();
-      await _persist(); // Save to local storage
-      
-      debugPrint('✅ Loaded ${bookings.value.length} unique bookings from Supabase');
-    } catch (e) {
-      debugPrint('❌ Failed to load bookings from Supabase: $e');
-      // Don't throw - allow app to continue with local data
+    final supabase = Supabase.instance.client;
+    final currentUser = AuthRepository.instance.currentUser;
+    
+    if (currentUser == null) {
+      debugPrint('⚠️ No user logged in - skipping Supabase booking load');
+      return;
     }
+
+    debugPrint('🔍 Loading bookings for user: ${currentUser.id}');
+
+    // Load bookings where user is either customer OR provider (CORRECT field names)
+    final response = await supabase
+        .from('bookings')
+        .select()
+        .or('profile_customer_id.eq.${currentUser.id},profile_provider_id.eq.${currentUser.id}')
+        .order('created_at', ascending: false);
+
+    if (response.isEmpty) {
+      debugPrint('✅ No bookings found in Supabase for user ${currentUser.id}');
+      return;
+    }
+
+    debugPrint('📥 Received ${(response as List).length} bookings from Supabase');
+    
+    // Debug: Print all booking IDs received
+    for (var json in response) {
+      debugPrint('   - Booking ID: ${json['id']}');
+    }
+
+    final loadedBookings = (response as List)
+        .map((json) => Booking.fromJson(json as Map<String, dynamic>))
+        .toList();
+
+    // Deduplicate by ID (in case of any duplicates)
+    final uniqueBookings = <String, Booking>{};
+    for (final booking in loadedBookings) {
+      if (uniqueBookings.containsKey(booking.id)) {
+        debugPrint('⚠️ Duplicate booking detected: ${booking.id}');
+      } else {
+        debugPrint('   ✓ Adding booking: ${booking.id}');
+      }
+      uniqueBookings[booking.id] = booking;
+    }
+
+    bookings.value = uniqueBookings.values.toList();
+    await _persist(); // Save to local storage
+    
+    debugPrint('✅ Loaded ${bookings.value.length} unique bookings from Supabase');
   }
 
   Future<void> _persist() async {
@@ -238,7 +261,13 @@ class BookingRepository {
     BookingMode bookingMode = BookingMode.shared,
     int? totalCapacityBooked,
   }) async {
-    // Check for full vehicle booking conflicts
+    // Prevent self-booking: User cannot book their own post
+    if (userId == providerId) {
+      debugPrint('❌ Cannot book your own post - self-booking not allowed');
+      throw Exception('You cannot book your own service');
+    }
+
+    // Check for full post booking conflicts
     if (bookingMode == BookingMode.full) {
       // Check if slot already has any active bookings
       final hasActiveBookings = bookings.value.any(
@@ -248,11 +277,11 @@ class BookingRepository {
             b.status != BookingStatus.refunded,
       );
       if (hasActiveBookings) {
-        debugPrint('❌ Cannot book full vehicle - slot already has active bookings');
+        debugPrint('❌ Cannot book full post - slot already has active bookings');
         return null;
       }
     } else {
-      // Check if slot is locked by a full vehicle booking
+      // Check if slot is locked by a full post booking
       final isLockedByFullVehicle = bookings.value.any(
         (b) =>
             b.slotId == slotId &&
@@ -262,7 +291,7 @@ class BookingRepository {
             b.status != BookingStatus.refunded,
       );
       if (isLockedByFullVehicle) {
-        debugPrint('❌ Cannot book - slot is locked by full vehicle booking');
+        debugPrint('❌ Cannot book - slot is locked by full post booking');
         return null;
       }
     }
@@ -279,16 +308,16 @@ class BookingRepository {
 
     final currentRemaining = getRemainingCapacity(slotId, defaultCapacity);
     
-    // For full vehicle bookings, check if full capacity is available
+    // For full post bookings, check if full capacity is available
     if (bookingMode == BookingMode.full) {
       if (currentRemaining < defaultCapacity) {
-        debugPrint('❌ Cannot book full vehicle - not enough capacity available');
+        debugPrint('❌ Cannot book full post - not enough capacity available');
         return null;
       }
       // Lock entire capacity
       remainingCapacityBySlotId.value = {
         ...remainingCapacityBySlotId.value,
-        slotId: 0, // Full vehicle = no remaining capacity
+        slotId: 0, // Full post = no remaining capacity
       };
     } else {
       // Shared booking

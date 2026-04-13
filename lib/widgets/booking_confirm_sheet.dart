@@ -6,6 +6,7 @@ import '../models/seat_layout.dart';
 import '../models/booking.dart';
 import '../models/passenger.dart';
 import '../models/service_type.dart';
+import '../models/post_mode.dart';
 import '../services/app_preferences.dart';
 import '../services/booking_repository.dart';
 import '../services/seat_layout_repository.dart';
@@ -254,12 +255,20 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
       slot.capacity,
     );
 
+    // For Full Post mode, force quantity to all remaining slots
+    final isFullPostMode = slot.postMode == PostMode.fullPost;
+    
     if (!hasSeatLayout) {
-      if (_quantity < 1) {
-        _quantity = 1;
-      }
-      if (remainingCapacity > 0 && _quantity > remainingCapacity) {
-        _quantity = remainingCapacity;
+      if (isFullPostMode) {
+        // Full post mode: must book all remaining slots in this post
+        _quantity = remainingCapacity > 0 ? remainingCapacity : slot.capacity;
+      } else {
+        if (_quantity < 1) {
+          _quantity = 1;
+        }
+        if (remainingCapacity > 0 && _quantity > remainingCapacity) {
+          _quantity = remainingCapacity;
+        }
       }
       if (_passengerForms.isEmpty) {
         _passengerForms.add(PassengerFormData());
@@ -295,12 +304,18 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
     }
 
     // Calculate total price for all selected seats
-    final totalPrice = layout != null && _selectedSeats.isNotEmpty
-        ? _selectedSeats.fold<int>(
-            0,
-            (sum, seatKey) => sum + (layout.cells[seatKey]?.price ?? 0),
-          )
-        : slot.price.toInt();
+    final int totalPrice;
+    if (isFullPostMode) {
+      // Full post mode: price × remaining capacity
+      totalPrice = slot.price.toInt() * (remainingCapacity > 0 ? remainingCapacity : slot.capacity);
+    } else if (layout != null && _selectedSeats.isNotEmpty) {
+      totalPrice = _selectedSeats.fold<int>(
+        0,
+        (sum, seatKey) => sum + (layout.cells[seatKey]?.price ?? 0),
+      );
+    } else {
+      totalPrice = slot.price.toInt() * _quantity;
+    }
 
     return SafeArea(
       child: Padding(
@@ -376,6 +391,27 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
                   }
                   final isLease = slot.serviceType.name == 'lease';
                   final deposit = isLease ? (slot.securityDeposit ?? 0.0) : 0.0;
+                  
+                  // Full post mode: show breakdown
+                  if (isFullPostMode) {
+                    final quantity = remainingCapacity > 0 ? remainingCapacity : slot.capacity;
+                    final pricePerSeat = slot.price.toInt();
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _Row(
+                          icon: Icons.info_outline,
+                          text: 'Full Post Mode: All $quantity slots',
+                        ),
+                        const SizedBox(height: 4),
+                        _Row(
+                          icon: Icons.payments,
+                          text: '${AppPreferences.instance.formatMoney(pricePerSeat)} × $quantity = ${AppPreferences.instance.formatMoney(totalPrice)}',
+                        ),
+                      ],
+                    );
+                  }
+                  
                   if (isLease && deposit > 0) {
                     return Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -755,13 +791,13 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
                 const SizedBox(height: 8),
                 Row(
                   children: [
-                    const Text(
-                      'Quantity',
-                      style: TextStyle(fontWeight: FontWeight.w700),
+                    Text(
+                      isFullPostMode ? 'All Remaining Slots' : 'Quantity',
+                      style: const TextStyle(fontWeight: FontWeight.w700),
                     ),
                     const Spacer(),
                     IconButton(
-                      onPressed: remainingCapacity <= 0 || _quantity <= 1
+                      onPressed: isFullPostMode || remainingCapacity <= 0 || _quantity <= 1
                           ? null
                           : () {
                               setState(() {
@@ -773,7 +809,7 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
                     ),
                     Text('$_quantity'),
                     IconButton(
-                      onPressed: remainingCapacity <= 0 || _quantity >= remainingCapacity
+                      onPressed: isFullPostMode || remainingCapacity <= 0 || _quantity >= remainingCapacity
                           ? null
                           : () {
                               setState(() {
@@ -785,6 +821,18 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
                     ),
                   ],
                 ),
+                if (isFullPostMode)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text(
+                      'Must book all ${remainingCapacity > 0 ? remainingCapacity : slot.capacity} remaining slots in this post',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.green.shade700,
+                        fontStyle: FontStyle.italic,
+                      ),
+                    ),
+                  ),
               ],
               const SizedBox(height: 16),
               Row(
@@ -1096,17 +1144,9 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
                                     );
 
                                     if (localBooking != null && context.mounted) {
-                                      Navigator.pop(
-                                        context,
-                                        BookingConfirmResult(
-                                          seatKeys: seatKeysOrdered,
-                                          userGenders: genders,
-                                          userNames: names,
-                                          userAges: ages,
-                                          userPhones: phones,
-                                          userEmails: emails,
-                                        ),
-                                      );
+                                      // Don't return result - booking already created
+                                      // Just close the sheet
+                                      Navigator.pop(context);
                                       
                                       // Go to Requests tab
                                       mainTabIndex.value = 1;
@@ -1166,16 +1206,27 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
   }
   
   double _calculateTotalPrice() {
+    final isFullPostMode = widget.slot.postMode == PostMode.fullPost;
+    final remainingCapacity = BookingRepository.instance.getRemainingCapacity(
+      widget.slot.id,
+      widget.slot.capacity,
+    );
+    
     double basePrice;
-    if (_selectedSeats.isEmpty) {
-      basePrice = widget.slot.price;
+    
+    if (isFullPostMode) {
+      // Full post mode: price × remaining capacity
+      final quantity = remainingCapacity > 0 ? remainingCapacity : widget.slot.capacity;
+      basePrice = widget.slot.price * quantity;
+    } else if (_selectedSeats.isEmpty) {
+      basePrice = widget.slot.price * _quantity;
     } else {
       final layout = SeatLayoutRepository.instance.getLayout(
         widget.slot.seatLayoutOwnerId ?? '',
       );
 
       if (layout == null) {
-        basePrice = widget.slot.price;
+        basePrice = widget.slot.price * _quantity;
       } else {
         double total = 0.0;
         for (final seatKey in _selectedSeats) {
@@ -1184,7 +1235,7 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
             total += cell.price!;
           }
         }
-        basePrice = total > 0 ? total : widget.slot.price;
+        basePrice = total > 0 ? total : widget.slot.price * _quantity;
       }
     }
 

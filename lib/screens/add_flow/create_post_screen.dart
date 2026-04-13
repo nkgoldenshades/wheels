@@ -7,7 +7,9 @@ import 'package:image_picker/image_picker.dart';
 import '../vehicle/vehicle_list_screen.dart';
 import '../../models/service_type.dart';
 import '../../models/slot_type.dart';
+import '../../models/post_mode.dart';
 import '../../services/app_preferences.dart';
+import '../../services/auth_repository.dart';
 import '../../models/vehicle.dart';
 import '../../models/slot.dart';
 import '../../models/pickup_mode.dart';
@@ -16,6 +18,7 @@ import '../../services/customer_slot_repository.dart';
 import '../../services/content_filter_service.dart';
 import '../../controllers/seat_layout_controller.dart';
 import '../../models/seat_layout.dart';
+import '../../models/simple_seat_layout.dart'; // Add SimpleSeatLayout import
 import '../../screens/add_flow/seat_layout_builder_screen.dart';
 import '../../services/seat_layout_repository.dart';
 import '../../widgets/location_autocomplete_field.dart';
@@ -80,6 +83,13 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   // Seating mode: simple (price+capacity) or layout-based
   bool _useSimpleSeating = true;
 
+  // Post mode: instant, wait_for_full, full_vehicle
+  PostMode _postMode = PostMode.instant;
+  
+  // Wait for full deadline (manual input)
+  final _deadlineHoursController = TextEditingController(text: '2');
+  final _deadlineMinutesController = TextEditingController(text: '0');
+
   // Pickup mode
   PickupMode _pickupMode = PickupMode.customerPickup;
 
@@ -96,6 +106,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   bool _isPosting = false;
 
   String? _seatLayoutOwnerId;
+  SimpleSeatLayout? _builtSeatLayout; // Store the actual layout structure
 
   bool get _hasSeatLayoutSeats {
     final ownerId = _seatLayoutOwnerId;
@@ -149,6 +160,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     _radiusController.dispose();
     _priceController.dispose();
     _notesController.dispose();
+    _deadlineHoursController.dispose();
+    _deadlineMinutesController.dispose();
     _maxWeightController.dispose();
     _maxLengthController.dispose();
     _maxWidthController.dispose();
@@ -381,6 +394,18 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     return '${d.day}/${d.month} ${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
   }
 
+  int? _calculateDeadlineHours() {
+    final hours = int.tryParse(_deadlineHoursController.text) ?? 0;
+    final minutes = int.tryParse(_deadlineMinutesController.text) ?? 0;
+    
+    // Convert to total hours (rounded up if there are minutes)
+    if (hours == 0 && minutes == 0) return null;
+    
+    // If there are minutes, round up to next hour
+    // e.g., 2 hours 30 minutes = 3 hours
+    return minutes > 0 ? hours + 1 : hours;
+  }
+
   Future<void> _pickImage() async {
     if (_selectedImages.length >= 4) {
       _showError('Maximum 4 images allowed');
@@ -489,12 +514,28 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
           ? _withOperator
           : true; // Passenger and Parcel always have operators
 
+      // Guest-first: Check if user is logged in before creating post
+      final currentUser = AuthRepository.instance.currentUser;
+      if (currentUser == null) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Please login to create posts'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        Navigator.pushNamed(context, '/login');
+        return;
+      }
+
       final slot = Slot(
         id: slotId,
+        profileId: currentUser.id, // Post owner (null-safe)
         vehicleId: _selectedVehicle!.id,
         serviceType: actualServiceType,
         slotType: _slotType,
         seatLayoutOwnerId: layoutOwnerId,
+        seatLayoutStructure: _builtSeatLayout, // Add the actual layout structure
         requiresApproval: false,
         fromLocation: _slotType == SlotType.fromTo
             ? _formatLocationValue(
@@ -543,7 +584,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         securityDeposit: widget.serviceType == ServiceType.lease
             ? double.tryParse(_securityDepositController.text)
             : null,
-        mileageLimit: null,
         fuelPolicy: widget.serviceType == ServiceType.lease
             ? _fuelPolicy
             : null,
@@ -555,12 +595,30 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
             ? _leaseTermsController.text.trim()
             : null,
         withOperator: operatorValue,
+        postMode: _postMode, // Add post mode
+        waitForFullDeadlineHours: _postMode == PostMode.waitForFull 
+            ? _calculateDeadlineHours() 
+            : null,
       );
+
+      // Debug: Verify seat layout structure before saving
+      if (_builtSeatLayout == null) {
+        debugPrint('⚠️ WARNING: Seat layout structure is NULL');
+      } else {
+        debugPrint('✅ Seat layout structure: ${_builtSeatLayout!.toJson()}');
+      }
 
       if (widget.isUserMode) {
         await CustomerSlotRepository.instance.addSlot(slot);
       } else {
         await SlotRepository.instance.addSlot(slot);
+      }
+
+      // Refresh posts from Supabase to show the newly created post
+      if (widget.isUserMode) {
+        // CustomerSlotRepository doesn't have a refresh method, but it auto-updates via ValueNotifier
+      } else {
+        await SlotRepository.instance.loadSlots();
       }
 
       if (mounted) {
@@ -604,10 +662,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
             _buildLocationSection(),
             const SizedBox(height: 20),
 
-            // Time Section
-            _buildTimeSection(),
-            const SizedBox(height: 20),
-
             // Price and Capacity
             _buildPriceCapacitySection(),
             const SizedBox(height: 20),
@@ -632,6 +686,10 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
 
             // Pickup Mode
             _buildPickupModeSection(),
+            const SizedBox(height: 20),
+            
+            // Post Mode (Booking Strategy)
+            _buildPostModeSection(),
             const SizedBox(height: 20),
             
             // Operator Availability (only for Lease service)
@@ -1723,6 +1781,193 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     );
   }
 
+  Widget _buildPostModeSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          '🎯 Booking Mode',
+          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 12),
+        Container(
+          decoration: BoxDecoration(
+            border: Border.all(color: Colors.grey.shade300),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            children: [
+              // Instant Booking
+              InkWell(
+                onTap: () => setState(() => _postMode = PostMode.instant),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4.0),
+                  child: Row(
+                    children: [
+                      Radio<PostMode>(
+                        value: PostMode.instant,
+                        groupValue: _postMode,
+                        onChanged: (value) => setState(() => _postMode = value!),
+                      ),
+                      const Icon(Icons.flash_on, color: Colors.blue),
+                      const SizedBox(width: 8),
+                      const Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Instant Booking',
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            Text(
+                              'Customers can book immediately',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const Divider(),
+              // Wait for Full
+              InkWell(
+                onTap: () => setState(() => _postMode = PostMode.waitForFull),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4.0),
+                  child: Row(
+                    children: [
+                      Radio<PostMode>(
+                        value: PostMode.waitForFull,
+                        groupValue: _postMode,
+                        onChanged: (value) => setState(() => _postMode = value!),
+                      ),
+                      const Icon(Icons.groups, color: Colors.orange),
+                      const SizedBox(width: 8),
+                      const Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Wait for Full',
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            Text(
+                              'Wait until all seats are filled',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              // Deadline input (only for Wait for Full)
+              if (_postMode == PostMode.waitForFull) ...[
+                const SizedBox(height: 8),
+                Padding(
+                  padding: const EdgeInsets.only(left: 48),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _deadlineHoursController,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: 'Hours',
+                            hintText: '0-48',
+                            border: OutlineInputBorder(),
+                            contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: TextField(
+                          controller: _deadlineMinutesController,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: 'Minutes',
+                            hintText: '0-59',
+                            border: OutlineInputBorder(),
+                            contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Padding(
+                  padding: const EdgeInsets.only(left: 48),
+                  child: Text(
+                    'Deadline before start time',
+                    style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                  ),
+                ),
+              ],
+              const Divider(),
+              // Full Post Mode
+              InkWell(
+                onTap: () => setState(() => _postMode = PostMode.fullPost),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4.0),
+                  child: Row(
+                    children: [
+                      Radio<PostMode>(
+                        value: PostMode.fullPost,
+                        groupValue: _postMode,
+                        onChanged: (value) => setState(() => _postMode = value!),
+                      ),
+                      const Icon(Icons.directions_car, color: Colors.green),
+                      const SizedBox(width: 8),
+                      const Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Full Post Mode',
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            Text(
+                              'Customer must book all remaining slots',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _buildOperatorSection() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1826,10 +2071,57 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
 
     if (saved == null) return;
     SeatLayoutRepository.instance.upsert(ownerId: ownerId, layout: saved);
+    
+    // Convert SeatLayout to SimpleSeatLayout for database storage
+    _builtSeatLayout = _convertToSimpleSeatLayout(saved);
+    debugPrint('📦 Seat Layout Structure: ${_builtSeatLayout?.toJson()}');
+    
     if (!mounted) return;
     setState(() {
       _useSimpleSeating = false;
     });
+  }
+
+  /// Convert SeatLayout (UI model) to SimpleSeatLayout (DB model)
+  SimpleSeatLayout _convertToSimpleSeatLayout(SeatLayout layout) {
+    final items = <LayoutItem>[];
+    
+    // Convert each cell to a LayoutItem
+    layout.cells.forEach((key, cell) {
+      if (cell.type == CellType.seat) {
+        // Convert SeatGender enum to string
+        String genderStr = 'Any';
+        if (cell.gender == SeatGender.male) {
+          genderStr = 'Male';
+        } else if (cell.gender == SeatGender.female) {
+          genderStr = 'Female';
+        }
+        
+        items.add(PassengerSeat(
+          key: cell.seatName ?? key,
+          matrix: '${cell.row}x${cell.col}',
+          allowedGender: genderStr,
+          price: cell.price ?? 0,
+          status: cell.isLocked ? SlotStatus.locked : SlotStatus.available,
+          bookingId: null,
+        ));
+      } else if (cell.type == CellType.space) {
+        // Space cells are gaps in the layout
+        items.add(PassengerSeat(
+          key: 'gap_${cell.row}x${cell.col}',
+          matrix: '${cell.row}x${cell.col}',
+          allowedGender: 'Any',
+          price: 0,
+          status: SlotStatus.gap,
+          bookingId: null,
+        ));
+      }
+    });
+    
+    return SimpleSeatLayout(
+      type: widget.serviceType == ServiceType.passenger ? 'passenger' : 'parcel',
+      layout: items,
+    );
   }
 
   Widget _buildNotesSection() {

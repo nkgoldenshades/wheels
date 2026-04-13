@@ -1,31 +1,34 @@
--- 🔍 DEBUG RLS ISSUE
--- Run this in Supabase SQL Editor when logged in with Firebase
+-- ============================================
+-- DEBUG: Check RLS and Profile Issues
+-- ============================================
+-- Run this to see what's wrong with post creation
+-- ============================================
 
--- 1. Check if you can see profiles as admin (should work)
-SELECT COUNT(*) as total_profiles FROM profiles;
+-- 1. Check if your profile exists
+SELECT id, full_name, email, created_at 
+FROM public.profiles 
+WHERE id = 'GbsFkKmcHCQFJ0ceVoBWz2punch1';
 
--- 2. Check your current JWT claims
+-- 2. Check current RLS policies on posts table
 SELECT 
-  auth.jwt() as full_jwt,
-  auth.jwt()->>'sub' as firebase_uid,
-  auth.jwt()->>'role' as role;
-
--- 3. Check RLS policies
-SELECT 
+  schemaname,
+  tablename,
   policyname,
+  permissive,
+  roles,
   cmd,
   qual,
   with_check
 FROM pg_policies 
-WHERE tablename = 'profiles';
+WHERE tablename = 'posts'
+ORDER BY policyname;
 
--- 4. Try to select your own profile (this might fail due to RLS)
--- Replace 'YOUR_FIREBASE_UID' with your actual Firebase UID
-SELECT * FROM profiles WHERE id = 'YOUR_FIREBASE_UID';
+-- 3. Check if RLS is enabled on posts table
+SELECT tablename, rowsecurity 
+FROM pg_tables 
+WHERE schemaname = 'public' AND tablename = 'posts';
 
--- 5. Test if RLS is working correctly
--- This should return your profile if RLS is working
-SELECT * FROM profiles WHERE id = auth.jwt()->>'sub';
-
--- 6. Check if there are any profiles at all
-SELECT id, full_name, email, created_at FROM profiles LIMIT 5;
+-- 4. Try to see what posts exist (if any)
+SELECT id, profile_id, vehicle_id, service_type, created_at
+FROM public.posts
+LIMIT 5;

@@ -84,7 +84,7 @@ class BackendConnectionTest {
         final vehicles = await supabase
             .from('vehicles')
             .select()
-            .eq('owner_id', currentUser.id)
+            .eq('profile_id', currentUser.id) // Changed from owner_id
             .limit(5);
 
         debugPrint('   ✅ Can read vehicles (${vehicles.length} found)');
@@ -92,17 +92,17 @@ class BackendConnectionTest {
         debugPrint('   ❌ Vehicles read failed: $e');
       }
 
-      // Test: Can read active slots
+      // Test: Can read active posts
       try {
-        final slots = await supabase
-            .from('slots')
+        final posts = await supabase
+            .from('posts') // Changed from slots
             .select()
             .eq('is_active', true)
             .limit(5);
 
-        debugPrint('   ✅ Can read slots (${slots.length} found)');
+        debugPrint('   ✅ Can read posts (${posts.length} found)');
       } catch (e) {
-        debugPrint('   ❌ Slots read failed: $e');
+        debugPrint('   ❌ Posts read failed: $e');
       }
 
     } catch (e) {
@@ -117,11 +117,10 @@ class BackendConnectionTest {
     final tables = [
       'profiles',
       'vehicles',
-      'slots',
+      'posts', // Changed from 'slots'
       'bookings',
       'reviews',
-      'user_posts',
-      'user_post_acceptances',
+      // Note: user_posts and user_post_acceptances may not exist in your schema
     ];
 
     for (final table in tables) {

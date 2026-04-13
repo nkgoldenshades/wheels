@@ -5,6 +5,8 @@ import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
 import 'app_preferences.dart';
 import 'profile_name_registry.dart';
 import 'auth_repository.dart' as auth;
+import 'vehicle_repository.dart';
+import 'slot_repository.dart';
 
 class ProfileInfo {
   final String id; // Firebase UID
@@ -44,6 +46,9 @@ class ProfileInfo {
   final String? razorpayAccountId;
   final double walletBalance;
   final String? country;
+  
+  // AI Credits for chat usage
+  final int aiCredits; // Credits for AI chat (1 credit = 1 message)
 
   const ProfileInfo({
     required this.id,
@@ -75,6 +80,7 @@ class ProfileInfo {
     this.razorpayAccountId,
     this.walletBalance = 0.0,
     this.country,
+    this.aiCredits = 50, // New users get 50 free credits
   });
 
   // Create from Supabase JSON
@@ -109,6 +115,8 @@ class ProfileInfo {
       razorpayAccountId: json['razorpay_account_id'] as String?,
       walletBalance: (json['wallet_balance'] as num?)?.toDouble() ?? 0.0,
       country: json['country'] as String?,
+      // AI Credits
+      aiCredits: json['ai_credits'] as int? ?? 50, // Default 50 credits for new users
     );
   }
 
@@ -184,6 +192,7 @@ class ProfileInfo {
     double? walletBalance,
     String? country,
     bool setCountryNull = false,
+    int? aiCredits,
   }) {
     return ProfileInfo(
       id: id ?? this.id,
@@ -229,6 +238,7 @@ class ProfileInfo {
       razorpayAccountId: setRazorpayAccountIdNull ? null : razorpayAccountId ?? this.razorpayAccountId,
       walletBalance: walletBalance ?? this.walletBalance,
       country: setCountryNull ? null : country ?? this.country,
+      aiCredits: aiCredits ?? this.aiCredits,
     );
   }
 }
@@ -259,6 +269,13 @@ class ProfileRepository {
           try {
             await loadProfile(firebaseUser.uid);
             if (kDebugMode) print('✅ Profile loaded for authenticated user');
+            
+            // IMPORTANT: Reload vehicles and posts after authentication
+            // This fixes the timing issue where they load before auth completes
+            if (kDebugMode) print('🔄 Reloading vehicles and posts after auth...');
+            await VehicleRepository.instance.loadVehicles();
+            await SlotRepository.instance.loadSlots();
+            if (kDebugMode) print('✅ Vehicles and posts reloaded');
           } catch (e) {
             if (kDebugMode) print('⚠️ Profile not found, creating default: $e');
             // Create default profile if doesn't exist
@@ -526,6 +543,65 @@ class ProfileRepository {
     );
 
     await saveProfile(updatedProfile);
+  }
+  
+  /// Deduct AI credits (1 credit per message)
+  Future<bool> deductAICredits(int amount) async {
+    final currentProfile = _currentProfile ?? profile.value;
+    if (currentProfile.id.isEmpty) {
+      throw Exception('No profile loaded');
+    }
+    
+    // Check if user has enough credits
+    if (currentProfile.aiCredits < amount) {
+      return false; // Not enough credits
+    }
+    
+    final newCredits = currentProfile.aiCredits - amount;
+    final updatedProfile = currentProfile.copyWith(
+      aiCredits: newCredits,
+    );
+    
+    await saveProfile(updatedProfile);
+    
+    // Also update in Supabase
+    try {
+      await _supabase
+          .from('profiles')
+          .update({'ai_credits': newCredits})
+          .eq('id', currentProfile.id);
+      debugPrint('✅ Deducted $amount AI credits. Remaining: $newCredits');
+    } catch (e) {
+      debugPrint('⚠️ Failed to update AI credits in Supabase: $e');
+    }
+    
+    return true; // Success
+  }
+  
+  /// Add AI credits (purchase or reward)
+  Future<void> addAICredits(int amount) async {
+    final currentProfile = _currentProfile ?? profile.value;
+    if (currentProfile.id.isEmpty) {
+      throw Exception('No profile loaded');
+    }
+    
+    final newCredits = currentProfile.aiCredits + amount;
+    final updatedProfile = currentProfile.copyWith(
+      aiCredits: newCredits,
+    );
+    
+    await saveProfile(updatedProfile);
+    
+    // Also update in Supabase
+    try {
+      await _supabase
+          .from('profiles')
+          .update({'ai_credits': newCredits})
+          .eq('id', currentProfile.id);
+      debugPrint('✅ Added $amount AI credits. New balance: $newCredits');
+    } catch (e) {
+      debugPrint('⚠️ Failed to update AI credits in Supabase: $e');
+    }
   }
 
   Future<void> updateCountry(String country) async {

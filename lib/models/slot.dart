@@ -2,6 +2,8 @@ import 'service_type.dart';
 import 'slot_type.dart';
 import 'pickup_mode.dart';
 import 'user_tier.dart';
+import 'post_mode.dart';
+import 'simple_seat_layout.dart';
 
 enum BookingMode {
   shared, // Multiple customers (default)
@@ -10,10 +12,13 @@ enum BookingMode {
 
 class Slot {
   final String id;
+  final String profileId; // Owner of the post (from posts.profile_id)
+  final String? providerName; // Provider name from profiles.full_name (JOIN)
   final String vehicleId;
   final ServiceType serviceType;
   final SlotType slotType;
   final String? seatLayoutOwnerId;
+  final SimpleSeatLayout? seatLayoutStructure; // Direct JSON structure
   final bool requiresApproval;
   final String? fromLocation;
   final String? toLocation;
@@ -38,7 +43,6 @@ class Slot {
   // Lease-specific fields
   final String? leaseDuration; // hourly, daily, weekly, monthly
   final double? securityDeposit; // deposit amount
-  final int? mileageLimit; // km per day
   final String? fuelPolicy; // full-to-full, included, etc.
   final bool? insuranceIncluded;
   final String? leaseTerms; // additional terms and conditions
@@ -50,13 +54,22 @@ class Slot {
   final BookingMode bookingMode; // 'shared' or 'full'
   final UserTier minCustomerTier; // Minimum tier required to book
   final double? fullVehiclePrice; // Price for full charter (if booking_mode = 'full')
+  
+  // Post Mode - How this post can be booked
+  final PostMode postMode; // 'instant', 'wait_for_full', or 'full_vehicle'
+  
+  // Wait for full deadline (hours before start time)
+  final int? waitForFullDeadlineHours; // Only used when postMode = waitForFull
 
   Slot({
     required this.id,
+    required this.profileId,
+    this.providerName,
     required this.vehicleId,
     required this.serviceType,
     required this.slotType,
     this.seatLayoutOwnerId,
+    this.seatLayoutStructure,
     this.requiresApproval = true,
     this.fromLocation,
     this.toLocation,
@@ -77,7 +90,6 @@ class Slot {
     this.maxHeight,
     this.leaseDuration,
     this.securityDeposit,
-    this.mileageLimit,
     this.fuelPolicy,
     this.insuranceIncluded,
     this.leaseTerms,
@@ -85,14 +97,19 @@ class Slot {
     this.bookingMode = BookingMode.shared,
     this.minCustomerTier = UserTier.basic,
     this.fullVehiclePrice,
+    this.postMode = PostMode.instant,
+    this.waitForFullDeadlineHours,
   });
 
   Slot copyWith({
     String? id,
+    String? profileId,
+    String? providerName,
     String? vehicleId,
     ServiceType? serviceType,
     SlotType? slotType,
     String? seatLayoutOwnerId,
+    SimpleSeatLayout? seatLayoutStructure,
     bool? requiresApproval,
     String? fromLocation,
     bool setFromLocationNull = false,
@@ -124,8 +141,6 @@ class Slot {
     bool setLeaseDurationNull = false,
     double? securityDeposit,
     bool setSecurityDepositNull = false,
-    int? mileageLimit,
-    bool setMileageLimitNull = false,
     String? fuelPolicy,
     bool setFuelPolicyNull = false,
     bool? insuranceIncluded,
@@ -137,13 +152,18 @@ class Slot {
     UserTier? minCustomerTier,
     double? fullVehiclePrice,
     bool setFullVehiclePriceNull = false,
+    PostMode? postMode,
+    int? waitForFullDeadlineHours,
   }) {
     return Slot(
       id: id ?? this.id,
+      profileId: profileId ?? this.profileId,
+      providerName: providerName ?? this.providerName,
       vehicleId: vehicleId ?? this.vehicleId,
       serviceType: serviceType ?? this.serviceType,
       slotType: slotType ?? this.slotType,
       seatLayoutOwnerId: seatLayoutOwnerId ?? this.seatLayoutOwnerId,
+      seatLayoutStructure: seatLayoutStructure ?? this.seatLayoutStructure,
       requiresApproval: requiresApproval ?? this.requiresApproval,
       fromLocation: setFromLocationNull ? null : (fromLocation ?? this.fromLocation),
       toLocation: setToLocationNull ? null : (toLocation ?? this.toLocation),
@@ -166,7 +186,6 @@ class Slot {
       securityDeposit: setSecurityDepositNull
           ? null
           : (securityDeposit ?? this.securityDeposit),
-      mileageLimit: setMileageLimitNull ? null : (mileageLimit ?? this.mileageLimit),
       fuelPolicy: setFuelPolicyNull ? null : (fuelPolicy ?? this.fuelPolicy),
       insuranceIncluded: setInsuranceIncludedNull
           ? null
@@ -176,16 +195,20 @@ class Slot {
       bookingMode: bookingMode ?? this.bookingMode,
       minCustomerTier: minCustomerTier ?? this.minCustomerTier,
       fullVehiclePrice: setFullVehiclePriceNull ? null : (fullVehiclePrice ?? this.fullVehiclePrice),
+      postMode: postMode ?? this.postMode,
+      waitForFullDeadlineHours: waitForFullDeadlineHours ?? this.waitForFullDeadlineHours,
     );
   }
 
   Map<String, dynamic> toJson() {
     return {
       'id': id,
+      'profile_id': profileId,
       'vehicle_id': vehicleId,
       'service_type': serviceType.name,
       'slot_type': slotType.name,
       'seat_layout_owner_id': seatLayoutOwnerId,
+      'seat_layout_structure': seatLayoutStructure?.toJson(),
       'requires_approval': requiresApproval,
       'from_location': fromLocation,
       'to_location': toLocation,
@@ -206,7 +229,6 @@ class Slot {
       'max_height': maxHeight,
       'lease_duration': leaseDuration,
       'security_deposit': securityDeposit,
-      'mileage_limit': mileageLimit,
       'fuel_policy': fuelPolicy,
       'insurance_included': insuranceIncluded,
       'lease_terms': leaseTerms,
@@ -214,13 +236,29 @@ class Slot {
       'booking_mode': bookingMode.name,
       'min_customer_tier': minCustomerTier.name,
       'full_vehicle_price': fullVehiclePrice,
+      'postmode': postMode.dbValue,
+      'wait_for_full_deadline_hours': waitForFullDeadlineHours,
       'updated_at': DateTime.now().toIso8601String(),
     };
   }
 
   factory Slot.fromJson(Map<String, dynamic> json) {
+    // Use denormalized provider_name field (no JOIN needed for guest access)
+    String? providerName = json['provider_name'];
+    
+    // Fallback: Extract from JOIN if still present (backward compatibility)
+    if (providerName == null) {
+      if (json['public_profiles'] != null && json['public_profiles'] is Map) {
+        providerName = json['public_profiles']['full_name'];
+      } else if (json['profiles'] != null && json['profiles'] is Map) {
+        providerName = json['profiles']['full_name'];
+      }
+    }
+    
     return Slot(
       id: json['id'],
+      profileId: json['profile_id'] ?? json['profileId'] ?? '',
+      providerName: providerName,
       vehicleId: json['vehicle_id'] ?? json['vehicleId'],
       serviceType: ServiceType.values.firstWhere(
         (s) => s.name == (json['service_type'] ?? json['serviceType']),
@@ -229,6 +267,9 @@ class Slot {
         (s) => s.name == (json['slot_type'] ?? json['slotType']),
       ),
       seatLayoutOwnerId: json['seat_layout_owner_id'] ?? json['seatLayoutOwnerId'],
+      seatLayoutStructure: json['seat_layout_structure'] != null
+          ? SimpleSeatLayout.fromJson(json['seat_layout_structure'] as Map<String, dynamic>)
+          : null,
       requiresApproval: json['requires_approval'] ?? json['requiresApproval'] ?? true,
       fromLocation: json['from_location'] ?? json['fromLocation'],
       toLocation: json['to_location'] ?? json['toLocation'],
@@ -251,7 +292,6 @@ class Slot {
       maxHeight: (json['max_height'] ?? json['maxHeight'] as num?)?.toDouble(),
       leaseDuration: json['lease_duration'] ?? json['leaseDuration'],
       securityDeposit: (json['security_deposit'] ?? json['securityDeposit'] as num?)?.toDouble(),
-      mileageLimit: json['mileage_limit'] ?? json['mileageLimit'],
       fuelPolicy: json['fuel_policy'] ?? json['fuelPolicy'],
       insuranceIncluded: json['insurance_included'] ?? json['insuranceIncluded'],
       leaseTerms: json['lease_terms'] ?? json['leaseTerms'],
@@ -269,6 +309,10 @@ class Slot {
             )
           : UserTier.basic,
       fullVehiclePrice: (json['full_vehicle_price'] ?? json['fullVehiclePrice'] as num?)?.toDouble(),
+      postMode: json['postmode'] != null || json['postMode'] != null
+          ? PostModeExtension.fromDbValue(json['postmode'] ?? json['postMode'])
+          : PostMode.instant,
+      waitForFullDeadlineHours: json['wait_for_full_deadline_hours'] ?? json['waitForFullDeadlineHours'],
     );
   }
 }

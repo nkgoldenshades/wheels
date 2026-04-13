@@ -1,10 +1,8 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/seat_layout.dart';
-import 'auth_repository.dart';
 
 class SeatLayoutRepository {
   SeatLayoutRepository._();
@@ -75,6 +73,12 @@ class SeatLayoutRepository {
   }
 
   Future<void> _syncLayoutToSupabase(String ownerId, SeatLayout layout) async {
+    // NOTE: seat_layout_structure is now stored directly in posts table as JSONB
+    // No need for separate seat_layouts table
+    // This sync is disabled
+    return;
+    
+    /* OLD CODE - DISABLED
     try {
       final supabase = Supabase.instance.client;
       final currentUser = AuthRepository.instance.currentUser;
@@ -93,9 +97,16 @@ class SeatLayoutRepository {
     } catch (e) {
       debugPrint('❌ Failed to sync seat layout to Supabase: $e');
     }
+    */
   }
 
   Future<void> _deleteLayoutFromSupabase(String ownerId) async {
+    // NOTE: seat_layout_structure is now stored directly in posts table as JSONB
+    // No need for separate seat_layouts table
+    // This delete is disabled
+    return;
+    
+    /* OLD CODE - DISABLED
     try {
       final supabase = Supabase.instance.client;
       
@@ -105,5 +116,6 @@ class SeatLayoutRepository {
     } catch (e) {
       debugPrint('❌ Failed to delete seat layout from Supabase: $e');
     }
+    */
   }
 }

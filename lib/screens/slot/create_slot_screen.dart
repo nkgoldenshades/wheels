@@ -6,7 +6,9 @@ import '../../models/slot.dart';
 import '../../models/slot_type.dart';
 import '../../models/service_type.dart';
 import '../../models/pickup_mode.dart';
+import '../../models/post_mode.dart';
 import '../../services/slot_repository.dart';
+import '../../services/auth_repository.dart';
 import '../../services/content_filter_service.dart';
 import '../../widgets/location_field.dart';
 
@@ -25,6 +27,7 @@ class CreateSlotScreen extends StatefulWidget {
 class _CreateSlotScreenState extends State<CreateSlotScreen> {
   SlotType _slotType = SlotType.fromTo;
   ServiceType _serviceType = ServiceType.passenger; // Add service type selection
+  PostMode _postMode = PostMode.instant; // Add post mode selection
   
   // Controllers
   final _fromController = TextEditingController();
@@ -186,6 +189,102 @@ class _CreateSlotScreenState extends State<CreateSlotScreen> {
                           children: [
                             Text('Lease', style: TextStyle(fontSize: 16)),
                             Text('Rent out vehicle with or without operator', 
+                                 style: TextStyle(fontSize: 12, color: Colors.grey)),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+          
+          const SizedBox(height: 24),
+          
+          // Post Mode Selection
+          const Text(
+            'Booking Mode',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 8),
+          
+          // Post Mode Options
+          Column(
+            children: [
+              InkWell(
+                onTap: () => setState(() => _postMode = PostMode.instant),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4.0),
+                  child: Row(
+                    children: [
+                      Radio<PostMode>(
+                        value: PostMode.instant,
+                        groupValue: _postMode,
+                        onChanged: (value) => setState(() => _postMode = value!),
+                      ),
+                      const Icon(Icons.flash_on, color: Colors.blue),
+                      const SizedBox(width: 8),
+                      const Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Instant Booking', style: TextStyle(fontSize: 16)),
+                            Text('Customers can book individual seats immediately', 
+                                 style: TextStyle(fontSize: 12, color: Colors.grey)),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              InkWell(
+                onTap: () => setState(() => _postMode = PostMode.waitForFull),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4.0),
+                  child: Row(
+                    children: [
+                      Radio<PostMode>(
+                        value: PostMode.waitForFull,
+                        groupValue: _postMode,
+                        onChanged: (value) => setState(() => _postMode = value!),
+                      ),
+                      const Icon(Icons.groups, color: Colors.orange),
+                      const SizedBox(width: 8),
+                      const Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Wait for Full', style: TextStyle(fontSize: 16)),
+                            Text('Wait until all seats are filled before confirming', 
+                                 style: TextStyle(fontSize: 12, color: Colors.grey)),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              InkWell(
+                onTap: () => setState(() => _postMode = PostMode.fullPost),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4.0),
+                  child: Row(
+                    children: [
+                      Radio<PostMode>(
+                        value: PostMode.fullPost,
+                        groupValue: _postMode,
+                        onChanged: (value) => setState(() => _postMode = value!),
+                      ),
+                      const Icon(Icons.directions_car, color: Colors.green),
+                      const SizedBox(width: 8),
+                      const Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Full Post Mode', style: TextStyle(fontSize: 16)),
+                            Text('Customer must book all remaining slots in this post', 
                                  style: TextStyle(fontSize: 12, color: Colors.grey)),
                           ],
                         ),
@@ -516,9 +615,24 @@ class _CreateSlotScreenState extends State<CreateSlotScreen> {
     setState(() => _isCreating = true);
     
     try {
+      // Guest-first: Check if user is logged in
+      final currentUser = AuthRepository.instance.currentUser;
+      if (currentUser == null) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Please login to create slots'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        Navigator.pushNamed(context, '/login');
+        return;
+      }
+      
       // Create slot
       final slot = Slot(
         id: DateTime.now().millisecondsSinceEpoch.toString(),
+        profileId: currentUser.id,
         vehicleId: widget.vehicle.id,
         serviceType: _serviceType,
         slotType: _slotType,
@@ -546,6 +660,8 @@ class _CreateSlotScreenState extends State<CreateSlotScreen> {
         createdAt: DateTime.now(),
         pickupOption: PickupMode.providerPickup,
         withOperator: false, // Default to false for now
+        postMode: _postMode, // Add post mode
+        waitForFullDeadlineHours: _postMode == PostMode.waitForFull ? 2 : null, // Default 2 hours
       );
       
       // Save to Supabase

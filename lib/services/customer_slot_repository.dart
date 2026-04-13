@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/slot.dart';
 import '../models/slot_entry.dart';
+import '../models/post_mode.dart';
 import 'auth_repository.dart';
 import 'customer_vehicle_repository.dart';
 
@@ -180,11 +181,11 @@ class CustomerSlotRepository {
 
       final data = {
         'id': slot.id,
-        'user_id': currentUser.id,
-        'ref_code': refCode, // Short code shown to users
+        'profile_id': currentUser.id,
         'vehicle_id': slot.vehicleId,
         'service_type': slot.serviceType.name,
         'slot_type': slot.slotType.name,
+        'seat_layout_structure': slot.seatLayoutStructure?.toJson(),
         'from_location': slot.fromLocation,
         'to_location': slot.toLocation,
         'base_location': slot.baseLocation,
@@ -193,22 +194,20 @@ class CustomerSlotRepository {
         'end_time': slot.endTime.toIso8601String(),
         'price': slot.price,
         'capacity': slot.capacity,
-        'notes': slot.notes,
-        'images': slot.images,
-        'is_available': slot.isAvailable,
+        'terms': slot.notes, // notes maps to terms in DB
         'pickup_option': slot.pickupOption.name,
-        'requires_approval': slot.requiresApproval,
-        'max_weight': slot.maxWeight,
-        'max_length': slot.maxLength,
-        'max_width': slot.maxWidth,
-        'max_height': slot.maxHeight,
-        'lease_duration': slot.leaseDuration,
-        'security_deposit': slot.securityDeposit,
-        'mileage_limit': slot.mileageLimit,
-        'fuel_policy': slot.fuelPolicy,
-        'insurance_included': slot.insuranceIncluded,
-        'lease_terms': slot.leaseTerms,
+        // Parcel fields
+        if (slot.maxWeight != null) 'max_weight': slot.maxWeight,
+        if (slot.maxLength != null) 'max_length': slot.maxLength,
+        if (slot.maxWidth != null) 'max_width': slot.maxWidth,
+        if (slot.maxHeight != null) 'max_height': slot.maxHeight,
+        // Lease fields
+        if (slot.securityDeposit != null) 'security_deposit': slot.securityDeposit,
+        if (slot.fuelPolicy != null) 'fuel_policy': slot.fuelPolicy,
         'with_operator': slot.withOperator,
+        // Post mode
+        'postmode': slot.postMode.dbValue,
+        'is_active': slot.isAvailable,
         'updated_at': DateTime.now().toIso8601String(),
       };
 

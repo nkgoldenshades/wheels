@@ -5,6 +5,7 @@ import '../../models/service_type.dart';
 import '../../models/vehicle.dart';
 import '../../services/slot_repository.dart';
 import '../../services/vehicle_repository.dart';
+import '../../services/auth_repository.dart';
 import '../vehicle/vehicle_list_screen.dart';
 
 /// Unified My Posts page - shows all your personal vehicle-based posts
@@ -266,7 +267,13 @@ class _MyPostsUnifiedPageState extends State<MyPostsUnifiedPage>
   Widget _buildMyVehiclesTab() {
     return ValueListenableBuilder(
       valueListenable: VehicleRepository.instance.vehiclesListenable,
-      builder: (context, vehicles, _) {
+      builder: (context, allVehicles, _) {
+        // Filter to show only current user's vehicles
+        final currentUser = AuthRepository.instance.currentUser;
+        final vehicles = currentUser == null 
+            ? <Vehicle>[]
+            : allVehicles.where((v) => v.userId == currentUser.id).toList();
+        
         if (vehicles.isEmpty) {
           return Center(
             child: Padding(

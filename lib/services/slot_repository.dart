@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/slot.dart';
 import '../models/slot_entry.dart';
+import '../models/post_mode.dart';
 import 'auth_repository.dart';
 import 'vehicle_repository.dart';
 
@@ -33,6 +34,7 @@ class SlotRepository {
 
   void _buildSlotEntries() {
     final entries = <SlotEntry>[];
+    
     for (final slot in _slots.value) {
       final vehicle = VehicleRepository.instance.getById(slot.vehicleId);
       if (vehicle != null) {
@@ -40,6 +42,7 @@ class SlotRepository {
       }
     }
     _slotEntries.value = entries;
+    debugPrint('📊 Built ${entries.length} slot entries from ${_slots.value.length} slots');
   }
 
   Future<void> init() async {
@@ -56,27 +59,25 @@ class SlotRepository {
     try {
       // Load from Supabase first (source of truth)
       final supabase = Supabase.instance.client;
-      final currentUser = AuthRepository.instance.currentUser;
       
-      if (currentUser != null) {
-        final response = await supabase
-            .from('posts')
-            .select()
-            .eq('profile_id', currentUser.id)
-            .eq('is_active', true)
-            .order('created_at', ascending: false);
+      // Guest-first: Load posts for everyone (not just logged-in users)
+      // Load ALL active posts - NO JOIN needed, uses denormalized provider_name/provider_avatar
+      final response = await supabase
+          .from('posts')
+          .select('*')
+          .eq('is_active', true)
+          .order('created_at', ascending: false);
 
-        _slots.value = (response as List)
-            .map((json) => Slot.fromJson(json as Map<String, dynamic>))
-            .toList();
-        
-        _buildSlotEntries();
-        debugPrint('✅ Loaded ${_slots.value.length} slots from Supabase');
-        
-        // Save to local storage as cache
-        await _saveSlots();
-        return;
-      }
+      _slots.value = (response as List)
+          .map((json) => Slot.fromJson(json as Map<String, dynamic>))
+          .toList();
+      
+      _buildSlotEntries();
+      debugPrint('✅ Loaded ${_slots.value.length} slots from Supabase');
+      
+      // Save to local storage as cache
+      await _saveSlots();
+      return;
     } catch (e) {
       debugPrint('⚠️ Failed to load slots from Supabase, trying local: $e');
     }
@@ -149,13 +150,38 @@ class SlotRepository {
       // Generate short 6-char reference code from timestamp
       final refCode = slot.id.toString().substring(slot.id.toString().length - 6);
 
-      await supabase.from('posts').insert({
+      debugPrint('🔍 DEBUG: profile_id to insert: ${currentUser.id}');
+      
+      // Check if profile exists first
+      try {
+        final profileCheck = await supabase
+            .from('profiles')
+            .select('id')
+            .eq('id', currentUser.id)
+            .maybeSingle();
+        
+        if (profileCheck == null) {
+          debugPrint('❌ CRITICAL: Profile does not exist in Supabase!');
+          debugPrint('👉 Run syncUserToSupabase() first');
+          throw Exception('Profile not found in Supabase. Please sync user first.');
+        }
+        debugPrint('✅ Profile exists in Supabase');
+      } catch (e) {
+        debugPrint('❌ Failed to check profile: $e');
+        rethrow;
+      }
+      
+      // Check current auth state
+      final authHeaders = supabase.headers;
+      debugPrint('🔑 Auth headers: ${authHeaders['Authorization']?.substring(0, 50)}...');
+      
+      final insertData = {
         'id': slot.id,
-        'provider_id': currentUser.id,
-        'ref_code': refCode, // Short code shown to users (e.g. "791379")
+        'profile_id': currentUser.id,
         'vehicle_id': slot.vehicleId,
         'service_type': slot.serviceType.name,
         'slot_type': slot.slotType.name,
+        'seat_layout_structure': slot.seatLayoutStructure?.toJson(),
         'from_location': slot.fromLocation,
         'to_location': slot.toLocation,
         'base_location': slot.baseLocation,
@@ -164,24 +190,26 @@ class SlotRepository {
         'end_time': slot.endTime.toIso8601String(),
         'price': slot.price,
         'capacity': slot.capacity,
-        'notes': slot.notes,
-        'images': slot.images,
-        'is_available': slot.isAvailable,
+        'terms': slot.notes, // notes maps to terms in DB
         'pickup_option': slot.pickupOption.name,
-        'requires_approval': slot.requiresApproval,
-        'max_weight': slot.maxWeight,
-        'max_length': slot.maxLength,
-        'max_width': slot.maxWidth,
-        'max_height': slot.maxHeight,
-        'lease_duration': slot.leaseDuration,
-        'security_deposit': slot.securityDeposit,
-        'mileage_limit': slot.mileageLimit,
-        'fuel_policy': slot.fuelPolicy,
-        'insurance_included': slot.insuranceIncluded,
-        'lease_terms': slot.leaseTerms,
+        // Parcel fields
+        if (slot.maxWeight != null) 'max_weight': slot.maxWeight,
+        if (slot.maxLength != null) 'max_length': slot.maxLength,
+        if (slot.maxWidth != null) 'max_width': slot.maxWidth,
+        if (slot.maxHeight != null) 'max_height': slot.maxHeight,
+        // Lease fields
+        if (slot.securityDeposit != null) 'security_deposit': slot.securityDeposit,
+        if (slot.fuelPolicy != null) 'fuel_policy': slot.fuelPolicy,
         'with_operator': slot.withOperator,
+        // Post mode
+        'postmode': slot.postMode.dbValue,
+        'is_active': slot.isAvailable,
         'created_at': DateTime.now().toIso8601String(),
-      });
+      };
+      
+      debugPrint('📤 Inserting data: ${insertData.toString().substring(0, 200)}...');
+      
+      await supabase.from('posts').insert(insertData);
 
       debugPrint('✅ Slot synced to Supabase: ${slot.id} (ref: $refCode)');
     } catch (e) {
@@ -267,6 +295,7 @@ class SlotRepository {
         'vehicle_id': slot.vehicleId,
         'service_type': slot.serviceType.name,
         'slot_type': slot.slotType.name,
+        'seat_layout_structure': slot.seatLayoutStructure?.toJson(),
         'from_location': slot.fromLocation,
         'to_location': slot.toLocation,
         'base_location': slot.baseLocation,
@@ -275,22 +304,20 @@ class SlotRepository {
         'end_time': slot.endTime.toIso8601String(),
         'price': slot.price,
         'capacity': slot.capacity,
-        'notes': slot.notes,
-        'images': slot.images,
-        'is_available': slot.isAvailable,
+        'terms': slot.notes, // notes maps to terms in DB
         'pickup_option': slot.pickupOption.name,
-        'requires_approval': slot.requiresApproval,
-        'max_weight': slot.maxWeight,
-        'max_length': slot.maxLength,
-        'max_width': slot.maxWidth,
-        'max_height': slot.maxHeight,
-        'lease_duration': slot.leaseDuration,
-        'security_deposit': slot.securityDeposit,
-        'mileage_limit': slot.mileageLimit,
-        'fuel_policy': slot.fuelPolicy,
-        'insurance_included': slot.insuranceIncluded,
-        'lease_terms': slot.leaseTerms,
+        // Parcel fields
+        if (slot.maxWeight != null) 'max_weight': slot.maxWeight,
+        if (slot.maxLength != null) 'max_length': slot.maxLength,
+        if (slot.maxWidth != null) 'max_width': slot.maxWidth,
+        if (slot.maxHeight != null) 'max_height': slot.maxHeight,
+        // Lease fields
+        if (slot.securityDeposit != null) 'security_deposit': slot.securityDeposit,
+        if (slot.fuelPolicy != null) 'fuel_policy': slot.fuelPolicy,
         'with_operator': slot.withOperator,
+        // Post mode
+        'postmode': slot.postMode.dbValue,
+        'is_active': slot.isAvailable,
         'updated_at': DateTime.now().toIso8601String(),
       }).eq('id', slot.id);
 

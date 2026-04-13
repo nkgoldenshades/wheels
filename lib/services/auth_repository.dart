@@ -134,6 +134,18 @@ class AuthRepository {
 
       _currentUser.value = user;
       
+      // CRITICAL: Set Firebase JWT in Supabase client for RLS
+      try {
+        final firebaseToken = await credential.user!.getIdToken(true);
+        if (firebaseToken != null) {
+          // Store token for use in requests
+          Supabase.instance.client.headers['Authorization'] = 'Bearer $firebaseToken';
+          debugPrint('✅ Firebase JWT set in Supabase client headers');
+        }
+      } catch (e) {
+        debugPrint('⚠️ Failed to set Firebase JWT: $e');
+      }
+      
       // Sync user to Supabase with timeout
       try {
         await syncUserToSupabase().timeout(
@@ -224,6 +236,18 @@ class AuthRepository {
       );
 
       _currentUser.value = user;
+      
+      // CRITICAL: Set Firebase JWT in Supabase client for RLS
+      try {
+        final firebaseToken = await credential.user!.getIdToken(true);
+        if (firebaseToken != null) {
+          // Store token for use in requests
+          Supabase.instance.client.headers['Authorization'] = 'Bearer $firebaseToken';
+          debugPrint('✅ Firebase JWT set in Supabase client headers');
+        }
+      } catch (e) {
+        debugPrint('⚠️ Failed to set Firebase JWT: $e');
+      }
       
       // Sync user to Supabase with timeout
       try {

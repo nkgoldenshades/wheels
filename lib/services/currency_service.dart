@@ -74,6 +74,10 @@ class CurrencyService {
 
   /// Get currency code based on device locale
   String getDeviceCurrency() {
+    // Force USD for all users (international app)
+    return 'USD';
+    
+    /* Original multi-currency code (disabled):
     try {
       // Get device locale
       final locale = Platform.localeName; // e.g., "en_US", "hi_IN"
@@ -85,15 +89,21 @@ class CurrencyService {
       debugPrint('Error detecting device currency: $e');
       return 'USD'; // Fallback to USD
     }
+    */
   }
 
   /// Get currency code from Flutter locale (alternative method)
   String getCurrencyFromLocale(Locale locale) {
+    // Force USD for all users (international app)
+    return 'USD';
+    
+    /* Original multi-currency code (disabled):
     final countryCode = locale.countryCode?.toUpperCase();
     if (countryCode != null) {
       return _countryCurrencyMap[countryCode] ?? 'USD';
     }
     return 'USD';
+    */
   }
 
   /// Get currency symbol for display

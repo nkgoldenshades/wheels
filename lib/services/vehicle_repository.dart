@@ -45,10 +45,10 @@ class VehicleRepository {
   Future<void> _loadVehicles() async {
     try {
       // Load provider vehicles from Supabase (vehicles users are offering)
+      // Note: Using is_online instead of is_active (column doesn't exist in DB)
       final response = await _supabase
           .from('vehicles')
           .select()
-          .eq('is_active', true)
           .order('created_at', ascending: false);
 
       _vehicles.value = (response as List)
@@ -57,7 +57,7 @@ class VehicleRepository {
 
       debugPrint('✅ Loaded ${_vehicles.value.length} vehicles from Supabase');
     } catch (e) {
-      debugPrint('⚠️  Failed to load from Supabase, trying local: $e');
+      debugPrint('❌ Failed to load from Supabase: $e');
       // Fallback to local storage
       await _loadVehiclesLocal();
     }
@@ -144,7 +144,7 @@ class VehicleRepository {
         'video_url': vehicle.videoUrl,
         'created_at': vehicle.createdAt.toIso8601String(),
         'updated_at': DateTime.now().toIso8601String(),
-        'is_active': true,
+        'is_online': true, // Vehicle is online by default when created
         
         // Legal documents
         'rc_front_url': vehicle.rcFrontUrl,

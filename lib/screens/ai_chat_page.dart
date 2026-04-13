@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_vertexai/firebase_vertexai.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../services/auth_repository.dart';
+import '../services/profile_repository.dart';
 // import 'package:image_picker/image_picker.dart'; // Commented out for Windows compatibility
 // import 'package:speech_to_text/speech_to_text.dart'; // Commented out for Windows compatibility
 // import 'package:permission_handler/permission_handler.dart'; // Not needed
@@ -25,6 +27,11 @@ class _AIChatPageState extends State<AIChatPage> {
   String? _initError;
   int? _currentConversationId; // Track current conversation
   
+  // Guest user conversation limit
+  static const int _guestConversationLimit = 10;
+  int _guestConversationCount = 0;
+  bool _isGuest = false;
+  
   // Image and voice functionality (disabled for Windows compatibility)
   // final ImagePicker _imagePicker = ImagePicker();
   // final SpeechToText _speechToText = SpeechToText();
@@ -33,8 +40,21 @@ class _AIChatPageState extends State<AIChatPage> {
   @override
   void initState() {
     super.initState();
+    _checkGuestStatus();
     _loadOrCreateConversation(); // Load or create conversation
     _initializeFirebaseAI();
+  }
+  
+  Future<void> _checkGuestStatus() async {
+    final currentUser = AuthRepository.instance.currentUser;
+    _isGuest = currentUser == null;
+    
+    if (_isGuest) {
+      // Load guest conversation count from SharedPreferences
+      final prefs = await SharedPreferences.getInstance();
+      _guestConversationCount = prefs.getInt('guest_conversation_count') ?? 0;
+      debugPrint('👤 Guest user - conversation count: $_guestConversationCount/$_guestConversationLimit');
+    }
   }
 
   Future<void> _initializeFirebaseAI() async {
@@ -78,11 +98,15 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
       final testText = testResponse.text ?? '';
       debugPrint('✅ Firebase Gemini API test response: $testText');
 
+      if (!mounted) return;
       setState(() {
         _aiInitialized = true;
+        final welcomeMessage = _isGuest
+            ? "Hi there! Welcome to QuickOHunt. I'm your AI assistant here to help you with rides, vehicle rentals, bookings, and any questions about the app.\n\n⚠️ Guest Mode: You have $_guestConversationLimit free conversations. Login for unlimited access!\n\nWhat can I help you with today?"
+            : "Hi there! Welcome to QuickOHunt. I'm your AI assistant here to help you with rides, vehicle rentals, bookings, and any questions about the app. What can I help you with today?";
+        
         _messages.add(ChatMessage(
-          text:
-              "Hi there! Welcome to QuickOHunt. I'm your AI assistant here to help you with rides, vehicle rentals, bookings, and any questions about the app. What can I help you with today?",
+          text: welcomeMessage,
           isUser: false,
           timestamp: DateTime.now(),
         ));
@@ -90,6 +114,7 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
     } catch (e, stack) {
       debugPrint('❌ Firebase Gemini API initialization failed: $e');
       debugPrint('Stack: $stack');
+      if (!mounted) return;
       setState(() {
         _aiInitialized = false;
         _initError = e.toString();
@@ -131,18 +156,37 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
   }
 
   Future<void> _startListening() async {
+    if (!mounted) return;
+    setState(() {
+      _isListening = true;
+    });
+    
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Voice input not available on this platform. Use web version for full functionality.'),
-        backgroundColor: Colors.orange,
+      SnackBar(
+        content: Text(_isListening 
+          ? 'Voice input active - speak continuously until you tap mic again' 
+          : 'Voice input not available on this platform'),
+        backgroundColor: _isListening ? Colors.green : Colors.orange,
+        duration: const Duration(seconds: 3),
       ),
     );
   }
 
   void _stopListening() {
+    if (!mounted) return;
     setState(() {
       _isListening = false;
     });
+    
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Voice input stopped'),
+        backgroundColor: Colors.grey,
+        duration: Duration(seconds: 2),
+      ),
+    );
   }
 
   // AI Settings functionality
@@ -160,6 +204,7 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
   }
 
   void _clearChat() {
+    if (!mounted) return;
     setState(() {
       _messages.clear();
       _messages.add(ChatMessage(
@@ -185,6 +230,7 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
   }
 
   void _reconnectAI() {
+    if (!mounted) return;
     setState(() {
       _aiInitialized = false;
       _initError = null;
@@ -197,6 +243,22 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
     final text = _messageController.text.trim();
     if (text.isEmpty || _isLoading) return;
 
+    // Check guest conversation limit
+    if (_isGuest && _guestConversationCount >= _guestConversationLimit) {
+      _showLoginPrompt();
+      return;
+    }
+    
+    // Check AI credits for logged-in users
+    if (!_isGuest) {
+      final profile = ProfileRepository.instance.profile.value;
+      if (profile.aiCredits < 1) {
+        _showBuyCreditsDialog(context);
+        return;
+      }
+    }
+
+    if (!mounted) return;
     setState(() {
       _messages.add(ChatMessage(
         text: text,
@@ -209,7 +271,214 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
     _messageController.clear();
     _scrollToBottom();
 
+    // Increment guest conversation count
+    if (_isGuest) {
+      _guestConversationCount++;
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt('guest_conversation_count', _guestConversationCount);
+      debugPrint('👤 Guest conversation count: $_guestConversationCount/$_guestConversationLimit');
+    } else {
+      // Deduct 1 credit for logged-in users
+      final success = await ProfileRepository.instance.deductAICredits(1);
+      if (!success) {
+        // This shouldn't happen as we checked above, but handle it anyway
+        if (mounted) {
+          setState(() {
+            _messages.removeLast(); // Remove the user message
+            _isLoading = false;
+          });
+          _showBuyCreditsDialog(context);
+        }
+        return;
+      }
+    }
+
     await _sendToFirebaseAI(text);
+  }
+  
+  void _showLoginPrompt() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.lock, color: Colors.orange),
+            SizedBox(width: 8),
+            Text('Conversation Limit Reached'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'You\'ve reached the limit of $_guestConversationLimit conversations as a guest.',
+              style: const TextStyle(fontSize: 16),
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'Login to get unlimited AI conversations and access to:',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            const Text('• Unlimited AI chat'),
+            const Text('• Save conversation history'),
+            const Text('• Book rides and services'),
+            const Text('• Create posts'),
+            const Text('• And much more!'),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Maybe Later'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context); // Close dialog
+              Navigator.pushNamed(context, '/login'); // Go to login
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.blue,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Login Now'),
+          ),
+        ],
+      ),
+    );
+  }
+  
+  void _showBuyCreditsDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.shopping_cart, color: Colors.blue),
+            SizedBox(width: 8),
+            Text('Buy AI Credits'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Choose a credit package:',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+            ),
+            const SizedBox(height: 16),
+            _buildCreditPackage(context, 100, 1),
+            const SizedBox(height: 8),
+            _buildCreditPackage(context, 500, 4, popular: true),
+            const SizedBox(height: 8),
+            _buildCreditPackage(context, 1000, 7),
+            const SizedBox(height: 16),
+            const Text(
+              '💡 1 credit = 1 AI message',
+              style: TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+        ],
+      ),
+    );
+  }
+  
+  Widget _buildCreditPackage(BuildContext context, int credits, int price, {bool popular = false}) {
+    return InkWell(
+      onTap: () async {
+        Navigator.pop(context); // Close dialog
+        // TODO: Integrate with payment gateway (Razorpay/Stripe)
+        // For now, just add credits directly (demo)
+        await ProfileRepository.instance.addAICredits(credits);
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('✅ Added $credits credits! (Demo mode - no payment required)'),
+              backgroundColor: Colors.green,
+              duration: const Duration(seconds: 3),
+            ),
+          );
+        }
+      },
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: popular ? Colors.blue.shade50 : Colors.grey.shade100,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: popular ? Colors.blue : Colors.grey.shade300,
+            width: popular ? 2 : 1,
+          ),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              Icons.stars,
+              color: popular ? Colors.blue : Colors.grey.shade600,
+              size: 24,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Text(
+                        '$credits Credits',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: popular ? Colors.blue.shade900 : Colors.black87,
+                        ),
+                      ),
+                      if (popular) ...[
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: Colors.orange,
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: const Text(
+                            'POPULAR',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                  Text(
+                    '\$$price',
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: Colors.grey.shade700,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Icon(
+              Icons.arrow_forward_ios,
+              size: 16,
+              color: Colors.grey.shade600,
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _sendToFirebaseAI(String userText) async {
@@ -398,6 +667,106 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
         ),
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
         actions: [
+          // Credits widget for logged-in users (compact)
+          if (!_isGuest)
+            ValueListenableBuilder<ProfileInfo>(
+              valueListenable: ProfileRepository.instance.profile,
+              builder: (context, profile, _) {
+                return Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: Center(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: Colors.blue.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.blue, width: 1),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.stars, size: 16, color: Colors.blue.shade700),
+                          const SizedBox(width: 4),
+                          Text(
+                            '${profile.aiCredits}',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.blue.shade700,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          // Buy credits button for logged-in users
+          if (!_isGuest)
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: Center(
+                child: TextButton.icon(
+                  onPressed: () => _showBuyCreditsDialog(context),
+                  icon: const Icon(Icons.shopping_cart, size: 16),
+                  label: const Text('Buy', style: TextStyle(fontSize: 12)),
+                  style: TextButton.styleFrom(
+                    foregroundColor: Colors.blue.shade700,
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                ),
+              ),
+            ),
+          // Guest conversation counter
+          if (_isGuest)
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: Center(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: _guestConversationCount >= _guestConversationLimit
+                        ? Colors.red.withOpacity(0.2)
+                        : Colors.orange.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: _guestConversationCount >= _guestConversationLimit
+                          ? Colors.red
+                          : Colors.orange,
+                      width: 1,
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        _guestConversationCount >= _guestConversationLimit
+                            ? Icons.lock
+                            : Icons.chat_bubble_outline,
+                        size: 14,
+                        color: _guestConversationCount >= _guestConversationLimit
+                            ? Colors.red
+                            : Colors.orange,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        '${_guestConversationLimit - _guestConversationCount} left',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          color: _guestConversationCount >= _guestConversationLimit
+                              ? Colors.red
+                              : Colors.orange,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
           // AI Settings button
           IconButton(
             onPressed: _showAISettings,
@@ -463,14 +832,31 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
                   icon: const Icon(Icons.image, color: Colors.grey),
                   tooltip: 'Add Image',
                 ),
-                // Mic button
-                IconButton(
-                  onPressed: _toggleVoiceInput,
-                  icon: Icon(
-                    _isListening ? Icons.mic : Icons.mic_none,
-                    color: _isListening ? Colors.red : Colors.grey,
-                  ),
-                  tooltip: 'Voice Input',
+                // Mic button with continuous mode indicator
+                Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    // Pulsing animation when listening
+                    if (_isListening)
+                      Container(
+                        width: 48,
+                        height: 48,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: Colors.red.withOpacity(0.2),
+                        ),
+                      ),
+                    IconButton(
+                      onPressed: _toggleVoiceInput,
+                      icon: Icon(
+                        _isListening ? Icons.mic : Icons.mic_none,
+                        color: _isListening ? Colors.red : Colors.grey,
+                      ),
+                      tooltip: _isListening 
+                        ? 'Stop Voice Input (Continuous Mode Active)' 
+                        : 'Start Voice Input (Continuous Mode)',
+                    ),
+                  ],
                 ),
                 // Text input field
                 Expanded(

@@ -42,7 +42,7 @@ class Booking {
 
   // Booking mode fields
   final BookingMode bookingMode;
-  final int? totalCapacityBooked; // For full vehicle bookings
+  final int? totalCapacityBooked; // For full post bookings
   final bool isFullVehicleLocked;
 
   Booking({
@@ -161,6 +161,46 @@ class Booking {
       'bookingMode': bookingMode.name,
       'totalCapacityBooked': totalCapacityBooked,
       'isFullVehicleLocked': isFullVehicleLocked,
+    };
+  }
+
+  /// Convert to Supabase format with snake_case and JSONB fields
+  Map<String, dynamic> toSupabaseJson() {
+    return {
+      'id': id,
+      'post_id': slotId,
+      'profile_customer_id': userId,
+      'profile_provider_id': providerId,
+      'price_snapshot': price,
+      'deposit_snapshot': securityDeposit,
+      'seat_keys': seatKey != null ? [seatKey] : [],
+      'passenger_details': [
+        {
+          'name': userName,
+          'age': userAge,
+          'phone': userPhone,
+          'email': userEmail,
+          'gender': userGender?.name,
+        }
+      ],
+      'metadata': {
+        'provider_name': providerName,
+        'provider_phone': providerPhone,
+        'provider_email': providerEmail,
+        'provider_avatar': providerAvatar,
+        'stripe_client_secret': stripeClientSecret,
+        'countdown_end_time': countdownEndTime?.toIso8601String(),
+        'payment_held_in_escrow': paymentHeldInEscrow,
+        'terms_snapshot': termsSnapshot,
+        'total_capacity_booked': totalCapacityBooked,
+        'is_full_vehicle_locked': isFullVehicleLocked,
+      },
+      'booking_strategy_snapshot': bookingMode == BookingMode.full ? 'full_vehicle' : 'instant',
+      'status': status.name,
+      'otp_code': otp,
+      'otp_verified': otpVerified,
+      'payment_gateway_id': stripePaymentIntentId,
+      'created_at': createdAt.toIso8601String(),
     };
   }
 

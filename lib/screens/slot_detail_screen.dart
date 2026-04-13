@@ -5,6 +5,7 @@ import '../models/seat_layout.dart';
 import '../models/booking.dart';
 import '../models/slot.dart';
 import '../models/slot_type.dart';
+import '../models/post_mode.dart';
 import '../models/vehicle.dart';
 import '../models/service_type.dart';
 import '../services/auth_repository.dart';
@@ -22,6 +23,7 @@ import '../widgets/booking_confirm_sheet.dart';
 import '../widgets/location_autocomplete_field.dart';
 import '../services/location_autocomplete_service.dart';
 import 'booking_map_screen.dart';
+import 'location_map_screen.dart';
 
 class SlotDetailScreen extends StatelessWidget {
   final Slot slot;
@@ -81,7 +83,7 @@ class SlotDetailScreen extends StatelessWidget {
         );
 
         final currentUser = AuthRepository.instance.currentUser;
-        final isOwner = currentUser != null && currentUser.id == resolvedVehicle.userId;
+        final isOwner = currentUser != null && currentUser.id == resolvedSlot.profileId; // Use post owner
 
         return Scaffold(
           appBar: AppBar(
@@ -154,11 +156,23 @@ class SlotDetailScreen extends StatelessWidget {
                         ),
                         const SizedBox(height: 12),
                         _InfoRow(
+                          icon: Icons.timelapse,
+                          title: 'Duration',
+                          value: _formatDuration(resolvedSlot.startTime, resolvedSlot.endTime),
+                        ),
+                        const SizedBox(height: 12),
+                        _InfoRow(
                           icon: Icons.payments,
                           title: 'Price',
                           value: AppPreferences.instance.formatMoney(
                             resolvedSlot.price.toInt(),
                           ),
+                        ),
+                        const SizedBox(height: 12),
+                        _InfoRow(
+                          icon: Icons.mode,
+                          title: 'Booking Mode',
+                          value: resolvedSlot.postMode.displayName,
                         ),
                         const SizedBox(height: 12),
                         ValueListenableBuilder<Map<String, int>>(
@@ -282,7 +296,7 @@ class SlotDetailScreen extends StatelessWidget {
                     _handleBookingAction(
                       context,
                       slot: resolvedSlot,
-                      providerId: resolvedVehicle.userId,
+                      providerId: resolvedSlot.profileId, // Use post owner
                       providerName: providerName,
                       providerAvatar: providerAvatar,
                       userId:
@@ -623,7 +637,36 @@ class SlotDetailScreen extends StatelessWidget {
   }
 
   static String _formatTime(DateTime time) {
-    return '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
+    // Format: Jan 26, 2025 10:00
+    final months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    final month = months[time.month - 1];
+    final day = time.day;
+    final year = time.year;
+    final hour = time.hour.toString().padLeft(2, '0');
+    final minute = time.minute.toString().padLeft(2, '0');
+    return '$month $day, $year $hour:$minute';
+  }
+
+  static String _formatDuration(DateTime start, DateTime end) {
+    final duration = end.difference(start);
+    
+    final days = duration.inDays;
+    final hours = duration.inHours % 24;
+    final minutes = duration.inMinutes % 60;
+    
+    final parts = <String>[];
+    
+    if (days > 0) {
+      parts.add('$days ${days == 1 ? 'day' : 'days'}');
+    }
+    if (hours > 0) {
+      parts.add('$hours ${hours == 1 ? 'hour' : 'hours'}');
+    }
+    if (minutes > 0 || parts.isEmpty) {
+      parts.add('$minutes ${minutes == 1 ? 'minute' : 'minutes'}');
+    }
+    
+    return parts.join(', ');
   }
 
   static IconData _serviceTypeIcon(Slot slot) {
@@ -1132,7 +1175,36 @@ class _LocationBlock extends StatelessWidget {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(Icons.route, color: Colors.blue[700]),
+            // Make route icon clickable to open map with both locations
+            InkWell(
+              onTap: (fromCoords != null || toCoords != null)
+                  ? () {
+                      // Use the first available coordinate, or from if both exist
+                      final coords = fromCoords ?? toCoords!;
+                      final name = fromCoords != null ? from : to;
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => LocationMapScreen(
+                            latitude: coords.$1,
+                            longitude: coords.$2,
+                            locationName: name,
+                          ),
+                        ),
+                      );
+                    }
+                  : null,
+              borderRadius: BorderRadius.circular(20),
+              child: Padding(
+                padding: const EdgeInsets.all(4),
+                child: Icon(
+                  Icons.route,
+                  color: (fromCoords != null || toCoords != null)
+                      ? Colors.blue[700]
+                      : Colors.grey,
+                ),
+              ),
+            ),
             const SizedBox(width: 10),
             Expanded(
               child: Column(
@@ -1167,7 +1239,31 @@ class _LocationBlock extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(Icons.location_on, color: Colors.blue[700]),
+          // Make location icon clickable to open map
+          InkWell(
+            onTap: baseCoords != null
+                ? () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => LocationMapScreen(
+                          latitude: baseCoords.$1,
+                          longitude: baseCoords.$2,
+                          locationName: base,
+                        ),
+                      ),
+                    );
+                  }
+                : null,
+            borderRadius: BorderRadius.circular(20),
+            child: Padding(
+              padding: const EdgeInsets.all(4),
+              child: Icon(
+                Icons.location_on,
+                color: baseCoords != null ? Colors.blue[700] : Colors.grey,
+              ),
+            ),
+          ),
           const SizedBox(width: 10),
           Expanded(
             child: Column(

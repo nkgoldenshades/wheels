@@ -47,11 +47,9 @@ class _SplashscreenState extends State<Splashscreen> {
     // Remove listener to prevent multiple calls
     AuthRepository.instance.currentUserListenable.removeListener(_onAuthStateChanged);
     
-    final isAuthenticated = AuthRepository.instance.isAuthenticated;
-    final nextRoute = isAuthenticated ? '/main' : '/login';
-    
+    // Guest-first: Always go to main screen (no forced login)
     if (mounted) {
-      Navigator.pushReplacementNamed(context, nextRoute);
+      Navigator.pushReplacementNamed(context, '/main');
     }
   }
 

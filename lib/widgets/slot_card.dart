@@ -8,6 +8,7 @@ import '../models/vehicle.dart';
 import '../models/service_type.dart';
 import '../models/slot_type.dart';
 import '../models/pickup_mode.dart';
+import '../models/post_mode.dart';
 import '../services/booking_repository.dart';
 import '../services/app_preferences.dart';
 import '../services/review_repository.dart';
@@ -353,32 +354,68 @@ class SlotCard extends StatelessWidget {
           ),
         ),
         
-        // Service type badge
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-          decoration: BoxDecoration(
-            color: _getServiceTypeColor().withValues(alpha: 0.1),
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                _getServiceTypeIcon(),
-                size: 16,
-                color: _getServiceTypeColor(),
+        const SizedBox(width: 8),
+        
+        // Post mode badges (stacked vertically)
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            // Service type badge
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: _getServiceTypeColor().withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(12),
               ),
-              const SizedBox(width: 4),
-              Text(
-                slot.serviceType.displayName,
-                style: TextStyle(
-                  fontSize: 12,
-                  color: _getServiceTypeColor(),
-                  fontWeight: FontWeight.w600,
-                ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    _getServiceTypeIcon(),
+                    size: 16,
+                    color: _getServiceTypeColor(),
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    slot.serviceType.displayName,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: _getServiceTypeColor(),
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
               ),
-            ],
-          ),
+            ),
+            const SizedBox(height: 4),
+            // Post mode badge
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: _getPostModeColor().withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    _getPostModeIcon(),
+                    size: 14,
+                    color: _getPostModeColor(),
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    _getPostModeText(),
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: _getPostModeColor(),
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
       ],
     );
@@ -648,14 +685,24 @@ class SlotCard extends StatelessWidget {
     );
   }
 
-  Widget _buildTimeRow() {    final duration = slot.endTime.difference(slot.startTime);
-    final hours = duration.inHours;
+  Widget _buildTimeRow() {
+    final duration = slot.endTime.difference(slot.startTime);
+    final days = duration.inDays;
+    final hours = duration.inHours % 24;
     final minutes = duration.inMinutes % 60;
-    final durationText = hours > 0 && minutes > 0
-        ? '${hours}h ${minutes}m'
-        : hours > 0
-            ? '${hours}h'
-            : '${minutes}m';
+    
+    // Compact duration format: "8h", "2d", "2d 5h"
+    String durationText;
+    if (days > 0 && hours > 0) {
+      durationText = '${days}d ${hours}h';
+    } else if (days > 0) {
+      durationText = '${days}d';
+    } else if (hours > 0) {
+      durationText = '${hours}h';
+    } else {
+      durationText = '${minutes}m';
+    }
+    
     final isValid = slot.endTime.isAfter(slot.startTime);
 
     return Row(
@@ -808,6 +855,39 @@ class SlotCard extends StatelessWidget {
     }
   }
 
+  Color _getPostModeColor() {
+    switch (slot.postMode) {
+      case PostMode.instant:
+        return Colors.blue;
+      case PostMode.waitForFull:
+        return Colors.orange;
+      case PostMode.fullPost:
+        return Colors.green;
+    }
+  }
+
+  IconData _getPostModeIcon() {
+    switch (slot.postMode) {
+      case PostMode.instant:
+        return Icons.flash_on;
+      case PostMode.waitForFull:
+        return Icons.groups;
+      case PostMode.fullPost:
+        return Icons.directions_car;
+    }
+  }
+
+  String _getPostModeText() {
+    switch (slot.postMode) {
+      case PostMode.instant:
+        return 'Instant';
+      case PostMode.waitForFull:
+        return 'Wait Full';
+      case PostMode.fullPost:
+        return 'Full Post';
+    }
+  }
+
   IconData _getCapacityIcon() {
     switch (slot.serviceType) {
       case ServiceType.passenger:
@@ -835,6 +915,13 @@ class SlotCard extends StatelessWidget {
   }
 
   String _formatTime(DateTime time) {
-    return '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
+    // Format: Jan 26, 2025 10:00
+    final months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    final month = months[time.month - 1];
+    final day = time.day;
+    final year = time.year;
+    final hour = time.hour.toString().padLeft(2, '0');
+    final minute = time.minute.toString().padLeft(2, '0');
+    return '$month $day, $year $hour:$minute';
   }
 }

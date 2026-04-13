@@ -54,24 +54,26 @@ User → Firebase Auth → JWT Token → Supabase RLS → Database Access
 
 ---
 
-### 3. **slots**
+### 3. **posts** (formerly slots)
 **Purpose:** Provider-created service offerings
 
 **Key Fields:**
-- `id` (TEXT) - UUID
-- `provider_id` (TEXT) - References profiles(id)
+- `id` (BIGINT) - Auto-generated ID (Primary Key)
+- `profile_id` (TEXT) - References profiles(id)
 - `vehicle_id` (TEXT) - References vehicles(id)
-- `service_type` (ride, delivery, rental)
-- `slot_type` (from_to, from_range)
+- `service_type` (passenger, parcel, working, lease)
+- `slot_type` (seat, berth, full_vehicle, parcel_space)
 - Location: `from_location`, `to_location`, `base_location`, `radius`
 - Timing: `start_time`, `end_time`
-- Capacity: `available_seats`, `total_seats`
-- `price_per_person` (numeric)
-- Requirements: `requires_verified_vehicle`, `requires_expert_vehicle`
+- Capacity: `capacity` (integer)
+- `price` (numeric)
+- `postmode` (instant, wait_for_full, full_vehicle) - Booking strategy
+- `wait_for_full_deadline_hours` (integer) - Hours before start time to confirm (only for wait_for_full mode)
+- Requirements: `requires_approval` (boolean)
 
 **RLS Policies:**
-- ✅ All users can view active slots
-- ✅ Providers can create/update own slots
+- ✅ All users can view active posts
+- ✅ Providers can create/update own posts
 
 ---
 
@@ -422,3 +424,59 @@ await Supabase.initialize(
 - [ ] Check provider profile → verify reviews show correct ratings
 - [ ] Test offline mode → verify local storage fallback works
 - [ ] Go online → verify data syncs to Supabase
+
+
+---
+
+## 🔧 Database Migrations
+
+### Add wait_for_full_deadline_hours column (if not exists)
+```sql
+-- Add column for Wait for Full mode deadline
+ALTER TABLE posts 
+ADD COLUMN IF NOT EXISTS wait_for_full_deadline_hours integer;
+
+-- Add comment
+COMMENT ON COLUMN posts.wait_for_full_deadline_hours IS 'Hours before start_time to confirm booking (only used when postmode = wait_for_full)';
+```
+
+### Verify column exists
+```sql
+SELECT column_name, data_type, is_nullable 
+FROM information_schema.columns 
+WHERE table_name = 'posts' 
+AND column_name = 'wait_for_full_deadline_hours';
+```
+
+---
+
+## 📝 Post Mode (Booking Strategy) Explained
+
+### Three Booking Modes:
+
+1. **Instant Booking** (`postmode = 'instant'`)
+   - Customers can book individual seats immediately
+   - Booking is confirmed instantly
+   - Default mode for most posts
+
+2. **Wait for Full** (`postmode = 'wait_for_full'`)
+   - Provider waits until all seats are filled before confirming
+   - Requires `wait_for_full_deadline_hours` to be set
+   - If not full by deadline, booking may be cancelled
+   - Example: "Wait until 2 hours before departure"
+
+3. **Full Vehicle Only** (`postmode = 'full_vehicle'`)
+   - Only allow full vehicle charter bookings
+   - No individual seat bookings allowed
+   - Customer must book entire capacity
+
+### Database Values:
+- Flutter enum: `PostMode.instant` → DB: `'instant'`
+- Flutter enum: `PostMode.waitForFull` → DB: `'wait_for_full'`
+- Flutter enum: `PostMode.fullVehicle` → DB: `'full_vehicle'`
+
+### UI Display:
+- Instant: Blue badge with ⚡ icon
+- Wait Full: Orange badge with 👥 icon
+- Full Vehicle: Green badge with 🚗 icon
+

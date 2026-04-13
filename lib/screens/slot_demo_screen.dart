@@ -13,8 +13,11 @@ class SlotDemoScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     // Sample data for demonstration
+    final currentUserId = AuthRepository.instance.currentUser?.id ?? 'demo-user';
+    
     final sampleSlot = Slot(
       id: '1',
+      profileId: currentUserId,
       vehicleId: 'v1',
       serviceType: ServiceType.passenger,
       slotType: SlotType.fromTo,
@@ -49,6 +52,7 @@ class SlotDemoScreen extends StatelessWidget {
 
     final sampleSlot2 = Slot(
       id: '2',
+      profileId: currentUserId,
       vehicleId: 'v2',
       serviceType: ServiceType.parcel,
       slotType: SlotType.fromRange,

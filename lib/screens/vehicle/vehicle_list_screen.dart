@@ -94,8 +94,8 @@ class VehicleListScreen extends StatelessWidget {
         ]),
         builder: (context, _) {
           final vehicles = isUserMode 
-              ? CustomerVehicleRepository.instance.allVehicles
-              : _vehicleRepo.allVehicles;
+              ? CustomerVehicleRepository.instance.allVehicles  // User mode shows all (for browsing)
+              : _vehicleRepo.userVehicles;  // Provider mode shows only MY vehicles
           if (vehicles.isEmpty) {
             return const Center(
               child: Padding(

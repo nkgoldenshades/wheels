@@ -315,7 +315,7 @@ class Vehicle {
       'video_url': videoUrl,
       'created_at': createdAt.toIso8601String(),
       'updated_at': DateTime.now().toIso8601String(),
-      'is_active': true,
+      'is_online': true, // Default to online when serializing
       
       // RC Documents
       'rc_front_url': rcFrontUrl,

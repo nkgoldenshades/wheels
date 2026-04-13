@@ -10,7 +10,7 @@ import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:supabase_flutter/supabase_flutter.dart' hide AuthUser;
 import 'package:url_launcher/url_launcher.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -22,6 +22,7 @@ import 'models/slot_entry.dart';
 import 'models/slot_type.dart';
 import 'models/vehicle.dart';
 import 'models/pickup_mode.dart';
+import 'models/post_mode.dart';
 import 'models/booking.dart';
 import 'models/review.dart';
 import 'config/supabase_config.dart';
@@ -190,9 +191,9 @@ void _initializeServicesInBackground() async {
           }
         },
       ).timeout(
-        const Duration(seconds: 30),
+        const Duration(seconds: 10), // Reduced from 30 to 10 seconds
         onTimeout: () {
-          throw TimeoutException('Supabase initialization timed out', const Duration(seconds: 30));
+          throw TimeoutException('Supabase initialization timed out', const Duration(seconds: 10));
         },
       );
       if (kDebugMode) print('✅ Supabase initialized');
@@ -208,11 +209,11 @@ void _initializeServicesInBackground() async {
     if (kDebugMode) print('⏳ Starting ProfileRepository...');
     try {
       await ProfileRepository.instance.init().timeout(
-        const Duration(seconds: 30),
+        const Duration(seconds: 10), // Reduced from 30 to 10 seconds
         onTimeout: () {
           if (kDebugMode) print('⏰ ProfileRepository init timed out');
-          throw TimeoutException('ProfileRepository initialization timed out', const Duration(seconds: 30));
-        },
+          throw TimeoutException('ProfileRepository initialization timed out', const Duration(seconds: 10));
+        },  
       );
       if (kDebugMode) print('✅ ProfileRepository initialized');
     } catch (e) {
@@ -2899,6 +2900,50 @@ class _MainScreenState extends State<MainScreen> {
         appBar: AppBar(
           title: const Text('VaultWheels'),
           backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+          actions: [
+            // Guest-first: Show Login/SignUp button if not logged in
+            ValueListenableBuilder(
+              valueListenable: AuthRepository.instance.currentUserListenable,
+              builder: (context, user, _) {
+                if (user == null) {
+                  // Not logged in - show Login button
+                  return TextButton(
+                    onPressed: () {
+                      Navigator.pushNamed(context, '/login');
+                    },
+                    child: const Text(
+                      'Login',
+                      style: TextStyle(color: Colors.white, fontSize: 16),
+                    ),
+                  );
+                } else {
+                  // Logged in - show profile icon (already in bottom nav, so just show indicator)
+                  return Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: Center(
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: Colors.green.withOpacity(0.2),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: const Row(
+                          children: [
+                            Icon(Icons.check_circle, color: Colors.green, size: 16),
+                            SizedBox(width: 4),
+                            Text(
+                              'Logged in',
+                              style: TextStyle(color: Colors.green, fontSize: 12),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  );
+                }
+              },
+            ),
+          ],
         ),
         body: _pages[_currentIndex],
         bottomNavigationBar: BottomNavigationBar(
@@ -2995,6 +3040,12 @@ class _PostsPageState extends State<PostsPage> {
   // Pickup mode filter
   PickupMode?
   _selectedPickupMode; // null = both, otherwise filter by pickup mode
+
+  // Booking mode filter (Post Mode)
+  PostMode? _selectedPostMode; // null = all, otherwise filter by post mode
+  
+  // Wait for full deadline filter (only when Wait for Full is selected)
+  int? _waitForFullDeadlineHours; // Filter by deadline hours
 
   // Sort option
   SortOption _sortOption = SortOption.newest;
@@ -3543,9 +3594,20 @@ class _PostsPageState extends State<PostsPage> {
                     return;
                   }
 
+                  // Prevent self-booking: User cannot book their own post
+                  if (currentUser.id == item.slot.profileId) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('You cannot book your own service'),
+                        backgroundColor: Colors.orange,
+                      ),
+                    );
+                    return;
+                  }
+
                   _handleBookingAction(
                     slot: item.slot,
-                    providerId: item.vehicle.userId,
+                    providerId: item.slot.profileId, // Use post owner
                     userId: currentUser.id,
                     isOffer: item.isOffer,
                     providerName: item.providerName,
@@ -3634,6 +3696,17 @@ class _PostsPageState extends State<PostsPage> {
                     return;
                   }
 
+                  // Prevent accepting your own request
+                  if (currentUser.id == item.slot.profileId) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('You cannot accept your own request'),
+                        backgroundColor: Colors.orange,
+                      ),
+                    );
+                    return;
+                  }
+
                   final profile = ProfileRepository.instance.profile.value;
 
                   final booking = await BookingRepository.instance.createBooking(
@@ -3641,10 +3714,10 @@ class _PostsPageState extends State<PostsPage> {
                     providerId: currentUser.id,
                     providerName: profile.profileName,
                     providerPhone: profile.phone,
-                    userId: item.vehicle.userId,
+                    userId: item.slot.profileId, // Use post owner
                     defaultCapacity: item.slot.capacity,
                     price: item.slot.price,
-                    userName: ProfileNameRegistry.instance.getNameForUser(item.vehicle.userId) ?? 'User',
+                    userName: ProfileNameRegistry.instance.getNameForUser(item.slot.profileId) ?? 'User',
                   );
 
                   if (!context.mounted) return;
@@ -3689,10 +3762,11 @@ class _PostsPageState extends State<PostsPage> {
 
   List<SlotFeedItem> _filteredSlotItems() {
     final currentUser = AuthRepository.instance.currentUser;
-    if (currentUser == null) {
-      debugPrint('❌ No current user, returning empty list');
-      return [];
-    }
+    final isGuest = currentUser == null;
+
+    debugPrint('=== FILTERING DEBUG ===');
+    debugPrint('Current user ID: ${currentUser?.id ?? "GUEST"}');
+    debugPrint('Show user posts: $_showUserPosts');
 
     // Get posts based on active tab
     final List<SlotFeedItem> repoItems;
@@ -3700,16 +3774,25 @@ class _PostsPageState extends State<PostsPage> {
     if (_showUserPosts) {
       // User Posts tab - show ONLY OTHER users' posts (not current user's own posts)
       // Providers can accept these requests
-      repoItems = CustomerSlotRepository.instance.allSlots
+      final allUserSlots = CustomerSlotRepository.instance.allSlots;
+      debugPrint('Total user slots: ${allUserSlots.length}');
+      
+      final now = DateTime.now();
+      
+      repoItems = allUserSlots
           .where(
-            (e) => CustomerVehicleRepository.instance.isOnline(e.vehicle.id) &&
-                e.vehicle.userId != currentUser.id, // Exclude current user's own posts
+            // Filter out expired posts (start time has passed)
+            (e) => e.slot.startTime.isAfter(now),
+          )
+          .where(
+            // For guests, show all posts. For authenticated users, hide their own posts
+            (e) => isGuest || e.slot.profileId != currentUser.id,
           )
           .map(
             (e) => SlotFeedItem(
               slot: e.slot,
               vehicle: e.vehicle,
-              providerName: e.vehicle.userName, // Use the post creator's name
+              providerName: isGuest ? 'Unknown User' : (e.vehicle.userName ?? 'Unknown User'), // Hide identity from guests
               providerAvatar: '',
               providerRating: 5.0,
               isOffer: false,
@@ -3717,20 +3800,32 @@ class _PostsPageState extends State<PostsPage> {
             ),
           )
           .toList();
-      debugPrint('📊 User posts mapped (excluding own): ${repoItems.length}');
+      debugPrint('📊 User posts after expiry filter: ${repoItems.length}');
     } else {
-      // Provider Posts tab - show ONLY provider posts from ONLINE vehicles
-      final currentUser = AuthRepository.instance.currentUser;
-      repoItems = SlotRepository.instance.allSlots
+      // Provider Posts tab - show ALL provider posts
+      // For guests: show all posts
+      // For authenticated users: show posts from online vehicles only
+      final allProviderSlots = SlotRepository.instance.allSlots;
+      debugPrint('Total provider slots: ${allProviderSlots.length}');
+      
+      final now = DateTime.now();
+      
+      repoItems = allProviderSlots
           .where(
-            (e) => _vehicleRepository.isOnline(e.vehicle.id),
-          ) // Only show posts from online vehicles
+            // Filter out expired posts (start time has passed)
+            (e) => e.slot.startTime.isAfter(now),
+          )
+          .where(
+            // For guests, show all posts. For authenticated users, filter by online status
+            (e) => isGuest || _vehicleRepository.isOnline(e.vehicle.id),
+          )
           .map((e) {
-            // Use current profile name if it's the current user's vehicle, otherwise use stored userName
-            final providerName =
-                (currentUser != null && e.vehicle.userId == currentUser.id)
-                ? ProfileRepository.instance.profile.value.profileName
-                : e.vehicle.userName;
+            // Privacy: Show provider name only to authenticated users
+            final providerName = isGuest 
+                ? 'Unknown User'  // Hide identity from guests
+                : ((!isGuest && e.slot.profileId == currentUser.id)
+                    ? ProfileRepository.instance.profile.value.profileName
+                    : (e.slot.providerName ?? 'Unknown User'));
 
             return SlotFeedItem(
               slot: e.slot,
@@ -3743,7 +3838,7 @@ class _PostsPageState extends State<PostsPage> {
             );
           })
           .toList();
-      debugPrint('📊 Provider posts mapped: ${repoItems.length}');
+      debugPrint('📊 Provider posts after expiry filter: ${repoItems.length}');
     }
 
     final query = _searchController.text.trim().toLowerCase();
@@ -3855,6 +3950,25 @@ class _PostsPageState extends State<PostsPage> {
         : routeFiltered
             .where((e) => e.slot.pickupOption == _selectedPickupMode)
             .toList(growable: false);
+    
+    // Apply booking mode (post mode) filter
+    final postModeFiltered = _selectedPostMode == null
+        ? pickupFiltered
+        : pickupFiltered
+            .where((e) {
+              if (e.slot.postMode != _selectedPostMode) return false;
+              
+              // If Wait for Full is selected and deadline filter is set
+              if (_selectedPostMode == PostMode.waitForFull && 
+                  _waitForFullDeadlineHours != null) {
+                final slotDeadline = e.slot.waitForFullDeadlineHours;
+                if (slotDeadline == null) return false;
+                return slotDeadline == _waitForFullDeadlineHours;
+              }
+              
+              return true;
+            })
+            .toList(growable: false);
 
     // Apply location filters
     final locationFiltered = (_filterFromLocation == null ||
@@ -3862,8 +3976,8 @@ class _PostsPageState extends State<PostsPage> {
             (_filterToLocation == null || _filterToLocation!.trim().isEmpty) &&
             (_filterBaseLocation == null ||
                 _filterBaseLocation!.trim().isEmpty)
-        ? pickupFiltered
-        : pickupFiltered
+        ? postModeFiltered
+        : postModeFiltered
             .where((e) {
               final slot = e.slot;
               final fromNeedle = (_filterFromLocation ?? '').trim().toLowerCase();
@@ -3939,9 +4053,15 @@ class _PostsPageState extends State<PostsPage> {
             })
             .toList(growable: false);
 
-    if (!_nearestEnabled) return _applySorting(distanceFiltered);
+    if (!_nearestEnabled) {
+      final result = _applySorting(distanceFiltered);
+      debugPrint('📊 FINAL RESULT: ${result.length} posts after all filters');
+      return result;
+    }
 
-    return _sortByDistance(distanceFiltered);
+    final result = _sortByDistance(distanceFiltered);
+    debugPrint('📊 FINAL RESULT: ${result.length} posts after all filters (sorted by distance)');
+    return result;
   }
 
   List<SlotFeedItem> _applySorting(List<SlotFeedItem> items) {
@@ -4322,6 +4442,51 @@ class _PostsPageState extends State<PostsPage> {
                             .toList(),
                       ),
                       const SizedBox(height: 12),
+                      const Text(
+                        'Booking Mode',
+                        style: TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        children: PostMode.values
+                            .map(
+                              (m) => ChoiceChip(
+                                label: Text(m.displayName),
+                                selected: _selectedPostMode == m,
+                                onSelected: (_) => setSheetState(() {
+                                  _selectedPostMode = _selectedPostMode == m ? null : m;
+                                  // Reset deadline filter when changing mode
+                                  if (_selectedPostMode != PostMode.waitForFull) {
+                                    _waitForFullDeadlineHours = null;
+                                  }
+                                }),
+                              ),
+                            )
+                            .toList(),
+                      ),
+                      if (_selectedPostMode == PostMode.waitForFull) ...[
+                        const SizedBox(height: 12),
+                        TextField(
+                          decoration: const InputDecoration(
+                            labelText: 'Deadline (hours before start)',
+                            helperText: 'Filter by confirmation deadline',
+                            border: OutlineInputBorder(),
+                            prefixIcon: Icon(Icons.schedule),
+                          ),
+                          keyboardType: TextInputType.number,
+                          controller: TextEditingController(
+                            text: _waitForFullDeadlineHours?.toString() ?? '',
+                          ),
+                          onChanged: (value) {
+                            final parsed = int.tryParse(value);
+                            setSheetState(() {
+                              _waitForFullDeadlineHours = parsed;
+                            });
+                          },
+                        ),
+                      ],
+                      const SizedBox(height: 12),
                       Row(
                         children: [
                           Expanded(
@@ -4611,6 +4776,8 @@ class _PostsPageState extends State<PostsPage> {
                                   _maxSecurityDeposit = null;
                                   _selectedSlotType = null;
                                   _selectedPickupMode = null;
+                                  _selectedPostMode = null;
+                                  _waitForFullDeadlineHours = null;
                                   _filterFromLocation = null;
                                   _filterToLocation = null;
                                   _filterBaseLocation = null;
@@ -4881,6 +5048,22 @@ class _PostsPageState extends State<PostsPage> {
     String? providerEmail,
     String? providerAvatar,
   }) async {
+    // Guest-first: Check if user is logged in before booking
+    if (AuthRepository.instance.currentUser == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Please login to book'),
+          action: SnackBarAction(
+            label: 'Login',
+            onPressed: () {
+              Navigator.pushNamed(context, '/login');
+            },
+          ),
+        ),
+      );
+      return;
+    }
+
     debugPrint('🎫 Booking action started for slot: ${slot.id}');
 
     final canBook = BookingRepository.instance.canBook(slot.id, slot.capacity);
@@ -4914,12 +5097,12 @@ class _PostsPageState extends State<PostsPage> {
       builder: (context) => BookingConfirmSheet(
         slot: slot,
         isOffer: isOffer,
-        providerId: vehicle.userId,
+        providerId: slot.profileId, // Use post owner
       ),
     );
 
     if (result == null) {
-      debugPrint('❌ Booking cancelled by user');
+      debugPrint('❌ Booking cancelled by user or already created');
       return;
     }
 
@@ -4932,13 +5115,17 @@ class _PostsPageState extends State<PostsPage> {
         (vehicle.operatorPhone ?? _providerPhone(vehicle.userId));
 
     debugPrint('=== BOOKING DEBUG ===');
+    debugPrint('Post profileId: ${slot.profileId}');
     debugPrint('Vehicle userId: ${vehicle.userId}');
     debugPrint('Current user ID: ${AuthRepository.instance.currentUser?.id}');
-    debugPrint('Provider ID for booking: ${vehicle.userId}');
+    debugPrint('Provider ID for booking: ${slot.profileId}');
     debugPrint('====================');
 
     final confirmedCount = result.seatKeys.length;
-    if (confirmedCount == 0) return;
+    if (confirmedCount == 0) {
+      debugPrint('⚠️ No seats selected, booking already created in sheet');
+      return;
+    }
 
     final SeatLayout? layout = slot.seatLayoutOwnerId == null
         ? null
@@ -4954,7 +5141,7 @@ class _PostsPageState extends State<PostsPage> {
 
       final booking = await BookingRepository.instance.createBooking(
         slotId: slot.id,
-        providerId: vehicle.userId,
+        providerId: slot.profileId, // Use post owner
         providerName: finalProviderName,
         providerPhone: finalProviderPhone,
         providerEmail: providerEmail,
@@ -7457,6 +7644,69 @@ class _ProfilePageState extends State<ProfilePage> {
 
   @override
   Widget build(BuildContext context) {
+    // Guest-first: Check if user is logged in using ValueListenableBuilder for reactivity
+    return ValueListenableBuilder<AuthUser?>(
+      valueListenable: AuthRepository.instance.currentUserListenable,
+      builder: (context, currentUser, _) {
+        if (currentUser == null) {
+          // Show login prompt for guests
+          return Scaffold(
+            appBar: AppBar(
+              title: const Text('Profile'),
+              backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+            ),
+            body: Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24.0),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.person_outline, size: 100, color: Colors.grey[400]),
+                    const SizedBox(height: 24),
+                    const Text(
+                      'Login to access your profile',
+                      style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      'Create posts, manage bookings, and more',
+                      style: TextStyle(fontSize: 16, color: Colors.grey[600]),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 32),
+                    ElevatedButton.icon(
+                      onPressed: () {
+                        Navigator.pushNamed(context, '/login');
+                      },
+                      icon: const Icon(Icons.login),
+                      label: const Text('Login'),
+                      style: ElevatedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+                        textStyle: const TextStyle(fontSize: 16),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextButton(
+                      onPressed: () {
+                        Navigator.pushNamed(context, '/register');
+                      },
+                      child: const Text('Don\'t have an account? Sign Up'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        }
+
+        // User is logged in - show normal profile
+        return _buildLoggedInProfile(context);
+      },
+    );
+  }
+
+  Widget _buildLoggedInProfile(BuildContext context) {
     final profileListenable = ProfileRepository.instance.profile;
     return Scaffold(
       appBar: AppBar(
@@ -7728,6 +7978,19 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   void _showAddPostBottomSheet(BuildContext context) {
+    // Guest-first: Check if user is logged in before creating post
+    if (AuthRepository.instance.currentUser == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please login to create posts'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+      // Navigate to login
+      Navigator.pushNamed(context, '/login');
+      return;
+    }
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
