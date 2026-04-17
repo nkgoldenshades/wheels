@@ -8,6 +8,7 @@ import '../models/vehicle.dart';
 import '../models/service_type.dart';
 import '../models/slot_type.dart';
 import '../models/pickup_mode.dart';
+import '../utils/timezone_utils.dart';
 import '../models/post_mode.dart';
 import '../services/booking_repository.dart';
 import '../services/app_preferences.dart';
@@ -915,13 +916,7 @@ class SlotCard extends StatelessWidget {
   }
 
   String _formatTime(DateTime time) {
-    // Format: Jan 26, 2025 10:00
-    final months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    final month = months[time.month - 1];
-    final day = time.day;
-    final year = time.year;
-    final hour = time.hour.toString().padLeft(2, '0');
-    final minute = time.minute.toString().padLeft(2, '0');
-    return '$month $day, $year $hour:$minute';
+    // Format: Jan 26, 2025 10:00 IST
+    return TimezoneUtils.formatDateTimeWithTimezone(time, show24Hour: true);
   }
 }

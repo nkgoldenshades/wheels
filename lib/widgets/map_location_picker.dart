@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart'; // ✅ Add this import
 import 'package:geolocator/geolocator.dart';
 import 'package:geodesy/geodesy.dart';
 import 'dart:async';
@@ -9,11 +10,13 @@ import '../services/location_autocomplete_service.dart';
 class MapLocationPicker extends StatefulWidget {
   final LatLng? initialLocation;
   final String? initialAddress;
+  final double? radiusInKm; // ✅ Add radius parameter
 
   const MapLocationPicker({
     super.key,
     this.initialLocation,
     this.initialAddress,
+    this.radiusInKm, // ✅ Optional radius in kilometers
   });
 
   @override
@@ -185,6 +188,20 @@ class _MapLocationPickerState extends State<MapLocationPicker> {
                 userAgentPackageName: 'com.vaultwheels.app',
                 maxZoom: 19,
               ),
+              // ✅ Add radius circle if radiusInKm is provided
+              if (widget.radiusInKm != null)
+                CircleLayer(
+                  circles: [
+                    CircleMarker(
+                      point: _centerPosition,
+                      radius: widget.radiusInKm! * 1000, // Convert km to meters
+                      useRadiusInMeter: true,
+                      color: Colors.blue.withOpacity(0.2),
+                      borderColor: Colors.blue,
+                      borderStrokeWidth: 2,
+                    ),
+                  ],
+                ),
             ],
           ),
 

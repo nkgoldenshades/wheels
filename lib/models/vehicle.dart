@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'service_type.dart';
 
 enum VehicleGpsMode { deviceLive, externalLink, manual }
@@ -377,11 +378,24 @@ class Vehicle {
 
   factory Vehicle.fromJson(Map<String, dynamic> json) {
     // Support both camelCase (local) and snake_case (Supabase)
+    
+    final userName = json['profile_name'] ??      // ✅ From vehicles query with join
+                     json['user_name'] ?? 
+                     json['userName'] ?? 
+                     json['full_name'] ??
+                     json['operator_name'] ??
+                     'Unknown User';
+    
+    // Only log if userName is Unknown User (to debug issues)
+    if (kDebugMode && userName == 'Unknown User') {
+      debugPrint('⚠️ Vehicle.fromJson: id=${json['id']}, profile_name=${json['profile_name']}, user_name=${json['user_name']} → Unknown User');
+    }
+    
     return Vehicle(
       id: json['id'],
       userId: json['profile_id'] ?? json['user_id'] ?? json['userId'],
-      userName: json['user_name'] ?? json['userName'] ?? 'Unknown User',
-      name: json['name'] ?? '${json['brand'] ?? ''} ${json['model'] ?? ''}'.trim(),
+      userName: userName,
+      name: json['vehicle_name'] ?? json['name'] ?? '${json['brand'] ?? ''} ${json['model'] ?? ''}'.trim(),
       type: json['vehicle_type'] ?? json['type'],
       brand: json['brand'],
       model: json['model'],

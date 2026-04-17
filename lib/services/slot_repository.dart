@@ -2,9 +2,11 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
 import '../models/slot.dart';
 import '../models/slot_entry.dart';
 import '../models/post_mode.dart';
+import '../models/vehicle.dart';
 import 'auth_repository.dart';
 import 'vehicle_repository.dart';
 
@@ -32,17 +34,88 @@ class SlotRepository {
     return _slots.value;
   }
 
+  /// Extract lat,lng from location string format: "Address|lat,lng|keywords"
+  Map<String, double>? _extractLatLng(String? raw) {
+    if (raw == null || raw.isEmpty) return null;
+    final parts = raw.split('|');
+    if (parts.length < 2) return null;
+    
+    final coords = parts[1].split(',');
+    if (coords.length != 2) return null;
+    
+    final lat = double.tryParse(coords[0].trim());
+    final lng = double.tryParse(coords[1].trim());
+    
+    if (lat == null || lng == null) return null;
+    return {'lat': lat, 'lng': lng};
+  }
+
   void _buildSlotEntries() {
     final entries = <SlotEntry>[];
     
+    final vehicleCount = VehicleRepository.instance.allVehicles.length;
+    final slotCount = _slots.value.length;
+    
+    if (kDebugMode) {
+      debugPrint('🔍 _buildSlotEntries: Building $slotCount slots with $vehicleCount vehicles available');
+    }
+    
+    int foundCount = 0;
+    int notFoundCount = 0;
+    
     for (final slot in _slots.value) {
       final vehicle = VehicleRepository.instance.getById(slot.vehicleId);
+      
       if (vehicle != null) {
+        // Vehicle found - use it
+        foundCount++;
         entries.add(SlotEntry(slot: slot, vehicle: vehicle));
+      } else {
+        // Vehicle not found - create placeholder
+        notFoundCount++;
+        if (kDebugMode && notFoundCount == 1) {
+          // Only log first missing vehicle to avoid spam
+          debugPrint('⚠️ Vehicle not found: ${slot.vehicleId}');
+          if (vehicleCount > 0) {
+            debugPrint('⚠️ Available IDs: ${VehicleRepository.instance.allVehicles.take(3).map((v) => v.id).join(", ")}...');
+          }
+        }
+        
+        final placeholderVehicle = Vehicle(
+          id: slot.vehicleId,
+          userId: slot.profileId,
+          userName: 'Unknown User',
+          name: 'Unknown Vehicle',
+          type: 'Unknown',
+          capabilities: [slot.serviceType],
+          seatingCapacity: slot.capacity,
+          galleryImages: [],
+          createdAt: slot.createdAt,
+          gpsMode: VehicleGpsMode.manual,
+          isVerifiedToggle: false,
+          isExpertToggle: false,
+          averageRating: 0.0,
+          totalRatings: 0,
+          totalBookings: 0,
+          activePostsCount: 0,
+          rcVerified: false,
+          insuranceVerified: false,
+          dlVerified: false,
+          aadhaarVerified: false,
+          panVerified: false,
+          currency: 'INR',
+          countryCode: 'IN',
+        );
+        
+        entries.add(SlotEntry(slot: slot, vehicle: placeholderVehicle));
       }
     }
+    
     _slotEntries.value = entries;
-    debugPrint('📊 Built ${entries.length} slot entries from ${_slots.value.length} slots');
+    
+    if (kDebugMode) {
+      debugPrint('📊 Built ${entries.length} entries: $foundCount found, $notFoundCount missing');
+    }
   }
 
   Future<void> init() async {
@@ -52,6 +125,9 @@ class SlotRepository {
     // Listen to vehicle changes to rebuild slot entries
     VehicleRepository.instance.vehiclesListenable.addListener(_buildSlotEntries);
     
+    // Force rebuild after vehicles are loaded (in case they loaded after slots)
+    _buildSlotEntries();
+    
     _initialized = true;
   }
 
@@ -59,6 +135,9 @@ class SlotRepository {
     try {
       // Load from Supabase first (source of truth)
       final supabase = Supabase.instance.client;
+      
+      debugPrint('🔍 Loading posts from Supabase...');
+      debugPrint('🔍 Firebase user: ${firebase_auth.FirebaseAuth.instance.currentUser?.uid ?? "GUEST"}');
       
       // Guest-first: Load posts for everyone (not just logged-in users)
       // Load ALL active posts - NO JOIN needed, uses denormalized provider_name/provider_avatar
@@ -68,6 +147,8 @@ class SlotRepository {
           .eq('is_active', true)
           .order('created_at', ascending: false);
 
+      debugPrint('🔍 Supabase response: ${response.length} posts found');
+      
       _slots.value = (response as List)
           .map((json) => Slot.fromJson(json as Map<String, dynamic>))
           .toList();
@@ -116,10 +197,14 @@ class SlotRepository {
 
   Future<void> loadSlots() async {
     await _loadSlots();
+    // Rebuild entries after loading slots (in case vehicles are already loaded)
+    _buildSlotEntries();
   }
 
   Future<void> loadAllSlots() async {
     await _loadSlots();
+    // Rebuild entries after loading slots (in case vehicles are already loaded)
+    _buildSlotEntries();
   }
 
   Future<void> addSlot(Slot slot) async {
@@ -139,6 +224,8 @@ class SlotRepository {
 
   Future<void> _syncSlotToSupabase(Slot slot) async {
     try {
+      debugPrint('🚨🚨🚨 SYNCING SLOT TO SUPABASE - START 🚨🚨🚨');
+      
       final supabase = Supabase.instance.client;
       final currentUser = AuthRepository.instance.currentUser;
       
@@ -171,9 +258,63 @@ class SlotRepository {
         rethrow;
       }
       
+      // Verify vehicle belongs to current user
+      try {
+        final vehicleCheck = await supabase
+            .from('vehicles')
+            .select('profile_id')
+            .eq('id', slot.vehicleId)
+            .maybeSingle();
+        
+        if (vehicleCheck == null) {
+          debugPrint('❌ CRITICAL: Vehicle not found in Supabase!');
+          throw Exception('Vehicle not found: ${slot.vehicleId}');
+        }
+        
+        // Detailed logging for debugging
+        final vehicleProfileId = vehicleCheck['profile_id'];
+        final currentUserId = currentUser.id;
+        
+        debugPrint('🔍 VEHICLE OWNERSHIP CHECK:');
+        debugPrint('   Vehicle ID: ${slot.vehicleId}');
+        debugPrint('   Vehicle profile_id from DB: $vehicleProfileId');
+        debugPrint('   Vehicle profile_id type: ${vehicleProfileId.runtimeType}');
+        debugPrint('   Current user ID: $currentUserId');
+        debugPrint('   Current user ID type: ${currentUserId.runtimeType}');
+        debugPrint('   Are they equal? ${vehicleProfileId == currentUserId}');
+        debugPrint('   String comparison: ${vehicleProfileId.toString() == currentUserId.toString()}');
+        
+        // Also check Firebase UID
+        final firebaseUser = firebase_auth.FirebaseAuth.instance.currentUser;
+        if (firebaseUser != null) {
+          debugPrint('   Firebase UID: ${firebaseUser.uid}');
+          debugPrint('   Firebase UID matches currentUser.id? ${firebaseUser.uid == currentUserId}');
+        }
+        
+        if (vehicleProfileId != currentUserId) {
+          debugPrint('❌ CRITICAL: Vehicle does not belong to current user!');
+          throw Exception('Vehicle does not belong to current user. Please select your own vehicle.');
+        }
+        
+        debugPrint('✅ Vehicle ownership verified');
+      } catch (e) {
+        debugPrint('❌ Failed to verify vehicle ownership: $e');
+        rethrow;
+      }
+      
       // Check current auth state
       final authHeaders = supabase.headers;
       debugPrint('🔑 Auth headers: ${authHeaders['Authorization']?.substring(0, 50)}...');
+      
+      // Extract coordinates from location strings
+      final fromCoords = _extractLatLng(slot.fromLocation);
+      final toCoords = _extractLatLng(slot.toLocation);
+      final baseCoords = _extractLatLng(slot.baseLocation);
+      
+      debugPrint('📍 Location coordinates:');
+      debugPrint('   From: ${slot.fromLocation} → lat: ${fromCoords?['lat']}, lng: ${fromCoords?['lng']}');
+      debugPrint('   To: ${slot.toLocation} → lat: ${toCoords?['lat']}, lng: ${toCoords?['lng']}');
+      debugPrint('   Base: ${slot.baseLocation} → lat: ${baseCoords?['lat']}, lng: ${baseCoords?['lng']}');
       
       final insertData = {
         'id': slot.id,
@@ -182,12 +323,23 @@ class SlotRepository {
         'service_type': slot.serviceType.name,
         'slot_type': slot.slotType.name,
         'seat_layout_structure': slot.seatLayoutStructure?.toJson(),
+        
+        // Location strings (for display)
         'from_location': slot.fromLocation,
         'to_location': slot.toLocation,
         'base_location': slot.baseLocation,
+        
+        // Separate coordinate columns (for mapping/distance calculations)
+        if (fromCoords != null) 'from_lat': fromCoords['lat'],
+        if (fromCoords != null) 'from_lng': fromCoords['lng'],
+        if (toCoords != null) 'to_lat': toCoords['lat'],
+        if (toCoords != null) 'to_lng': toCoords['lng'],
+        if (baseCoords != null) 'base_lat': baseCoords['lat'],
+        if (baseCoords != null) 'base_lng': baseCoords['lng'],
+        
         'radius': slot.radius,
-        'start_time': slot.startTime.toIso8601String(),
-        'end_time': slot.endTime.toIso8601String(),
+        'start_time': slot.startTime.toUtc().toIso8601String(),
+        'end_time': slot.endTime.toUtc().toIso8601String(),
         'price': slot.price,
         'capacity': slot.capacity,
         'terms': slot.notes, // notes maps to terms in DB
@@ -195,7 +347,7 @@ class SlotRepository {
         // Parcel fields
         if (slot.maxWeight != null) 'max_weight': slot.maxWeight,
         if (slot.maxLength != null) 'max_length': slot.maxLength,
-        if (slot.maxWidth != null) 'max_width': slot.maxWidth,
+        if (slot.maxWidth != null) 'max_width': slot.maxHeight,
         if (slot.maxHeight != null) 'max_height': slot.maxHeight,
         // Lease fields
         if (slot.securityDeposit != null) 'security_deposit': slot.securityDeposit,
@@ -207,7 +359,12 @@ class SlotRepository {
         'created_at': DateTime.now().toIso8601String(),
       };
       
-      debugPrint('📤 Inserting data: ${insertData.toString().substring(0, 200)}...');
+      debugPrint('⏰ TIME DEBUG - START ⏰');
+      debugPrint('slot.startTime: ${slot.startTime}');
+      debugPrint('slot.startTime.isUtc: ${slot.startTime.isUtc}');
+      debugPrint('startTime ISO: ${slot.startTime.toIso8601String()}');
+      debugPrint('⏰ TIME DEBUG - END ⏰');
+      debugPrint('📤 Inserting: start_time=${insertData['start_time']}, end_time=${insertData['end_time']}');
       
       await supabase.from('posts').insert(insertData);
 
@@ -291,17 +448,38 @@ class SlotRepository {
     try {
       final supabase = Supabase.instance.client;
       
+      // Extract coordinates from location strings
+      final fromCoords = _extractLatLng(slot.fromLocation);
+      final toCoords = _extractLatLng(slot.toLocation);
+      final baseCoords = _extractLatLng(slot.baseLocation);
+      
+      debugPrint('📍 Updating location coordinates:');
+      debugPrint('   From: ${slot.fromLocation} → lat: ${fromCoords?['lat']}, lng: ${fromCoords?['lng']}');
+      debugPrint('   To: ${slot.toLocation} → lat: ${toCoords?['lat']}, lng: ${toCoords?['lng']}');
+      debugPrint('   Base: ${slot.baseLocation} → lat: ${baseCoords?['lat']}, lng: ${baseCoords?['lng']}');
+      
       await supabase.from('posts').update({
         'vehicle_id': slot.vehicleId,
         'service_type': slot.serviceType.name,
         'slot_type': slot.slotType.name,
         'seat_layout_structure': slot.seatLayoutStructure?.toJson(),
+        
+        // Location strings (for display)
         'from_location': slot.fromLocation,
         'to_location': slot.toLocation,
         'base_location': slot.baseLocation,
+        
+        // Separate coordinate columns (for mapping/distance calculations)
+        if (fromCoords != null) 'from_lat': fromCoords['lat'],
+        if (fromCoords != null) 'from_lng': fromCoords['lng'],
+        if (toCoords != null) 'to_lat': toCoords['lat'],
+        if (toCoords != null) 'to_lng': toCoords['lng'],
+        if (baseCoords != null) 'base_lat': baseCoords['lat'],
+        if (baseCoords != null) 'base_lng': baseCoords['lng'],
+        
         'radius': slot.radius,
-        'start_time': slot.startTime.toIso8601String(),
-        'end_time': slot.endTime.toIso8601String(),
+        'start_time': slot.startTime.toUtc().toIso8601String(),
+        'end_time': slot.endTime.toUtc().toIso8601String(),
         'price': slot.price,
         'capacity': slot.capacity,
         'terms': slot.notes, // notes maps to terms in DB

@@ -23,6 +23,7 @@ import '../../screens/add_flow/seat_layout_builder_screen.dart';
 import '../../services/seat_layout_repository.dart';
 import '../../widgets/location_autocomplete_field.dart';
 import '../../services/location_autocomplete_service.dart';
+import '../../utils/timezone_utils.dart';
 
 class CreatePostScreen extends StatefulWidget {
   final ServiceType serviceType;
@@ -391,7 +392,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   }
 
   String _fmtTime24(DateTime d) {
-    return '${d.day}/${d.month} ${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
+    return TimezoneUtils.formatShortDateTimeWithTimezone(d, show24Hour: true);
   }
 
   int? _calculateDeadlineHours() {
@@ -660,6 +661,10 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
 
             // Location Section
             _buildLocationSection(),
+            const SizedBox(height: 20),
+
+            // Time Window
+            _buildTimeSection(),
             const SizedBox(height: 20),
 
             // Price and Capacity

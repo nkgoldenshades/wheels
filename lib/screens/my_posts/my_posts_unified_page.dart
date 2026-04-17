@@ -7,6 +7,7 @@ import '../../services/slot_repository.dart';
 import '../../services/vehicle_repository.dart';
 import '../../services/auth_repository.dart';
 import '../vehicle/vehicle_list_screen.dart';
+import '../../utils/timezone_utils.dart';
 
 /// Unified My Posts page - shows all your personal vehicle-based posts
 /// Uses SEPARATE repositories from provider section (CustomerVehicleRepository, CustomerSlotRepository)
@@ -361,9 +362,7 @@ class _MyPostsUnifiedPageState extends State<MyPostsUnifiedPage>
   }
 
   String _formatTimeRange(DateTime start, DateTime end) {
-    final startStr = '${start.day}/${start.month} ${start.hour.toString().padLeft(2, '0')}:${start.minute.toString().padLeft(2, '0')}';
-    final endStr = '${end.hour.toString().padLeft(2, '0')}:${end.minute.toString().padLeft(2, '0')}';
-    return '$startStr - $endStr';
+    return TimezoneUtils.formatTimeRangeWithTimezone(start, end, show24Hour: true);
   }
 
   String _getServiceLabel(ServiceType type) {

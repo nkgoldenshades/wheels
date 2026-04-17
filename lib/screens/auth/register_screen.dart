@@ -216,6 +216,25 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 },
                 child: const Text('Already have an account? Sign In'),
               ),
+              const SizedBox(height: 16),
+              // Guest mode button
+              OutlinedButton.icon(
+                onPressed: _isLoading ? null : () {
+                  // Navigate to main screen without logging in
+                  Navigator.pushReplacementNamed(context, '/main');
+                },
+                icon: const Icon(Icons.person_outline),
+                label: const Text('Continue as Guest'),
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
+                  side: BorderSide(color: Theme.of(context).primaryColor),
+                ),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Browse posts without signing in',
+                style: TextStyle(fontSize: 12, color: Colors.grey),
+              ),
               const SizedBox(height: 40),
             ],
           ),

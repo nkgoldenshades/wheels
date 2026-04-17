@@ -34,18 +34,58 @@ class CustomerVehicleRepository {
     try {
       // Load customer vehicles from Supabase (vehicles user is looking for)
       final response = await _supabase
-          .from('vehicles')
-          .select()
+          .from('vehicles')  // ✅ Query vehicles table directly
+          .select('''
+            *,
+            profiles (
+              full_name,
+              profile_photo_url
+            )
+          ''')  // Join with profiles - PostgREST auto-detects FK
           .eq('profile_id', currentUser.id)
           .order('created_at', ascending: false);
 
+      debugPrint('🔍 Customer vehicles raw response (first): ${(response as List).isNotEmpty ? response[0] : "EMPTY"}');
+
       vehiclesListenable.value = (response as List)
-          .map((json) => Vehicle.fromJson(json as Map<String, dynamic>))
+          .map((json) {
+            // 🔍 DEBUG: Print raw JSON (truncate large fields)
+            if (kDebugMode) {
+              final debugJson = Map<String, dynamic>.from(json);
+              // Truncate base64 images to avoid huge logs
+              if (debugJson['vehicle_photo_url'] != null && debugJson['vehicle_photo_url'].toString().length > 100) {
+                debugJson['vehicle_photo_url'] = '${debugJson['vehicle_photo_url'].toString().substring(0, 50)}... [TRUNCATED]';
+              }
+              if (debugJson['gallery_images'] is List) {
+                debugJson['gallery_images'] = '[${(debugJson['gallery_images'] as List).length} images]';
+              }
+              debugPrint('🔍 RAW CUSTOMER VEHICLE JSON: $debugJson');
+              debugPrint('🔍 profiles value: ${json['profiles']}');
+            }
+            
+            // Flatten the profiles data into the vehicle object
+            final vehicleData = Map<String, dynamic>.from(json);
+            if (json['profiles'] != null) {
+              vehicleData['profile_name'] = json['profiles']['full_name'];
+              vehicleData['profile_avatar'] = json['profiles']['profile_photo_url'];
+              if (kDebugMode) {
+                debugPrint('✅ Profile found: ${json['profiles']['full_name']}');
+              }
+            } else {
+              if (kDebugMode) {
+                debugPrint('❌ profiles is NULL for customer vehicle: ${json['id']}');
+              }
+            }
+            return Vehicle.fromJson(vehicleData);
+          })
           .toList();
 
       debugPrint(
         '✅ Loaded ${vehiclesListenable.value.length} vehicles from Supabase',
       );
+      if (vehiclesListenable.value.isNotEmpty) {
+        debugPrint('🔍 First customer vehicle: id=${vehiclesListenable.value[0].id}, userName=${vehiclesListenable.value[0].userName}');
+      }
     } catch (e) {
       debugPrint('⚠️  Failed to load customer vehicles from Supabase: $e');
       vehiclesListenable.value = [];
@@ -84,6 +124,7 @@ class CustomerVehicleRepository {
         'created_at': vehicle.createdAt.toIso8601String(),
         'updated_at': DateTime.now().toIso8601String(),
         'is_active': true,
+        'vehicle_owner': 'customer', // Enum: provider or customer
         
         // Legal documents
         'rc_front_url': vehicle.rcFrontUrl,
@@ -174,7 +215,21 @@ class CustomerVehicleRepository {
 
   Future<void> removeVehicle(String id) async {
     try {
-      // Delete from Supabase
+      // Check if vehicle has ANY user posts
+      final posts = await _supabase
+          .from('user_posts')
+          .select('id')
+          .eq('vehicle_id', id);
+      
+      if (posts.isNotEmpty) {
+        final postCount = posts.length;
+        throw Exception(
+          'Cannot delete vehicle: $postCount post${postCount > 1 ? 's' : ''} exist. '
+          'Please delete all posts using this vehicle first.'
+        );
+      }
+      
+      // Safe to delete - no posts exist
       await _supabase.from('vehicles').delete().eq('id', id);
 
       // Update local state
@@ -184,35 +239,49 @@ class CustomerVehicleRepository {
 
       debugPrint('✅ User vehicle deleted from Supabase: $id');
     } catch (e) {
-      debugPrint('❌ Failed to delete user vehicle from Supabase: $e');
-      // Fallback to local only
-      vehiclesListenable.value = vehiclesListenable.value
-          .where((v) => v.id != id)
-          .toList();
-      debugPrint('✅ User vehicle deleted locally: $id');
+      debugPrint('❌ Failed to delete user vehicle: $e');
+      rethrow; // Re-throw to show error to user
     }
   }
 
-  void deleteVehicle(String id) {
-    vehiclesListenable.value = vehiclesListenable.value
-        .where((v) => v.id != id)
-        .toList();
-    // Also remove from online status
-    final newStatus = Map<String, bool>.from(onlineStatusListenable.value);
-    newStatus.remove(id);
-    onlineStatusListenable.value = newStatus;
+  Future<void> deleteVehicle(String id) async {
+    try {
+      // Check if vehicle has ANY user posts
+      final posts = await _supabase
+          .from('user_posts')
+          .select('id')
+          .eq('vehicle_id', id);
+      
+      if (posts.isNotEmpty) {
+        final postCount = posts.length;
+        debugPrint('❌ Cannot delete vehicle: $postCount post(s) exist');
+        throw Exception(
+          'Cannot delete vehicle: $postCount post${postCount > 1 ? 's' : ''} exist. '
+          'Please delete all posts using this vehicle first.'
+        );
+      }
+      
+      // Safe to delete
+      vehiclesListenable.value = vehiclesListenable.value
+          .where((v) => v.id != id)
+          .toList();
+      
+      // Also remove from online status
+      final newStatus = Map<String, bool>.from(onlineStatusListenable.value);
+      newStatus.remove(id);
+      onlineStatusListenable.value = newStatus;
 
-    // Delete from Supabase asynchronously
-    _supabase
-        .from('vehicles')
-        .delete()
-        .eq('id', id)
-        .then((_) {
-          debugPrint('✅ User vehicle deleted from Supabase: $id');
-        })
-        .catchError((e) {
-          debugPrint('❌ Failed to delete user vehicle from Supabase: $e');
-        });
+      // Delete from Supabase asynchronously
+      await _supabase
+          .from('vehicles')
+          .delete()
+          .eq('id', id);
+      
+      debugPrint('✅ User vehicle deleted from Supabase: $id');
+    } catch (e) {
+      debugPrint('❌ Failed to delete user vehicle: $e');
+      rethrow; // Re-throw to show error to user
+    }
   }
 
   bool isOnline(String vehicleId) {

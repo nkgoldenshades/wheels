@@ -58,9 +58,11 @@ import 'widgets/voice_ai_overlay.dart';
 import 'services/voice_ai_service.dart';
 import 'app_tab_controller.dart';
 import 'utils/test_backend_connection.dart';
+import 'utils/timezone_utils.dart';
 
-// Global Supabase client
-final supabase = Supabase.instance.client;
+// Global Supabase client getter (lazy evaluation - only accessed when needed)
+// Don't use 'final' here because it evaluates immediately before Supabase.initialize()
+SupabaseClient get supabase => Supabase.instance.client;
 
 /// Strip |lat,lon|keywords from stored location string — returns display name only
 String _cleanLoc(String? raw) {
@@ -164,34 +166,49 @@ void _initializeServicesInBackground() async {
     
     // Firebase and AuthRepository are already initialized in main(), skip them here
     
-    // Initialize Supabase with Firebase JWT validation
+    // Check if running on web and warn about CORS
+    if (kIsWeb) {
+      if (kDebugMode) {
+        print('⚠️ ═══════════════════════════════════════════════════════');
+        print('⚠️ WARNING: Running on WEB - CORS issues may occur!');
+        print('⚠️ If you see "Failed to fetch" errors:');
+        print('⚠️   1. Run on mobile/desktop instead: flutter run -d android');
+        print('⚠️   2. Or configure CORS in Supabase Dashboard');
+        print('⚠️   3. See FIX_SUPABASE_CORS_FOR_WEB.md for details');
+        print('⚠️ ═══════════════════════════════════════════════════════');
+      }
+    }
+    
+    // Initialize Supabase with Firebase JWT
     if (kDebugMode) print('⏳ Starting Supabase...');
     try {
       await Supabase.initialize(
         url: SupabaseConfig.url,
         anonKey: SupabaseConfig.anonKey,
-        // CRITICAL: Pass Firebase JWT to Supabase for RLS security
         accessToken: () async {
           final user = firebase_auth.FirebaseAuth.instance.currentUser;
           if (user == null) {
-            if (kDebugMode) print('🔑 No Firebase user - returning null token');
-            return null;
+            if (kDebugMode) print('🔑 No Firebase user - guest mode (using anon key)');
+            return null; // Supabase will use anon key automatically
           }
-          
           try {
             final token = await user.getIdToken(true);
+            if (token == null || token.isEmpty) {
+              if (kDebugMode) print('⚠️ Firebase token is empty - falling back to anon');
+              return null;
+            }
             if (kDebugMode) {
               print('🔑 Firebase UID: ${user.uid}');
               print('🔑 Sending Firebase JWT to Supabase');
             }
             return token;
           } catch (e) {
-            if (kDebugMode) print('❌ Failed to get Firebase token: $e');
-            return null;
+            if (kDebugMode) print('⚠️ Failed to get Firebase token: $e');
+            return null; // Fallback to anon key on error
           }
         },
       ).timeout(
-        const Duration(seconds: 10), // Reduced from 30 to 10 seconds
+        const Duration(seconds: 10),
         onTimeout: () {
           throw TimeoutException('Supabase initialization timed out', const Duration(seconds: 10));
         },
@@ -222,16 +239,32 @@ void _initializeServicesInBackground() async {
     }
     
     // Initialize all other repositories with timeout protection
+    // CRITICAL: Load vehicles FIRST, then slots (slots need vehicles to build entries)
     await initWithTimeout(VehicleRepository.instance.init(), 'VehicleRepository');
-    await initWithTimeout(SlotRepository.instance.init(), 'SlotRepository');
     await initWithTimeout(CustomerVehicleRepository.instance.init(), 'CustomerVehicleRepository');
+    
+    // Now load slots (they can find vehicles now)
+    await initWithTimeout(SlotRepository.instance.init(), 'SlotRepository');
     await initWithTimeout(CustomerSlotRepository.instance.init(), 'CustomerSlotRepository');
+    
+    // Load other repositories
     await initWithTimeout(UserPostRepository.instance.init(), 'UserPostRepository');
     await initWithTimeout(UserPostAcceptanceRepository.instance.init(), 'UserPostAcceptanceRepository');
     await initWithTimeout(SeatLayoutRepository.instance.init(), 'SeatLayoutRepository');
     await initWithTimeout(BookingRepository.instance.init(), 'BookingRepository');
     await initWithTimeout(PassengerRepository.instance.init(), 'PassengerRepository');
     await initWithTimeout(ReviewRepository.instance.init(), 'ReviewRepository');
+    
+    // Force refresh slot entries after all data is loaded
+    // This ensures slots find their vehicles even if there was a timing issue
+    if (kDebugMode) print('🔄 Refreshing slot entries after all data loaded...');
+    try {
+      await SlotRepository.instance.loadSlots();
+      await CustomerSlotRepository.instance.init(); // Reload to rebuild entries
+      if (kDebugMode) print('✅ Slot entries refreshed');
+    } catch (e) {
+      if (kDebugMode) print('⚠️ Failed to refresh slot entries: $e');
+    }
 
     // Test Supabase connection (only in debug mode)
     if (kDebugMode) {
@@ -579,9 +612,7 @@ class _EditUserPostPageState extends State<EditUserPostPage> {
   }
 
   String _fmtTime(DateTime d) {
-    final h = d.hour.toString().padLeft(2, '0');
-    final m = d.minute.toString().padLeft(2, '0');
-    return '$h:$m';
+    return TimezoneUtils.formatTimeWithTimezone(d, show24Hour: true);
   }
 }
 
@@ -892,6 +923,7 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'VaultWheels',
+      debugShowCheckedModeBanner: false, // Remove debug banner
       theme: ThemeData(
         primarySwatch: Colors.blue,
         useMaterial3: true,
@@ -1620,9 +1652,7 @@ class _CreateUserPostPageState extends State<CreateUserPostPage> {
   }
 
   String _fmtTime(DateTime d) {
-    final h = d.hour.toString().padLeft(2, '0');
-    final m = d.minute.toString().padLeft(2, '0');
-    return '$h:$m';
+    return TimezoneUtils.formatTimeWithTimezone(d, show24Hour: true);
   }
 }
 
@@ -2035,13 +2065,8 @@ class MyPostsPage extends StatelessWidget {
   }
 
   String _fmtRange(DateTime start, DateTime end) {
-    String fmt(DateTime d) {
-      final h = d.hour.toString().padLeft(2, '0');
-      final m = d.minute.toString().padLeft(2, '0');
-      return '$h:$m';
-    }
-
-    return '${start.day}/${start.month} ${fmt(start)}';
+    // Format: 26/1 09:30 IST
+    return TimezoneUtils.formatShortDateTimeWithTimezone(start, show24Hour: true);
   }
 
   String _serviceLabel(ServiceType type) {
@@ -2924,7 +2949,7 @@ class _MainScreenState extends State<MainScreen> {
                       child: Container(
                         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                         decoration: BoxDecoration(
-                          color: Colors.green.withOpacity(0.2),
+                          color: Colors.green.withValues(alpha: 0.2),
                           borderRadius: BorderRadius.circular(12),
                         ),
                         child: const Row(
@@ -3120,6 +3145,37 @@ class _PostsPageState extends State<PostsPage> {
             title: const Text('Posts'),
             backgroundColor: Theme.of(context).colorScheme.inversePrimary,
             actions: [
+              // Refresh button to reload posts from Supabase
+              IconButton(
+                icon: const Icon(Icons.refresh),
+                tooltip: 'Refresh Posts',
+                onPressed: () async {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Refreshing posts...'),
+                      duration: Duration(seconds: 1),
+                    ),
+                  );
+                  
+                  // Reload all data from Supabase
+                  await Future.wait([
+                    VehicleRepository.instance.loadAllVehicles(),
+                    CustomerVehicleRepository.instance.init(),
+                    SlotRepository.instance.loadAllSlots(),
+                    CustomerSlotRepository.instance.init(),
+                  ]);
+                  
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Posts refreshed!'),
+                        duration: Duration(seconds: 1),
+                        backgroundColor: Colors.green,
+                      ),
+                    );
+                  }
+                },
+              ),
               // Sort button
               IconButton(
                 icon: const Icon(Icons.sort),
@@ -3762,7 +3818,6 @@ class _PostsPageState extends State<PostsPage> {
 
   List<SlotFeedItem> _filteredSlotItems() {
     final currentUser = AuthRepository.instance.currentUser;
-    final isGuest = currentUser == null;
 
     debugPrint('=== FILTERING DEBUG ===');
     debugPrint('Current user ID: ${currentUser?.id ?? "GUEST"}');
@@ -3772,8 +3827,7 @@ class _PostsPageState extends State<PostsPage> {
     final List<SlotFeedItem> repoItems;
 
     if (_showUserPosts) {
-      // User Posts tab - show ONLY OTHER users' posts (not current user's own posts)
-      // Providers can accept these requests
+      // User Posts tab - show ALL customer requests (common feed)
       final allUserSlots = CustomerSlotRepository.instance.allSlots;
       debugPrint('Total user slots: ${allUserSlots.length}');
       
@@ -3781,18 +3835,18 @@ class _PostsPageState extends State<PostsPage> {
       
       repoItems = allUserSlots
           .where(
-            // Filter out expired posts (start time has passed)
-            (e) => e.slot.startTime.isAfter(now),
+            // Filter out expired posts (end time has passed)
+            (e) => e.slot.endTime.isAfter(now),
           )
-          .where(
-            // For guests, show all posts. For authenticated users, hide their own posts
-            (e) => isGuest || e.slot.profileId != currentUser.id,
-          )
+          // REMOVED: User-specific filter - show ALL posts for common feed
+          // .where(
+          //   (e) => isGuest || e.slot.profileId != currentUser.id,
+          // )
           .map(
             (e) => SlotFeedItem(
               slot: e.slot,
               vehicle: e.vehicle,
-              providerName: isGuest ? 'Unknown User' : (e.vehicle.userName ?? 'Unknown User'), // Hide identity from guests
+              providerName: e.vehicle.userName, // ✅ Show real name to everyone
               providerAvatar: '',
               providerRating: 5.0,
               isOffer: false,
@@ -3802,9 +3856,7 @@ class _PostsPageState extends State<PostsPage> {
           .toList();
       debugPrint('📊 User posts after expiry filter: ${repoItems.length}');
     } else {
-      // Provider Posts tab - show ALL provider posts
-      // For guests: show all posts
-      // For authenticated users: show posts from online vehicles only
+      // Provider Posts tab - show ALL provider offers (common feed)
       final allProviderSlots = SlotRepository.instance.allSlots;
       debugPrint('Total provider slots: ${allProviderSlots.length}');
       
@@ -3812,20 +3864,16 @@ class _PostsPageState extends State<PostsPage> {
       
       repoItems = allProviderSlots
           .where(
-            // Filter out expired posts (start time has passed)
-            (e) => e.slot.startTime.isAfter(now),
+            // Filter out expired posts (end time has passed)
+            (e) => e.slot.endTime.isAfter(now),
           )
-          .where(
-            // For guests, show all posts. For authenticated users, filter by online status
-            (e) => isGuest || _vehicleRepository.isOnline(e.vehicle.id),
-          )
+          // REMOVED: Vehicle online status filter - show ALL posts for common feed
+          // .where(
+          //   (e) => isGuest || _vehicleRepository.isOnline(e.vehicle.id),
+          // )
           .map((e) {
-            // Privacy: Show provider name only to authenticated users
-            final providerName = isGuest 
-                ? 'Unknown User'  // Hide identity from guests
-                : ((!isGuest && e.slot.profileId == currentUser.id)
-                    ? ProfileRepository.instance.profile.value.profileName
-                    : (e.slot.providerName ?? 'Unknown User'));
+            // Show provider name to everyone
+            final providerName = e.vehicle.userName;
 
             return SlotFeedItem(
               slot: e.slot,
@@ -7645,7 +7693,7 @@ class _ProfilePageState extends State<ProfilePage> {
   @override
   Widget build(BuildContext context) {
     // Guest-first: Check if user is logged in using ValueListenableBuilder for reactivity
-    return ValueListenableBuilder<AuthUser?>(
+    return ValueListenableBuilder<AppAuthUser?>(
       valueListenable: AuthRepository.instance.currentUserListenable,
       builder: (context, currentUser, _) {
         if (currentUser == null) {

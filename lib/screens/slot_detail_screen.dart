@@ -24,6 +24,7 @@ import '../widgets/location_autocomplete_field.dart';
 import '../services/location_autocomplete_service.dart';
 import 'booking_map_screen.dart';
 import 'location_map_screen.dart';
+import '../utils/timezone_utils.dart';
 
 class SlotDetailScreen extends StatelessWidget {
   final Slot slot;
@@ -637,14 +638,8 @@ class SlotDetailScreen extends StatelessWidget {
   }
 
   static String _formatTime(DateTime time) {
-    // Format: Jan 26, 2025 10:00
-    final months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    final month = months[time.month - 1];
-    final day = time.day;
-    final year = time.year;
-    final hour = time.hour.toString().padLeft(2, '0');
-    final minute = time.minute.toString().padLeft(2, '0');
-    return '$month $day, $year $hour:$minute';
+    // Format: Jan 26, 2025 10:00 IST
+    return TimezoneUtils.formatDateTimeWithTimezone(time, show24Hour: true);
   }
 
   static String _formatDuration(DateTime start, DateTime end) {

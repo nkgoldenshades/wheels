@@ -2,9 +2,11 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
 import '../models/slot.dart';
 import '../models/slot_entry.dart';
 import '../models/post_mode.dart';
+import '../models/vehicle.dart';
 import 'auth_repository.dart';
 import 'customer_vehicle_repository.dart';
 
@@ -36,14 +38,79 @@ class CustomerSlotRepository {
     final entries = <SlotEntry>[];
     for (final slot in _slots.value) {
       final vehicle = CustomerVehicleRepository.instance.getById(slot.vehicleId);
+      
       if (vehicle != null) {
+        // Vehicle found - use it
         entries.add(SlotEntry(slot: slot, vehicle: vehicle));
+      } else {
+        // Vehicle not found - create placeholder "Unknown Vehicle"
+        debugPrint('⚠️ Vehicle not found for user slot ${slot.id}, using placeholder');
+        
+        final placeholderVehicle = Vehicle(
+          id: slot.vehicleId,
+          userId: slot.profileId,
+          userName: 'Unknown User',
+          name: 'Unknown Vehicle',
+          type: 'Unknown',
+          capabilities: [slot.serviceType],
+          seatingCapacity: slot.capacity,
+          galleryImages: [],
+          createdAt: slot.createdAt,
+          gpsMode: VehicleGpsMode.manual,
+          isVerifiedToggle: false,
+          isExpertToggle: false,
+          averageRating: 0.0,
+          totalRatings: 0,
+          totalBookings: 0,
+          activePostsCount: 0,
+          rcVerified: false,
+          insuranceVerified: false,
+          dlVerified: false,
+          aadhaarVerified: false,
+          panVerified: false,
+          currency: 'INR',
+          countryCode: 'IN',
+        );
+        
+        entries.add(SlotEntry(slot: slot, vehicle: placeholderVehicle));
       }
     }
     slotsListenable.value = entries;
+    debugPrint('📊 Built ${entries.length} user slot entries from ${_slots.value.length} slots');
   }
 
   Future<void> _loadSlots() async {
+    try {
+      // Load from Supabase first (source of truth)
+      final supabase = Supabase.instance.client;
+      
+      debugPrint('🔍 Loading user posts from Supabase...');
+      debugPrint('🔍 Firebase user: ${firebase_auth.FirebaseAuth.instance.currentUser?.uid ?? "GUEST"}');
+      
+      // Load ALL active user posts (requests) - not just current user's
+      final response = await supabase
+          .from('user_posts')
+          .select('*')
+          .eq('is_active', true)
+          .order('created_at', ascending: false);
+
+      debugPrint('🔍 Supabase user_posts response: ${response.length} posts found');
+      
+      _slots.value = (response as List)
+          .map((json) => Slot.fromJson(json as Map<String, dynamic>))
+          .toList();
+      
+      _buildSlotEntries();
+      debugPrint('✅ Loaded ${_slots.value.length} user slots from Supabase');
+      
+      // Save to local storage as cache
+      await _saveSlots();
+      return;
+    } catch (e) {
+      debugPrint('⚠️ Failed to load user slots from Supabase, trying local: $e');
+    }
+    
+    // Fallback to local storage
     try {
       final prefs = await SharedPreferences.getInstance();
       final jsonString = prefs.getString(_userSlotsKey);
@@ -190,8 +257,8 @@ class CustomerSlotRepository {
         'to_location': slot.toLocation,
         'base_location': slot.baseLocation,
         'radius': slot.radius,
-        'start_time': slot.startTime.toIso8601String(),
-        'end_time': slot.endTime.toIso8601String(),
+        'start_time': slot.startTime.toUtc().toIso8601String(),
+        'end_time': slot.endTime.toUtc().toIso8601String(),
         'price': slot.price,
         'capacity': slot.capacity,
         'terms': slot.notes, // notes maps to terms in DB

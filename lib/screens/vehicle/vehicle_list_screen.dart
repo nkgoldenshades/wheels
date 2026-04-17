@@ -161,10 +161,45 @@ class VehicleListScreen extends StatelessWidget {
                     );
 
                     if (confirmed == true) {
-                      if (isUserMode) {
-                        CustomerVehicleRepository.instance.deleteVehicle(v.id);
-                      } else {
-                        await _vehicleRepo.removeVehicle(v.id);
+                      try {
+                        if (isUserMode) {
+                          await CustomerVehicleRepository.instance.deleteVehicle(v.id);
+                        } else {
+                          await _vehicleRepo.removeVehicle(v.id);
+                        }
+                        
+                        // Show success message
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('${v.name} deleted successfully'),
+                              backgroundColor: Colors.green,
+                            ),
+                          );
+                        }
+                      } catch (e) {
+                        // Show error message
+                        if (context.mounted) {
+                          showDialog(
+                            context: context,
+                            builder: (context) => AlertDialog(
+                              title: const Row(
+                                children: [
+                                  Icon(Icons.error_outline, color: Colors.red),
+                                  SizedBox(width: 8),
+                                  Text('Cannot Delete Vehicle'),
+                                ],
+                              ),
+                              content: Text(e.toString().replaceFirst('Exception: ', '')),
+                              actions: [
+                                FilledButton(
+                                  onPressed: () => Navigator.pop(context),
+                                  child: const Text('OK'),
+                                ),
+                              ],
+                            ),
+                          );
+                        }
                       }
                     }
                   },

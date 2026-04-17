@@ -8,6 +8,7 @@ import '../models/passenger.dart';
 import '../models/service_type.dart';
 import '../models/post_mode.dart';
 import '../services/app_preferences.dart';
+import '../utils/timezone_utils.dart';
 import '../services/booking_repository.dart';
 import '../services/seat_layout_repository.dart';
 import '../app_tab_controller.dart';
@@ -1246,9 +1247,7 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
   }
 
   static String _formatTime(DateTime time) {
-    final h = time.hour.toString().padLeft(2, '0');
-    final m = time.minute.toString().padLeft(2, '0');
-    return '$h:$m';
+    return TimezoneUtils.formatTimeWithTimezone(time, show24Hour: true);
   }
 }
 

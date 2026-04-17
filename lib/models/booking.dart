@@ -1,4 +1,5 @@
 import 'seat_layout.dart';
+import 'post_mode.dart';
 
 enum BookingStatus { pending, accepted, completed, rejected, refunded }
 
@@ -44,6 +45,7 @@ class Booking {
   final BookingMode bookingMode;
   final int? totalCapacityBooked; // For full post bookings
   final bool isFullVehicleLocked;
+  final PostMode? postMode; // Add PostMode field
 
   Booking({
     required this.id,
@@ -74,6 +76,7 @@ class Booking {
     this.bookingMode = BookingMode.shared,
     this.totalCapacityBooked,
     this.isFullVehicleLocked = false,
+    this.postMode, // Add to constructor
   });
 
   Booking copyWith({
@@ -98,6 +101,7 @@ class Booking {
     BookingMode? bookingMode,
     int? totalCapacityBooked,
     bool? isFullVehicleLocked,
+    PostMode? postMode, // Add to copyWith
   }) {
     return Booking(
       id: id,
@@ -128,6 +132,7 @@ class Booking {
       bookingMode: bookingMode ?? this.bookingMode,
       totalCapacityBooked: totalCapacityBooked ?? this.totalCapacityBooked,
       isFullVehicleLocked: isFullVehicleLocked ?? this.isFullVehicleLocked,
+      postMode: postMode ?? this.postMode, // Add to copyWith return
     );
   }
 
@@ -161,6 +166,7 @@ class Booking {
       'bookingMode': bookingMode.name,
       'totalCapacityBooked': totalCapacityBooked,
       'isFullVehicleLocked': isFullVehicleLocked,
+      'postMode': postMode?.dbValue, // Add to toJson
     };
   }
 
@@ -260,6 +266,9 @@ class Booking {
           : BookingMode.shared,
       totalCapacityBooked: (json['totalCapacityBooked'] ?? json['total_capacity_booked'] ?? metadata?['total_capacity_booked']) as int?,
       isFullVehicleLocked: json['isFullVehicleLocked'] ?? json['is_full_vehicle_locked'] ?? metadata?['is_full_vehicle_locked'] ?? false,
+      postMode: (json['postMode'] ?? json['post_mode'] ?? json['post_mode_snapshot']) != null
+          ? PostModeExtension.fromDbValue(json['postMode'] ?? json['post_mode'] ?? json['post_mode_snapshot'])
+          : null, // Add PostMode parsing
     );
   }
   

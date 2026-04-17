@@ -4,14 +4,14 @@ import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'profile_name_registry.dart';
 
-class AuthUser {
+class AppAuthUser {
   final String id;
   final String email;
   final String? profileName;
   final String? avatarUrl;
   final String? phone;
 
-  const AuthUser({
+  const AppAuthUser({
     required this.id,
     required this.email,
     this.profileName,
@@ -25,18 +25,18 @@ class AuthRepository {
 
   static final AuthRepository instance = AuthRepository._();
 
-  final ValueNotifier<AuthUser?> _currentUser = ValueNotifier<AuthUser?>(null);
+  final ValueNotifier<AppAuthUser?> _currentUser = ValueNotifier<AppAuthUser?>(null);
   final firebase_auth.FirebaseAuth _firebaseAuth = firebase_auth.FirebaseAuth.instance;
 
   static const _storageKeyUser = 'auth_user';
 
-  ValueListenable<AuthUser?> get currentUserListenable => _currentUser;
+  ValueListenable<AppAuthUser?> get currentUserListenable => _currentUser;
 
-  AuthUser? get currentUser => _currentUser.value;
+  AppAuthUser? get currentUser => _currentUser.value;
 
   bool get isAuthenticated => _currentUser.value != null;
 
-  set currentUser(AuthUser? user) {
+  set currentUser(AppAuthUser? user) {
     _currentUser.value = user;
   }
 
@@ -49,7 +49,7 @@ class AuthRepository {
     // Update Firebase user display name
     await _firebaseAuth.currentUser?.updateDisplayName(trimmed);
     
-    final updated = AuthUser(
+    final updated = AppAuthUser(
       id: u.id,
       email: u.email,
       profileName: trimmed,
@@ -65,7 +65,7 @@ class AuthRepository {
     // Listen to Firebase auth state changes
     _firebaseAuth.authStateChanges().listen((firebase_auth.User? firebaseUser) {
       if (firebaseUser != null) {
-        _currentUser.value = AuthUser(
+        _currentUser.value = AppAuthUser(
           id: firebaseUser.uid,
           email: firebaseUser.email ?? '',
           profileName: firebaseUser.displayName,
@@ -80,7 +80,7 @@ class AuthRepository {
     // Check if user is already signed in
     final firebaseUser = _firebaseAuth.currentUser;
     if (firebaseUser != null) {
-      _currentUser.value = AuthUser(
+      _currentUser.value = AppAuthUser(
         id: firebaseUser.uid,
         email: firebaseUser.email ?? '',
         profileName: firebaseUser.displayName,
@@ -91,7 +91,7 @@ class AuthRepository {
   }
 
   // Sign up with email and password
-  Future<AuthUser?> signUpWithEmail({
+  Future<AppAuthUser?> signUpWithEmail({
     required String email,
     required String password,
     String? profileName,
@@ -124,7 +124,7 @@ class AuthRepository {
         );
       }
 
-      final user = AuthUser(
+      final user = AppAuthUser(
         id: credential.user!.uid,
         email: email.trim(),
         profileName: profileName?.trim(),
@@ -133,18 +133,6 @@ class AuthRepository {
       );
 
       _currentUser.value = user;
-      
-      // CRITICAL: Set Firebase JWT in Supabase client for RLS
-      try {
-        final firebaseToken = await credential.user!.getIdToken(true);
-        if (firebaseToken != null) {
-          // Store token for use in requests
-          Supabase.instance.client.headers['Authorization'] = 'Bearer $firebaseToken';
-          debugPrint('✅ Firebase JWT set in Supabase client headers');
-        }
-      } catch (e) {
-        debugPrint('⚠️ Failed to set Firebase JWT: $e');
-      }
       
       // Sync user to Supabase with timeout
       try {
@@ -217,7 +205,7 @@ class AuthRepository {
   }
 
   // Sign in with email and password
-  Future<AuthUser?> signInWithEmail({
+  Future<AppAuthUser?> signInWithEmail({
     required String email,
     required String password,
   }) async {
@@ -227,7 +215,7 @@ class AuthRepository {
         password: password,
       );
 
-      final user = AuthUser(
+      final user = AppAuthUser(
         id: credential.user!.uid,
         email: email.trim(),
         profileName: credential.user!.displayName,
@@ -236,18 +224,6 @@ class AuthRepository {
       );
 
       _currentUser.value = user;
-      
-      // CRITICAL: Set Firebase JWT in Supabase client for RLS
-      try {
-        final firebaseToken = await credential.user!.getIdToken(true);
-        if (firebaseToken != null) {
-          // Store token for use in requests
-          Supabase.instance.client.headers['Authorization'] = 'Bearer $firebaseToken';
-          debugPrint('✅ Firebase JWT set in Supabase client headers');
-        }
-      } catch (e) {
-        debugPrint('⚠️ Failed to set Firebase JWT: $e');
-      }
       
       // Sync user to Supabase with timeout
       try {
@@ -303,7 +279,7 @@ class AuthRepository {
 
       // Demo mode: bypass OTP and authenticate immediately with email
       // In production, implement proper phone auth
-      final user = AuthUser(
+      final user = AppAuthUser(
         id: _idFromPhone(phone),
         email: '$phone@temp.com', // Temporary email
         phone: phone,
@@ -328,7 +304,7 @@ class AuthRepository {
     return phone.trim();
   }
 
-  String _encodeUser(AuthUser u) {
+  String _encodeUser(AppAuthUser u) {
     final profileName = u.profileName ?? '';
     final avatar = u.avatarUrl ?? '';
     final phone = u.phone ?? '';

@@ -37,27 +37,77 @@ class VehicleRepository {
 
   Future<void> init() async {
     if (_initialized) return;
+    debugPrint('⏳ Starting VehicleRepository initialization...');
     await _loadVehicles();
     await _loadOnlineStatus();
     _initialized = true;
+    debugPrint('✅ VehicleRepository initialized with ${_vehicles.value.length} vehicles');
   }
 
   Future<void> _loadVehicles() async {
+    debugPrint('🔍 VehicleRepository: Starting to load vehicles from vehicles table...');
     try {
       // Load provider vehicles from Supabase (vehicles users are offering)
-      // Note: Using is_online instead of is_active (column doesn't exist in DB)
+      // Query vehicles table directly - NO FILTER to test RLS
       final response = await _supabase
-          .from('vehicles')
-          .select()
+          .from('vehicles')  // ✅ Query vehicles table directly
+          .select('''
+            *,
+            profiles (
+              full_name,
+              profile_photo_url
+            )
+          ''')  // Join with profiles - PostgREST auto-detects FK
+          // .eq('is_active', true)  // Temporarily removed to test
           .order('created_at', ascending: false);
 
+      debugPrint('🔍 VehicleRepository: Query completed, processing ${(response as List).length} vehicles');
+      
       _vehicles.value = (response as List)
-          .map((json) => Vehicle.fromJson(json as Map<String, dynamic>))
+          .map((json) {
+            // 🔍 DEBUG: Print raw JSON (truncate large fields)
+            if (kDebugMode) {
+              final debugJson = Map<String, dynamic>.from(json);
+              // Truncate base64 images to avoid huge logs
+              if (debugJson['vehicle_photo_url'] != null && debugJson['vehicle_photo_url'].toString().length > 100) {
+                debugJson['vehicle_photo_url'] = '${debugJson['vehicle_photo_url'].toString().substring(0, 50)}... [TRUNCATED]';
+              }
+              if (debugJson['gallery_images'] is List) {
+                debugJson['gallery_images'] = '[${(debugJson['gallery_images'] as List).length} images]';
+              }
+              debugPrint('🔍 RAW VEHICLE JSON: $debugJson');
+              debugPrint('🔍 profiles value: ${json['profiles']}');
+            }
+            
+            // Flatten the profiles data into the vehicle object
+            final vehicleData = Map<String, dynamic>.from(json);
+            if (json['profiles'] != null) {
+              vehicleData['profile_name'] = json['profiles']['full_name'];
+              vehicleData['profile_avatar'] = json['profiles']['profile_photo_url'];
+              if (kDebugMode) {
+                debugPrint('✅ Profile found: ${json['profiles']['full_name']}');
+              }
+            } else {
+              if (kDebugMode) {
+                debugPrint('❌ profiles is NULL for vehicle: ${json['id']}');
+              }
+            }
+            return Vehicle.fromJson(vehicleData);
+          })
           .toList();
 
       debugPrint('✅ Loaded ${_vehicles.value.length} vehicles from Supabase');
+      if (_vehicles.value.isNotEmpty) {
+        final firstVehicle = _vehicles.value[0];
+        debugPrint('🔍 First vehicle: id=${firstVehicle.id}, userName=${firstVehicle.userName}, name=${firstVehicle.name}');
+      } else {
+        debugPrint('⚠️ No vehicles returned - RLS is blocking ALL vehicles!');
+      }
     } catch (e) {
       debugPrint('❌ Failed to load from Supabase: $e');
+      if (e is PostgrestException) {
+        debugPrint('❌ Postgrest error: code=${e.code}, message=${e.message}');
+      }
       // Fallback to local storage
       await _loadVehiclesLocal();
     }
@@ -145,6 +195,7 @@ class VehicleRepository {
         'created_at': vehicle.createdAt.toIso8601String(),
         'updated_at': DateTime.now().toIso8601String(),
         'is_online': true, // Vehicle is online by default when created
+        'vehicle_owner': 'provider', // Enum: provider or customer
         
         // Legal documents
         'rc_front_url': vehicle.rcFrontUrl,
@@ -251,7 +302,22 @@ class VehicleRepository {
 
   Future<void> deleteVehicle(String vehicleId) async {
     try {
-      // Delete from Supabase
+      // Check if vehicle has ANY posts
+      final posts = await _supabase
+          .from('posts')
+          .select('id')
+          .eq('vehicle_id', vehicleId);
+      
+      if (posts.isNotEmpty) {
+        final postCount = posts.length;
+        throw Exception(
+          'Cannot delete vehicle: $postCount post${postCount > 1 ? 's' : ''} exist. '
+          'Please delete all posts using this vehicle first.'
+        );
+      }
+      
+      // Safe to delete - no posts exist
+      // Note: Delete from main vehicles table (not the view)
       await _supabase.from('vehicles').delete().eq('id', vehicleId);
 
       // Update local state
@@ -262,13 +328,8 @@ class VehicleRepository {
 
       debugPrint('✅ Vehicle deleted from Supabase: $vehicleId');
     } catch (e) {
-      debugPrint('❌ Failed to delete vehicle from Supabase: $e');
-      // Fallback to local only
-      _vehicles.value = _vehicles.value
-          .where((v) => v.id != vehicleId)
-          .toList();
-      await _saveVehicles();
-      debugPrint('✅ Vehicle deleted locally: $vehicleId');
+      debugPrint('❌ Failed to delete vehicle: $e');
+      rethrow; // Re-throw to show error to user
     }
   }
 
