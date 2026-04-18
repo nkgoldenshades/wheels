@@ -37,6 +37,7 @@ import 'services/customer_vehicle_repository.dart';
 import 'services/customer_slot_repository.dart';
 import 'services/user_post_repository.dart';
 import 'services/user_post_acceptance_repository.dart';
+import 'services/otp_service.dart';
 import 'models/user_post_acceptance.dart';
 import 'services/review_repository.dart';
 import 'widgets/slot_card.dart';
@@ -6673,11 +6674,34 @@ class _RequestsBodyState extends State<_RequestsBody> {
                                     messenger.showSnackBar(const SnackBar(content: Text('Invalid OTP'), backgroundColor: Colors.red));
                                   }
                                 } else {
-                                  final ok = await BookingRepository.instance.verifyOtp(bookingId: b.id, otp: otpText);
+                                  // Use OtpService for better error messages
+                                  final result = await OtpService().verifyOtp(
+                                    bookingId: int.parse(b.id),
+                                    userId: b.userId,
+                                    enteredOtp: otpText,
+                                  );
                                   if (!context.mounted) return;
                                   Navigator.pop(context);
-                                  messenger.showSnackBar(SnackBar(content: Text(ok ? 'OTP verified ✅' : 'Invalid OTP'), backgroundColor: ok ? Colors.green : Colors.red));
-                                  if (ok && context.mounted) _promptForReview(context, b, isProvider: true);
+                                  
+                                  if (result.isSuccess) {
+                                    // Update local state
+                                    await BookingRepository.instance.updateBookingAfterPayment(
+                                      bookingId: b.id,
+                                      status: BookingStatus.completed,
+                                      otpVerified: true,
+                                    );
+                                    messenger.showSnackBar(SnackBar(
+                                      content: Text(result.message),
+                                      backgroundColor: Colors.green,
+                                    ));
+                                    if (context.mounted) _promptForReview(context, b, isProvider: true);
+                                  } else {
+                                    // Show specific error message
+                                    messenger.showSnackBar(SnackBar(
+                                      content: Text(result.message),
+                                      backgroundColor: Colors.red,
+                                    ));
+                                  }
                                 }
                               } catch (e) {
                                 if (!context.mounted) return;
@@ -6768,50 +6792,55 @@ class _RequestsBodyState extends State<_RequestsBody> {
                                 );
                               }
                             } else {
-                              // Legacy booking without escrow
-                              final otpOk = BookingRepository.instance.isOtpValid(
-                                bookingId: b.id,
-                                otp: otpText,
+                              // Use OtpService for better error messages
+                              final result = await OtpService().verifyOtp(
+                                bookingId: int.parse(b.id),
+                                userId: b.userId,
+                                enteredOtp: otpText,
                               );
 
                               if (!context.mounted) return;
                               Navigator.pop(context); // Close loading
 
-                              if (!otpOk) {
-                                messenger.showSnackBar(
-                                  const SnackBar(content: Text('Invalid OTP')),
+                              if (result.isSuccess) {
+                                // Update local booking status
+                                await BookingRepository.instance.updateBookingAfterPayment(
+                                  bookingId: b.id,
+                                  status: BookingStatus.completed,
+                                  otpVerified: true,
                                 );
-                                return;
-                              }
 
-                              final ok = await BookingRepository.instance.verifyOtp(
-                                bookingId: b.id,
-                                otp: otpText,
-                              );
-                              
-                              if (ok && b.securityDeposit != null && b.securityDeposit! > 0) {
-                                messenger.showSnackBar(
-                                  SnackBar(
-                                    content: Text(
-                                      '✅ OTP verified! Security deposit of ${AppPreferences.instance.formatMoney(b.securityDeposit!.toInt())} refunded to user.',
+                                if (b.securityDeposit != null && b.securityDeposit! > 0) {
+                                  messenger.showSnackBar(
+                                    SnackBar(
+                                      content: Text(
+                                        '✅ OTP verified! Security deposit of ${AppPreferences.instance.formatMoney(b.securityDeposit!.toInt())} refunded to user.',
+                                      ),
+                                      backgroundColor: Colors.green,
+                                      duration: const Duration(seconds: 4),
                                     ),
-                                    backgroundColor: Colors.green,
-                                    duration: const Duration(seconds: 4),
-                                  ),
-                                );
+                                  );
+                                } else {
+                                  messenger.showSnackBar(
+                                    SnackBar(
+                                      content: Text(result.message),
+                                      backgroundColor: Colors.green,
+                                    ),
+                                  );
+                                }
+
+                                // Prompt for review if successful
+                                if (context.mounted) {
+                                  _promptForReview(context, b, isProvider: true);
+                                }
                               } else {
+                                // Show specific error message
                                 messenger.showSnackBar(
                                   SnackBar(
-                                    content: Text(
-                                      ok ? 'OTP verified ✅' : 'OTP verify failed',
-                                    ),
+                                    content: Text(result.message),
+                                    backgroundColor: Colors.red,
                                   ),
                                 );
-                              }
-
-                              // Prompt for review if successful
-                              if (ok && context.mounted) {
-                                _promptForReview(context, b, isProvider: true);
                               }
                             }
                           } catch (e) {

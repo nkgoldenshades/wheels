@@ -11,6 +11,7 @@ import '../models/service_type.dart';
 import 'auth_repository.dart';
 import 'slot_repository.dart';
 import 'vehicle_repository.dart';
+import 'otp_service.dart';
 
 class BookingRepository {
   BookingRepository._();
@@ -412,7 +413,7 @@ class BookingRepository {
         'persons_snapshot': 1,
         'seat_keys': booking.seatKey,
         'booking_strategy_snapshot': booking.bookingMode == BookingMode.full ? 'full_vehicle' : 'instant',
-        'post_mode_snapshot': booking.postMode?.dbValue ?? 'instant', // Add PostMode to booking data
+        'post_mode': booking.postMode?.dbValue ?? 'instant', // FIXED: Use 'post_mode' not 'post_mode_snapshot'
         
         // Passenger details (jsonb)
         'passenger_details': booking.userName != null ? {
@@ -529,21 +530,39 @@ class BookingRepository {
   }
 
   Future<bool> verifyOtp({required String bookingId, required String otp}) async {
-    final valid = isOtpValid(bookingId: bookingId, otp: otp);
-    if (!valid) return false;
+    // Use backend verification (tracks attempts, locks after 5 tries)
+    final booking = bookings.value.firstWhere((b) => b.id == bookingId);
+    
+    try {
+      final result = await OtpService().verifyOtp(
+        bookingId: int.parse(bookingId),
+        userId: booking.userId,
+        enteredOtp: otp,
+      );
 
-    bookings.value = bookings.value
-        .map(
-          (b) => (b.id == bookingId)
-              ? b.copyWith(
-                  status: BookingStatus.completed,
-                  otpVerified: true,
-                )
-              : b,
-        )
-        .toList(growable: false);
-    await _persist();
-    return true;
+      if (result.isSuccess) {
+        // Update local state
+        bookings.value = bookings.value
+            .map(
+              (b) => (b.id == bookingId)
+                  ? b.copyWith(
+                      status: BookingStatus.completed,
+                      otpVerified: true,
+                    )
+                  : b,
+            )
+            .toList(growable: false);
+        await _persist();
+        return true;
+      } else {
+        // Log the error reason
+        debugPrint('❌ OTP verification failed: ${result.message}');
+        return false;
+      }
+    } catch (e) {
+      debugPrint('❌ OTP verification error: $e');
+      return false;
+    }
   }
 
   /// Update booking after escrow payment is captured
