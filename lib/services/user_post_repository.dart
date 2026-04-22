@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
 import '../models/service_type.dart';
 import '../models/slot_type.dart';
 import 'auth_repository.dart';
@@ -342,13 +343,22 @@ class UserPostRepository {
 
   Future<void> delete(String postId) async {
     try {
-      // Delete from Supabase
-      await _supabase.from('user_posts').delete().eq('id', postId);
+      final user = firebase_auth.FirebaseAuth.instance.currentUser;
+      if (user == null) throw Exception('Not authenticated');
+
+      debugPrint('🗑️ Deleting user post: $postId (user: ${user.uid})');
+
+      // Delete from Supabase — CASCADE handles related records automatically
+      await _supabase
+          .from('user_posts')
+          .delete()
+          .eq('id', postId)
+          .eq('user_id', user.uid);
+
+      debugPrint('✅ User post deleted from Supabase: $postId');
 
       // Update local state
       posts.value = posts.value.where((p) => p.id != postId).toList();
-
-      debugPrint('✅ User post deleted from Supabase: $postId');
     } catch (e) {
       debugPrint('❌ Failed to delete user post: $e');
       rethrow;

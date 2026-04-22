@@ -777,23 +777,6 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
       ),
       body: Column(
         children: [
-          // Typing indicator
-          if (_isLoading)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: Row(
-                children: [
-                  const CircleAvatar(
-                    radius: 16,
-                    backgroundColor: Colors.blue,
-                    child: Icon(Icons.smart_toy, size: 16, color: Colors.white),
-                  ),
-                  const SizedBox(width: 8),
-                  const _TypingIndicator(),
-                ],
-              ),
-            ),
-
           // Messages list
           Expanded(
             child: _messages.isEmpty
@@ -810,8 +793,26 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
                 : ListView.builder(
                     controller: _scrollController,
                     padding: const EdgeInsets.all(16),
-                    itemCount: _messages.length,
+                    itemCount: _messages.length + (_isLoading ? 1 : 0),
                     itemBuilder: (context, index) {
+                      // Show typing indicator as last item inside the list
+                      if (_isLoading && index == _messages.length) {
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 4),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: const [
+                              CircleAvatar(
+                                radius: 16,
+                                backgroundColor: Colors.blue,
+                                child: Icon(Icons.smart_toy, size: 16, color: Colors.white),
+                              ),
+                              SizedBox(width: 8),
+                              _TypingIndicator(),
+                            ],
+                          ),
+                        );
+                      }
                       return ChatBubble(message: _messages[index]);
                     },
                   ),
@@ -819,79 +820,83 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
 
           // Message input
           Container(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
             decoration: BoxDecoration(
               color: Colors.grey[100],
               border: Border(top: BorderSide(color: Colors.grey[300]!)),
             ),
-            child: Row(
-              children: [
-                // Image picker button
-                IconButton(
-                  onPressed: _pickImage,
-                  icon: const Icon(Icons.image, color: Colors.grey),
-                  tooltip: 'Add Image',
-                ),
-                // Mic button with continuous mode indicator
-                Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    // Pulsing animation when listening
-                    if (_isListening)
-                      Container(
-                        width: 48,
-                        height: 48,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: Colors.red.withOpacity(0.2),
-                        ),
-                      ),
-                    IconButton(
-                      onPressed: _toggleVoiceInput,
-                      icon: Icon(
-                        _isListening ? Icons.mic : Icons.mic_none,
-                        color: _isListening ? Colors.red : Colors.grey,
-                      ),
-                      tooltip: _isListening 
-                        ? 'Stop Voice Input (Continuous Mode Active)' 
-                        : 'Start Voice Input (Continuous Mode)',
-                    ),
-                  ],
-                ),
-                // Text input field
-                Expanded(
-                  child: TextField(
-                    controller: _messageController,
-                    enabled: !_isLoading,
-                    decoration: InputDecoration(
-                      hintText: _isLoading
-                          ? 'AI is responding...'
-                          : 'Type your message...',
-                      border: const OutlineInputBorder(),
-                      contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 12),
-                    ),
-                    onSubmitted: (_) => _sendMessage(),
+            child: SafeArea(
+              top: false,
+              child: Row(
+                children: [
+                  // Image picker button
+                  IconButton(
+                    onPressed: _pickImage,
+                    icon: const Icon(Icons.image, color: Colors.grey),
+                    tooltip: 'Add Image',
                   ),
-                ),
-                const SizedBox(width: 8),
-                // Send button
-                FloatingActionButton(
-                  mini: true,
-                  onPressed: _isLoading ? null : _sendMessage,
-                  backgroundColor: _isLoading ? Colors.grey : null,
-                  child: _isLoading
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Colors.white,
+                  // Mic button with continuous mode indicator
+                  Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      // Pulsing animation when listening
+                      if (_isListening)
+                        Container(
+                          width: 48,
+                          height: 48,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: Colors.red.withOpacity(0.2),
                           ),
-                        )
-                      : const Icon(Icons.send),
-                ),
-              ],
+                        ),
+                      IconButton(
+                        onPressed: _toggleVoiceInput,
+                        icon: Icon(
+                          _isListening ? Icons.mic : Icons.mic_none,
+                          color: _isListening ? Colors.red : Colors.grey,
+                        ),
+                        tooltip: _isListening
+                            ? 'Stop Voice Input (Continuous Mode Active)'
+                            : 'Start Voice Input (Continuous Mode)',
+                      ),
+                    ],
+                  ),
+                  // Text input field
+                  Expanded(
+                    child: TextField(
+                      controller: _messageController,
+                      enabled: !_isLoading,
+                      decoration: InputDecoration(
+                        hintText: _isLoading
+                            ? 'AI is responding...'
+                            : 'Type your message...',
+                        border: const OutlineInputBorder(),
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 12),
+                        isDense: true,
+                      ),
+                      onSubmitted: (_) => _sendMessage(),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  // Send button
+                  FloatingActionButton(
+                    mini: true,
+                    onPressed: _isLoading ? null : _sendMessage,
+                    backgroundColor: _isLoading ? Colors.grey : null,
+                    child: _isLoading
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : const Icon(Icons.send),
+                  ),
+                ],
+              ),
             ),
           ),
         ],

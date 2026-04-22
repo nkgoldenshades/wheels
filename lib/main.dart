@@ -24,6 +24,7 @@ import 'models/vehicle.dart';
 import 'models/pickup_mode.dart';
 import 'models/post_mode.dart';
 import 'models/booking.dart';
+import 'models/exceptions.dart';
 import 'models/review.dart';
 import 'config/supabase_config.dart';
 import 'screens/slot_detail_screen.dart';
@@ -922,6 +923,43 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Set custom error widget builder to show errors instead of white screen
+    ErrorWidget.builder = (FlutterErrorDetails details) {
+      return Material(
+        child: Container(
+          color: Colors.red[50],
+          padding: const EdgeInsets.all(16),
+          child: Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.error_outline, size: 48, color: Colors.red),
+                const SizedBox(height: 16),
+                const Text(
+                  'Something went wrong',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  details.exception.toString(),
+                  style: const TextStyle(fontSize: 14),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 16),
+                ElevatedButton(
+                  onPressed: () {
+                    // Try to restart the app
+                    runApp(const MyApp());
+                  },
+                  child: const Text('Restart App'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    };
+
     return MaterialApp(
       title: 'VaultWheels',
       debugShowCheckedModeBanner: false, // Remove debug banner
@@ -1775,7 +1813,7 @@ class UserMyPostsPage extends StatelessWidget {
                       ),
                       PopupMenuButton<String>(
                         tooltip: 'Actions',
-                        onSelected: (value) {
+                        onSelected: (value) async {
                           if (value == 'edit') {
                             Navigator.push(
                               context,
@@ -1787,35 +1825,123 @@ class UserMyPostsPage extends StatelessWidget {
                           }
 
                           if (value == 'delete') {
-                            showDialog(
+                            final confirm = await showDialog<bool>(
                               context: context,
                               builder: (ctx) => AlertDialog(
                                 title: const Text('Delete Post'),
                                 content: const Text(
-                                  'Are you sure you want to delete this post?',
+                                  'Are you sure you want to delete this post?\n\nPosts with active bookings cannot be deleted.',
                                 ),
                                 actions: [
                                   TextButton(
-                                    onPressed: () => Navigator.pop(ctx),
+                                    onPressed: () => Navigator.pop(ctx, false),
                                     child: const Text('Cancel'),
                                   ),
                                   TextButton(
-                                    onPressed: () {
-                                      UserPostRepository.instance.archive(p.id);
-                                      Navigator.pop(ctx);
-                                      ScaffoldMessenger.of(
-                                        context,
-                                      ).showSnackBar(
-                                        const SnackBar(
-                                          content: Text('Post deleted'),
-                                        ),
-                                      );
-                                    },
+                                    onPressed: () => Navigator.pop(ctx, true),
+                                    style: TextButton.styleFrom(foregroundColor: Colors.red),
                                     child: const Text('Delete'),
                                   ),
                                 ],
                               ),
                             );
+                            if (confirm != true || !context.mounted) return;
+                            try {
+                              await UserPostRepository.instance.delete(p.id);
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('✅ Post deleted'),
+                                    backgroundColor: Colors.green,
+                                  ),
+                                );
+                              }
+                            } on ActiveBookingsException catch (e) {
+                              if (!context.mounted) return;
+                              showDialog(
+                                context: context,
+                                builder: (ctx) => AlertDialog(
+                                  shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(16)),
+                                  title: Row(
+                                    children: [
+                                      Icon(Icons.lock_outline,
+                                          color: Colors.orange[700]),
+                                      const SizedBox(width: 8),
+                                      const Text('Cannot Delete Post'),
+                                    ],
+                                  ),
+                                  content: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        '${e.activeCount} active booking${e.activeCount == 1 ? '' : 's'} must be '
+                                        'completed or cancelled before this post can be deleted.',
+                                        style: const TextStyle(fontSize: 15),
+                                      ),
+                                      const SizedBox(height: 12),
+                                      Container(
+                                        padding: const EdgeInsets.all(10),
+                                        decoration: BoxDecoration(
+                                          color: Colors.orange.shade50,
+                                          borderRadius:
+                                              BorderRadius.circular(8),
+                                          border: Border.all(
+                                              color: Colors.orange.shade200),
+                                        ),
+                                        child: const Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                                'Active = pending, accepted, confirmed, in_progress',
+                                                style: TextStyle(
+                                                    fontWeight: FontWeight.bold,
+                                                    fontSize: 12,
+                                                    color: Colors.deepOrange)),
+                                            SizedBox(height: 8),
+                                            Text('You can instead:',
+                                                style: TextStyle(
+                                                    fontWeight: FontWeight.bold,
+                                                    fontSize: 13)),
+                                            SizedBox(height: 4),
+                                            Text(
+                                                '• Mark post inactive — stops new bookings',
+                                                style:
+                                                    TextStyle(fontSize: 13)),
+                                            Text(
+                                                '• Wait for active bookings to complete',
+                                                style:
+                                                    TextStyle(fontSize: 13)),
+                                            Text(
+                                                '• Cancel/refund active bookings first',
+                                                style:
+                                                    TextStyle(fontSize: 13)),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  actions: [
+                                    TextButton(
+                                      onPressed: () => Navigator.pop(ctx),
+                                      child: const Text('OK'),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            } catch (e) {
+                              if (!context.mounted) return;
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                      'Failed to delete: ${e.toString().split('\n').first}'),
+                                  backgroundColor: Colors.red,
+                                ),
+                              );
+                            }
                             return;
                           }
 
@@ -2332,11 +2458,7 @@ class _EarningsPageState extends State<EarningsPage> {
             ),
             if (slot != null) ...[
               const SizedBox(height: 12),
-              _BookingTimingSection(
-                booking: booking,
-                slot: slot,
-                isRiderView: true,
-              ),
+              _BookingTimeBanner(booking: booking),
             ],
           ],
         ),
@@ -3159,15 +3281,17 @@ class _PostsPageState extends State<PostsPage> {
                   );
                   
                   // Reload all data from Supabase
+                  final messenger = ScaffoldMessenger.of(context);
                   await Future.wait([
                     VehicleRepository.instance.loadAllVehicles(),
                     CustomerVehicleRepository.instance.init(),
                     SlotRepository.instance.loadAllSlots(),
                     CustomerSlotRepository.instance.init(),
+                    BookingRepository.instance.refreshFromSupabase(),
                   ]);
                   
                   if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
+                    messenger.showSnackBar(
                       const SnackBar(
                         content: Text('Posts refreshed!'),
                         duration: Duration(seconds: 1),
@@ -5334,6 +5458,31 @@ class _RequestsBody extends StatefulWidget {
 class _RequestsBodyState extends State<_RequestsBody> {
   bool _isRiderView = true;
   final Map<String, TextEditingController> _otpControllers = {};
+
+  // Helper to build a filter chip that toggles a group of statuses
+  Widget _buildFilterChip(
+      String label, Color color, Set<BookingStatus> statuses) {
+    final isSelected = statuses.any((s) => _statusFilters.contains(s));
+    return FilterChip(
+      label: Text(label, style: const TextStyle(fontSize: 12)),
+      selected: isSelected,
+      onSelected: (selected) {
+        setState(() {
+          if (selected) {
+            _statusFilters.addAll(statuses);
+          } else {
+            _statusFilters.removeAll(statuses);
+          }
+        });
+      },
+      selectedColor: color.withValues(alpha: 0.2),
+      checkmarkColor: color,
+      labelStyle: TextStyle(
+        color: isSelected ? color : null,
+        fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+      ),
+    );
+  }
   final TextEditingController _searchController = TextEditingController();
   String _query = '';
   final Set<BookingStatus> _statusFilters = {}; // Empty = show all
@@ -5471,69 +5620,37 @@ class _RequestsBodyState extends State<_RequestsBody> {
             scrollDirection: Axis.horizontal,
             child: Row(
               children: [
-                FilterChip(
-                  label: const Text('Active', style: TextStyle(fontSize: 12)),
-                  selected: _statusFilters.contains(BookingStatus.accepted),
-                  onSelected: (selected) {
-                    setState(() {
-                      if (selected) {
-                        _statusFilters.add(BookingStatus.accepted);
-                      } else {
-                        _statusFilters.remove(BookingStatus.accepted);
-                      }
-                    });
-                  },
-                  selectedColor: Colors.green.withValues(alpha: 0.3),
-                  checkmarkColor: Colors.green,
-                ),
+                // Active group
+                _buildFilterChip('Active', Colors.green, {
+                  BookingStatus.pending,
+                  BookingStatus.accepted,
+                  BookingStatus.confirmed,
+                  BookingStatus.inProgress,
+                }),
                 const SizedBox(width: 8),
-                FilterChip(
-                  label: const Text('Completed', style: TextStyle(fontSize: 12)),
-                  selected: _statusFilters.contains(BookingStatus.completed),
-                  onSelected: (selected) {
-                    setState(() {
-                      if (selected) {
-                        _statusFilters.add(BookingStatus.completed);
-                      } else {
-                        _statusFilters.remove(BookingStatus.completed);
-                      }
-                    });
-                  },
-                  selectedColor: Colors.blue.withValues(alpha: 0.3),
-                  checkmarkColor: Colors.blue,
-                ),
+                _buildFilterChip('Completed', Colors.blue, {
+                  BookingStatus.completed,
+                }),
                 const SizedBox(width: 8),
-                FilterChip(
-                  label: const Text('Refunded', style: TextStyle(fontSize: 12)),
-                  selected: _statusFilters.contains(BookingStatus.refunded),
-                  onSelected: (selected) {
-                    setState(() {
-                      if (selected) {
-                        _statusFilters.add(BookingStatus.refunded);
-                      } else {
-                        _statusFilters.remove(BookingStatus.refunded);
-                      }
-                    });
-                  },
-                  selectedColor: Colors.orange.withValues(alpha: 0.3),
-                  checkmarkColor: Colors.orange,
-                ),
+                _buildFilterChip('Overdue', Colors.red, {
+                  BookingStatus.expired,
+                }),
                 const SizedBox(width: 8),
-                FilterChip(
-                  label: const Text('Pending', style: TextStyle(fontSize: 12)),
-                  selected: _statusFilters.contains(BookingStatus.pending),
-                  onSelected: (selected) {
-                    setState(() {
-                      if (selected) {
-                        _statusFilters.add(BookingStatus.pending);
-                      } else {
-                        _statusFilters.remove(BookingStatus.pending);
-                      }
-                    });
-                  },
-                  selectedColor: Colors.amber.withValues(alpha: 0.3),
-                  checkmarkColor: Colors.amber,
-                ),
+                _buildFilterChip('Disputed', Colors.deepOrange, {
+                  BookingStatus.disputed,
+                }),
+                const SizedBox(width: 8),
+                _buildFilterChip('Cancelled', Colors.purple, {
+                  BookingStatus.cancelled,
+                  BookingStatus.cancelledByCustomer,
+                  BookingStatus.cancelledByProvider,
+                  BookingStatus.rejected,
+                  BookingStatus.noShow,
+                }),
+                const SizedBox(width: 8),
+                _buildFilterChip('Refunded', Colors.orange, {
+                  BookingStatus.refunded,
+                }),
               ],
             ),
           ),
@@ -6072,6 +6189,9 @@ class _RequestsBodyState extends State<_RequestsBody> {
               style: TextStyle(color: Colors.grey[700], fontSize: 13),
             ),
             const SizedBox(height: 4),
+            // ── Trip schedule + deadline (from booking snapshot) ──────────
+            _BookingTimeBanner(booking: b),
+            const SizedBox(height: 4),
             if (bookingSlot != null) ...[
               // GPS Type and Location
               Builder(
@@ -6433,12 +6553,8 @@ class _RequestsBodyState extends State<_RequestsBody> {
                     isRiderView: isRiderView,
                   ),
                   const SizedBox(height: 6),
-                  // Timing section with countdown as small hint at the very bottom
-                  _BookingTimingSection(
-                    booking: b,
-                    slot: bookingSlot,
-                    isRiderView: isRiderView,
-                  ),
+                  // Timing section — from booking snapshot
+                  _BookingTimeBanner(booking: b),
                 ],
                 // Add review button for completed trips (user view)
                 if (b.status == BookingStatus.completed) ...[
@@ -6913,6 +7029,95 @@ class _RequestsBodyState extends State<_RequestsBody> {
                 ],
               ],
               if (isRiderView) ...[const SizedBox(height: 12)],
+
+              // ── Expired state ────────────────────────────────────────
+              if (b.status == BookingStatus.expired) ...[
+                const SizedBox(height: 10),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade100,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.grey.shade300),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.timer_off, size: 16, color: Colors.grey[600]),
+                          const SizedBox(width: 6),
+                          Text('Booking Expired',
+                              style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.grey[700],
+                                  fontSize: 13)),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        isRiderView
+                            ? 'The service was not completed within the deadline. Your payment has been refunded.'
+                            : 'This booking expired — trip not completed within deadline. Payment refunded to customer.',
+                        style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+
+              // ── Disputed state ───────────────────────────────────────
+              if (b.status == BookingStatus.disputed) ...[
+                const SizedBox(height: 10),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.deepOrange.shade50,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.deepOrange.shade200),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.gavel, size: 16, color: Colors.deepOrange[700]),
+                          const SizedBox(width: 6),
+                          Text('Dispute Raised',
+                              style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.deepOrange[700],
+                                  fontSize: 13)),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'This booking is under review by support. Payment is held until resolved.',
+                        style: TextStyle(fontSize: 12, color: Colors.deepOrange[600]),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+
+              // ── Raise dispute (only when expired — trip ended without OTP) ──
+              if (b.status == BookingStatus.expired && isRiderView) ...[
+                const SizedBox(height: 10),
+                OutlinedButton.icon(
+                  onPressed: () => _showRaiseDisputeDialog(context, b),
+                  icon: const Icon(Icons.report_problem_outlined, size: 16),
+                  label: const Text('Raise a Dispute',
+                      style: TextStyle(fontSize: 13)),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.deepOrange,
+                    side: const BorderSide(color: Colors.deepOrange),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                ),
+              ],
             ],
           ],
         ),
@@ -6920,18 +7125,92 @@ class _RequestsBodyState extends State<_RequestsBody> {
     );
   }
 
-  static String _statusLabel(BookingStatus status) {
-    switch (status) {
-      case BookingStatus.pending:
-        return 'Pending';
-      case BookingStatus.accepted:
-        return 'Accepted';
-      case BookingStatus.completed:
-        return 'Completed';
-      case BookingStatus.rejected:
-        return 'Rejected';
-      case BookingStatus.refunded:
-        return 'Refunded';
+  static String _statusLabel(BookingStatus status) => status.label;
+
+  Future<void> _showRaiseDisputeDialog(BuildContext context, Booking b) async {
+    final reasonCtrl = TextEditingController();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            Icon(Icons.gavel, color: Colors.deepOrange[700]),
+            const SizedBox(width: 8),
+            const Text('Raise a Dispute'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Describe the issue. Support will review and resolve within 24 hours.',
+              style: TextStyle(fontSize: 13, color: Colors.grey),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: reasonCtrl,
+              maxLines: 3,
+              maxLength: 300,
+              decoration: const InputDecoration(
+                hintText: 'e.g. Provider did not show up, wrong route taken...',
+                border: OutlineInputBorder(),
+                contentPadding: EdgeInsets.all(10),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.deepOrange,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Submit'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !context.mounted) return;
+    final reason = reasonCtrl.text.trim();
+    if (reason.isEmpty) return;
+
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await Supabase.instance.client
+          .from('bookings')
+          .update({
+            'status': BookingStatus.disputed.dbValue,
+            'dispute_reason': reason,
+            'disputed_at': DateTime.now().toUtc().toIso8601String(),
+          })
+          .eq('id', int.parse(b.id));
+
+      await BookingRepository.instance.updateBookingAfterPayment(
+        bookingId: b.id,
+        status: BookingStatus.disputed,
+      );
+
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text('Dispute submitted. Support will review within 24 hours.'),
+          backgroundColor: Colors.deepOrange,
+        ),
+      );
+    } catch (e) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text('Failed to submit: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
     }
   }
 
@@ -6940,13 +7219,24 @@ class _RequestsBodyState extends State<_RequestsBody> {
       case BookingStatus.pending:
         return Colors.orange;
       case BookingStatus.accepted:
+      case BookingStatus.confirmed:
         return Colors.green;
+      case BookingStatus.inProgress:
+        return Colors.teal;
       case BookingStatus.completed:
         return Colors.blue;
       case BookingStatus.rejected:
+      case BookingStatus.noShow:
         return Colors.red;
       case BookingStatus.refunded:
+      case BookingStatus.cancelledByCustomer:
+      case BookingStatus.cancelledByProvider:
+      case BookingStatus.cancelled:
         return Colors.purple;
+      case BookingStatus.disputed:
+        return Colors.deepOrange;
+      case BookingStatus.expired:
+        return Colors.grey;
     }
   }
 
@@ -7242,26 +7532,17 @@ class _AutoRefundSectionState extends State<_AutoRefundSection> {
   }
 }
 
-/// Shows a time-phase banner on a booking card:
-/// • Before start time  → "Starts in HH:MM:SS"
-/// • Between start & end → "In Progress · ends in HH:MM:SS"
-/// • After end time      → "Service ended"
-class _BookingTimingSection extends StatefulWidget {
+/// Standalone time banner using only booking fields (no Slot needed).
+/// Shows trip schedule, deadline countdown, and overdue warning.
+class _BookingTimeBanner extends StatefulWidget {
   final Booking booking;
-  final Slot slot;
-  final bool isRiderView;
-
-  const _BookingTimingSection({
-    required this.booking,
-    required this.slot,
-    required this.isRiderView,
-  });
+  const _BookingTimeBanner({required this.booking});
 
   @override
-  State<_BookingTimingSection> createState() => _BookingTimingSectionState();
+  State<_BookingTimeBanner> createState() => _BookingTimeBannerState();
 }
 
-class _BookingTimingSectionState extends State<_BookingTimingSection> {
+class _BookingTimeBannerState extends State<_BookingTimeBanner> {
   late Timer _timer;
 
   @override
@@ -7279,56 +7560,115 @@ class _BookingTimingSectionState extends State<_BookingTimingSection> {
   }
 
   String _fmt(Duration d) {
-    if (d.isNegative) return '00:00:00';
+    if (d.isNegative || d == Duration.zero) return '00:00:00';
     final h = d.inHours.toString().padLeft(2, '0');
     final m = (d.inMinutes % 60).toString().padLeft(2, '0');
     final s = (d.inSeconds % 60).toString().padLeft(2, '0');
     return '$h:$m:$s';
   }
 
+  String _fmtDate(DateTime dt) {
+    final h = dt.hour.toString().padLeft(2, '0');
+    final m = dt.minute.toString().padLeft(2, '0');
+    return '${dt.day}/${dt.month} $h:$m';
+  }
+
   @override
   Widget build(BuildContext context) {
+    final b = widget.booking;
     final now = DateTime.now();
-    final start = widget.slot.startTime;
-    final end = widget.slot.endTime;
 
-    IconData icon;
-    String label;
+    if (b.status.isTerminal) return const SizedBox.shrink();
 
-    if (now.isBefore(start)) {
-      final diff = start.difference(now);
-      icon = Icons.schedule;
-      label = 'Starts in ${_fmt(diff)}';
-    } else if (now.isBefore(end)) {
-      final diff = end.difference(now);
-      icon = Icons.play_circle_outline;
-      label = 'Trip time · ends in ${_fmt(diff)}';
-    } else {
-      icon = Icons.timer_off_outlined;
-      label = 'Service time ended';
+    final rows = <Widget>[];
+
+    // Trip schedule
+    if (b.tripStartTime != null && b.tripEndTime != null) {
+      final IconData icon;
+      final String label;
+      final Color color;
+
+      if (now.isBefore(b.tripStartTime!)) {
+        final diff = b.tripStartTime!.difference(now);
+        icon = Icons.schedule;
+        label = 'Starts in ${_fmt(diff)}  (${_fmtDate(b.tripStartTime!)})';
+        color = Colors.blue;
+      } else if (now.isBefore(b.tripEndTime!)) {
+        final diff = b.tripEndTime!.difference(now);
+        icon = Icons.play_circle_outline;
+        label = 'In progress · ends in ${_fmt(diff)}';
+        color = Colors.green;
+      } else {
+        icon = Icons.timer_off_outlined;
+        label = 'Trip time ended  (${_fmtDate(b.tripEndTime!)})';
+        color = Colors.grey;
+      }
+      rows.add(_timeRow(icon, label, color));
     }
 
-    // Display as small hint text
-    return Row(
-      children: [
-        Icon(icon, size: 12, color: Colors.grey[600]),
-        const SizedBox(width: 4),
-        Text(
-          label,
-          style: TextStyle(
-            fontSize: 11,
-            color: Colors.grey[600],
+    // Deadline
+    if (b.deadlineTime != null) {
+      if (b.isOverdue) {
+        rows.add(_timeRow(
+          Icons.warning_amber_rounded,
+          'OVERDUE — deadline was ${_fmtDate(b.deadlineTime!)}',
+          Colors.red,
+          bold: true,
+        ));
+      } else {
+        final remaining = b.deadlineTime!.difference(now);
+        final isUrgent = remaining.inHours < 1;
+        rows.add(_timeRow(
+          Icons.hourglass_bottom,
+          'Deadline in ${_fmt(remaining)}  (${_fmtDate(b.deadlineTime!)})',
+          isUrgent ? Colors.orange : Colors.grey.shade600,
+          bold: isUrgent,
+        ));
+      }
+    }
+
+    if (rows.isEmpty) return const SizedBox.shrink();
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 4, bottom: 2),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: rows,
+      ),
+    );
+  }
+
+  Widget _timeRow(IconData icon, String label, Color color,
+      {bool bold = false}) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 2),
+      child: Row(
+        children: [
+          Icon(icon, size: 13, color: color),
+          const SizedBox(width: 5),
+          Expanded(
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: 11,
+                color: color,
+                fontWeight: bold ? FontWeight.bold : FontWeight.normal,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }
 
 class CountdownText extends StatefulWidget {
   final DateTime endTime;
-  final DateTime? startTime;   // slot start time — shows "Trip starts in" phase
-  final String? bookingId;     // if set, auto-refund fires when endTime passes
+  final DateTime? startTime;
+  final String? bookingId;
+
   const CountdownText({
     super.key,
     required this.endTime,
@@ -7696,11 +8036,7 @@ class _SpendingPageState extends State<SpendingPage> {
             ),
             if (slot != null) ...[
               const SizedBox(height: 12),
-              _BookingTimingSection(
-                booking: booking,
-                slot: slot,
-                isRiderView: false,
-              ),
+              _BookingTimeBanner(booking: booking),
             ],
           ],
         ),

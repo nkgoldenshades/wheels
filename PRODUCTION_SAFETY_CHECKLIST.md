@@ -250,7 +250,7 @@ WHERE table_name = 'bookings' AND column_name LIKE '%stripe%';
 # functions/.env (already set)
 SUPABASE_SERVICE_ROLE_KEY=your_key_here
 RAZORPAY_KEY_ID=rzp_test_SMpj1xxJxAcT6K
-RAZORPAY_KEY_SECRET=PZKW95oZEjcavJ5flTEZVjeU
+RAZORPAY_KEY_SECRET=YOUR_RAZORPAY_KEY_SECRET
 ```
 
 ### 3. Deploy Functions

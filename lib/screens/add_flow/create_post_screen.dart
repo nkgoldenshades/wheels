@@ -1813,7 +1813,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                       Radio<PostMode>(
                         value: PostMode.instant,
                         groupValue: _postMode,
-                        onChanged: (value) => setState(() => _postMode = value!),
+                        onChanged: (v) => setState(() => _postMode = v!),
                       ),
                       const Icon(Icons.flash_on, color: Colors.blue),
                       const SizedBox(width: 8),
@@ -1821,20 +1821,12 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(
-                              'Instant Booking',
-                              style: TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                            Text(
-                              'Customers can book immediately',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Colors.grey,
-                              ),
-                            ),
+                            Text('Instant Booking',
+                                style: TextStyle(
+                                    fontSize: 14, fontWeight: FontWeight.w600)),
+                            Text('Customers can book immediately',
+                                style:
+                                    TextStyle(fontSize: 12, color: Colors.grey)),
                           ],
                         ),
                       ),
@@ -1853,7 +1845,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                       Radio<PostMode>(
                         value: PostMode.waitForFull,
                         groupValue: _postMode,
-                        onChanged: (value) => setState(() => _postMode = value!),
+                        onChanged: (v) => setState(() => _postMode = v!),
                       ),
                       const Icon(Icons.groups, color: Colors.orange),
                       const SizedBox(width: 8),
@@ -1861,20 +1853,12 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(
-                              'Wait for Full',
-                              style: TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                            Text(
-                              'Wait until all seats are filled',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Colors.grey,
-                              ),
-                            ),
+                            Text('Wait for Full',
+                                style: TextStyle(
+                                    fontSize: 14, fontWeight: FontWeight.w600)),
+                            Text('Wait until all seats are filled',
+                                style:
+                                    TextStyle(fontSize: 12, color: Colors.grey)),
                           ],
                         ),
                       ),
@@ -1937,7 +1921,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                       Radio<PostMode>(
                         value: PostMode.fullPost,
                         groupValue: _postMode,
-                        onChanged: (value) => setState(() => _postMode = value!),
+                        onChanged: (v) => setState(() => _postMode = v!),
                       ),
                       const Icon(Icons.directions_car, color: Colors.green),
                       const SizedBox(width: 8),
@@ -1945,20 +1929,12 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(
-                              'Full Post Mode',
-                              style: TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                            Text(
-                              'Customer must book all remaining slots',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Colors.grey,
-                              ),
-                            ),
+                            Text('Full Post Mode',
+                                style: TextStyle(
+                                    fontSize: 14, fontWeight: FontWeight.w600)),
+                            Text('Customer must book all remaining slots',
+                                style:
+                                    TextStyle(fontSize: 12, color: Colors.grey)),
                           ],
                         ),
                       ),

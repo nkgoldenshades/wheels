@@ -12,7 +12,7 @@ Booking is failing because Firebase Cloud Functions for Razorpay payment process
 4. Get your API keys:
    - **Test Keys**: For development (already in code)
      - Key ID: `rzp_test_SMpj1xxJxAcT6K`
-     - Key Secret: `PZKW95oZEjcavJ5flTEZVjeU`
+     - Key Secret: `YOUR_RAZORPAY_KEY_SECRET`
    - **Live Keys**: For production (get after KYC)
      - Key ID: `rzp_live_XXXXXXXXXX`
      - Key Secret: `XXXXXXXXXXXXXXXXXX`
@@ -34,7 +34,7 @@ This will install:
 ```bash
 # Set Razorpay keys as environment variables
 firebase functions:config:set razorpay.key_id="rzp_test_SMpj1xxJxAcT6K"
-firebase functions:config:set razorpay.key_secret="PZKW95oZEjcavJ5flTEZVjeU"
+firebase functions:config:set razorpay.key_secret="YOUR_RAZORPAY_KEY_SECRET"
 
 # For production, use live keys:
 # firebase functions:config:set razorpay.key_id="rzp_live_XXXXXXXXXX"

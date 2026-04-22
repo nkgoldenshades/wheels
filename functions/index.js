@@ -15,12 +15,15 @@ const stripe = require('stripe')(stripeSecretKey);
 // Initialize Firestore-based Stripe escrow functions
 const stripeEscrow = require('./stripe-escrow');
 
-// Get Razorpay keys from environment variables
-// For local testing, create a .env file in functions folder with:
-// RAZORPAY_KEY_ID=rzp_test_SMpj1xxJxAcT6K
-// RAZORPAY_KEY_SECRET=PZKW95oZEjcavJ5flTEZVjeU
-const RAZORPAY_KEY_ID = process.env.RAZORPAY_KEY_ID || 'rzp_test_SMpj1xxJxAcT6K';
-const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET || 'PZKW95oZEjcavJ5flTEZVjeU';
+// Get Razorpay keys from environment variables ONLY — never hardcode secrets
+// Set via: firebase functions:config:set razorpay.key_id="rzp_test_..." razorpay.key_secret="..."
+// Or locally: create functions/.env with RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET
+const RAZORPAY_KEY_ID = process.env.RAZORPAY_KEY_ID;
+const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET;
+
+if (!RAZORPAY_KEY_ID || !RAZORPAY_KEY_SECRET) {
+  console.error('❌ RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET must be set in environment variables');
+}
 
 // Initialize Razorpay with your keys
 const razorpay = new Razorpay({

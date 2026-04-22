@@ -1,7 +1,104 @@
 import 'seat_layout.dart';
 import 'post_mode.dart';
+import 'trip_media.dart';
 
-enum BookingStatus { pending, accepted, completed, rejected, refunded }
+enum BookingStatus {
+  // ── Active (blocks post delete, payment held) ──────────────────────────
+  pending,              // Created, waiting for provider to accept
+  accepted,             // Provider accepted, trip not started yet
+  confirmed,            // Payment confirmed, both parties ready
+  inProgress,           // Trip/service currently happening
+
+  // ── Terminal (post can be deleted, payment resolved) ───────────────────
+  completed,            // Trip done, OTP verified, payment released
+  rejected,             // Provider rejected the booking
+  refunded,             // Payment refunded to customer
+  cancelled,            // Cancelled (generic)
+  cancelledByCustomer,  // Customer cancelled
+  cancelledByProvider,  // Provider cancelled
+  noShow,               // Customer didn't show up
+  disputed,             // Dispute raised — under review
+  expired,              // Countdown timer ran out, auto-refunded
+}
+
+extension BookingStatusX on BookingStatus {
+  /// True = booking is live, payment held, post cannot be deleted
+  bool get isActive => const {
+    BookingStatus.pending,
+    BookingStatus.accepted,
+    BookingStatus.confirmed,
+    BookingStatus.inProgress,
+  }.contains(this);
+
+  /// True = booking is fully resolved, post can be deleted
+  bool get isTerminal => !isActive;
+
+  /// True = money needs to be returned to customer
+  bool get needsRefund => const {
+    BookingStatus.refunded,
+    BookingStatus.cancelledByCustomer,
+    BookingStatus.cancelledByProvider,
+    BookingStatus.expired,
+    BookingStatus.disputed,
+  }.contains(this);
+
+  /// Display label shown in UI
+  String get label {
+    switch (this) {
+      case BookingStatus.pending:             return 'Pending';
+      case BookingStatus.accepted:            return 'Accepted';
+      case BookingStatus.confirmed:           return 'Confirmed';
+      case BookingStatus.inProgress:          return 'In Progress';
+      case BookingStatus.completed:           return 'Completed';
+      case BookingStatus.rejected:            return 'Rejected';
+      case BookingStatus.refunded:            return 'Refunded';
+      case BookingStatus.cancelled:           return 'Cancelled';
+      case BookingStatus.cancelledByCustomer: return 'Cancelled by Customer';
+      case BookingStatus.cancelledByProvider: return 'Cancelled by Provider';
+      case BookingStatus.noShow:              return 'No Show';
+      case BookingStatus.disputed:            return 'Disputed';
+      case BookingStatus.expired:             return 'Expired';
+    }
+  }
+
+  /// DB/JSON value (snake_case to match Supabase)
+  String get dbValue {
+    switch (this) {
+      case BookingStatus.pending:             return 'pending';
+      case BookingStatus.accepted:            return 'accepted';
+      case BookingStatus.confirmed:           return 'confirmed';
+      case BookingStatus.inProgress:          return 'in_progress';
+      case BookingStatus.completed:           return 'completed';
+      case BookingStatus.rejected:            return 'rejected';
+      case BookingStatus.refunded:            return 'refunded';
+      case BookingStatus.cancelled:           return 'cancelled';
+      case BookingStatus.cancelledByCustomer: return 'cancelled_by_customer';
+      case BookingStatus.cancelledByProvider: return 'cancelled_by_provider';
+      case BookingStatus.noShow:              return 'no_show';
+      case BookingStatus.disputed:            return 'disputed';
+      case BookingStatus.expired:             return 'expired';
+    }
+  }
+
+  static BookingStatus fromString(String? value) {
+    switch (value) {
+      case 'pending':               return BookingStatus.pending;
+      case 'accepted':              return BookingStatus.accepted;
+      case 'confirmed':             return BookingStatus.confirmed;
+      case 'in_progress':           return BookingStatus.inProgress;
+      case 'completed':             return BookingStatus.completed;
+      case 'rejected':              return BookingStatus.rejected;
+      case 'refunded':              return BookingStatus.refunded;
+      case 'cancelled':             return BookingStatus.cancelled;
+      case 'cancelled_by_customer': return BookingStatus.cancelledByCustomer;
+      case 'cancelled_by_provider': return BookingStatus.cancelledByProvider;
+      case 'no_show':               return BookingStatus.noShow;
+      case 'disputed':              return BookingStatus.disputed;
+      case 'expired':               return BookingStatus.expired;
+      default:                      return BookingStatus.pending;
+    }
+  }
+}
 
 enum BookingMode {
   shared,  // Multiple customers (default)
@@ -32,8 +129,17 @@ class Booking {
   // Escrow payment fields
   final String? stripePaymentIntentId;
   final String? stripeClientSecret;
-  final DateTime? countdownEndTime;
+  final DateTime? countdownEndTime;   // payment must be confirmed by this time
   final bool paymentHeldInEscrow;
+
+  // Trip schedule — snapshotted from the post at booking time
+  final DateTime? tripStartTime;      // when the trip/service begins
+  final DateTime? tripEndTime;        // when the trip/service ends
+
+  // Deadline — booking must reach 'completed' by this time or it auto-expires
+  // Defaults to tripEndTime + 2 hours grace period
+  // After this: status → expired, payment → refunded
+  final DateTime? deadlineTime;
 
   // Lease security deposit
   final double? securityDeposit;
@@ -45,7 +151,23 @@ class Booking {
   final BookingMode bookingMode;
   final int? totalCapacityBooked; // For full post bookings
   final bool isFullVehicleLocked;
-  final PostMode? postMode; // Add PostMode field
+  final PostMode? postMode;
+
+  // Route / location snapshot — copied from the slot at booking time
+  final String? routeType;       // 'from_to' | 'base_range'
+  final String? fromAddress;
+  final double? fromLat;
+  final double? fromLng;
+  final String? toAddress;
+  final double? toLat;
+  final double? toLng;
+  final String? baseAddress;
+  final double? baseLat;
+  final double? baseLng;
+  final double? rangeKm;
+
+  // Trip media — photos/videos uploaded by provider & customer at start/end
+  final TripMedia tripMedia;
 
   Booking({
     required this.id,
@@ -71,15 +193,33 @@ class Booking {
     this.stripeClientSecret,
     this.countdownEndTime,
     this.paymentHeldInEscrow = false,
+    this.tripStartTime,
+    this.tripEndTime,
+    DateTime? deadlineTime,
     this.securityDeposit,
     this.termsSnapshot,
     this.bookingMode = BookingMode.shared,
     this.totalCapacityBooked,
     this.isFullVehicleLocked = false,
-    this.postMode, // Add to constructor
-  });
+    this.postMode,
+    // location
+    this.routeType,
+    this.fromAddress,
+    this.fromLat,
+    this.fromLng,
+    this.toAddress,
+    this.toLat,
+    this.toLng,
+    this.baseAddress,
+    this.baseLat,
+    this.baseLng,
+    this.rangeKm,
+    // trip media
+    this.tripMedia = TripMedia.empty,
+  }) : deadlineTime = deadlineTime ?? tripEndTime;
 
   Booking copyWith({
+    String? id,
     BookingStatus? status,
     String? otp,
     bool? otpVerified,
@@ -96,15 +236,19 @@ class Booking {
     String? stripeClientSecret,
     DateTime? countdownEndTime,
     bool? paymentHeldInEscrow,
+    DateTime? tripStartTime,
+    DateTime? tripEndTime,
+    DateTime? deadlineTime,
     double? securityDeposit,
     String? termsSnapshot,
     BookingMode? bookingMode,
     int? totalCapacityBooked,
     bool? isFullVehicleLocked,
-    PostMode? postMode, // Add to copyWith
+    PostMode? postMode,
+    TripMedia? tripMedia,
   }) {
     return Booking(
-      id: id,
+      id: id ?? this.id,
       slotId: slotId,
       providerId: providerId,
       providerName: providerName ?? this.providerName,
@@ -127,12 +271,29 @@ class Booking {
       stripeClientSecret: stripeClientSecret ?? this.stripeClientSecret,
       countdownEndTime: countdownEndTime ?? this.countdownEndTime,
       paymentHeldInEscrow: paymentHeldInEscrow ?? this.paymentHeldInEscrow,
+      tripStartTime: tripStartTime ?? this.tripStartTime,
+      tripEndTime: tripEndTime ?? this.tripEndTime,
+      deadlineTime: deadlineTime ?? this.deadlineTime,
       securityDeposit: securityDeposit ?? this.securityDeposit,
       termsSnapshot: termsSnapshot ?? this.termsSnapshot,
       bookingMode: bookingMode ?? this.bookingMode,
       totalCapacityBooked: totalCapacityBooked ?? this.totalCapacityBooked,
       isFullVehicleLocked: isFullVehicleLocked ?? this.isFullVehicleLocked,
-      postMode: postMode ?? this.postMode, // Add to copyWith return
+      postMode: postMode ?? this.postMode,
+      // preserve location fields unchanged
+      routeType: routeType,
+      fromAddress: fromAddress,
+      fromLat: fromLat,
+      fromLng: fromLng,
+      toAddress: toAddress,
+      toLat: toLat,
+      toLng: toLng,
+      baseAddress: baseAddress,
+      baseLat: baseLat,
+      baseLng: baseLng,
+      rangeKm: rangeKm,
+      // trip media
+      tripMedia: tripMedia ?? this.tripMedia,
     );
   }
 
@@ -153,7 +314,7 @@ class Booking {
       'userAge': userAge,
       'userPhone': userPhone,
       'userEmail': userEmail,
-      'status': status.name,
+      'status': status.dbValue,
       'otp': otp,
       'otpVerified': otpVerified,
       'createdAt': createdAt.toIso8601String(),
@@ -161,12 +322,29 @@ class Booking {
       'stripeClientSecret': stripeClientSecret,
       'countdownEndTime': countdownEndTime?.toIso8601String(),
       'paymentHeldInEscrow': paymentHeldInEscrow,
+      'tripStartTime': tripStartTime?.toIso8601String(),
+      'tripEndTime': tripEndTime?.toIso8601String(),
+      'deadlineTime': deadlineTime?.toIso8601String(),
       'securityDeposit': securityDeposit,
       'termsSnapshot': termsSnapshot,
       'bookingMode': bookingMode.name,
       'totalCapacityBooked': totalCapacityBooked,
       'isFullVehicleLocked': isFullVehicleLocked,
-      'postMode': postMode?.dbValue, // Add to toJson
+      'postMode': postMode?.dbValue,
+      // location snapshot
+      'routeType': routeType,
+      'fromAddress': fromAddress,
+      'fromLat': fromLat,
+      'fromLng': fromLng,
+      'toAddress': toAddress,
+      'toLat': toLat,
+      'toLng': toLng,
+      'baseAddress': baseAddress,
+      'baseLat': baseLat,
+      'baseLng': baseLng,
+      'rangeKm': rangeKm,
+      // trip media
+      'tripMedia': tripMedia.toJson(),
     };
   }
 
@@ -202,11 +380,16 @@ class Booking {
         'is_full_vehicle_locked': isFullVehicleLocked,
       },
       'booking_strategy_snapshot': bookingMode == BookingMode.full ? 'full_vehicle' : 'instant',
-      'status': status.name,
+      'status': status.dbValue,
       'otp_code': otp,
       'otp_verified': otpVerified,
       'payment_gateway_id': stripePaymentIntentId,
       'created_at': createdAt.toIso8601String(),
+      // trip schedule
+      if (tripStartTime != null) 'start_time': tripStartTime!.toUtc().toIso8601String(),
+      if (tripEndTime != null)   'end_time':   tripEndTime!.toUtc().toIso8601String(),
+      // deadline_time not sent — DB uses end_time directly
+      'trip_media': tripMedia.toJson(),
     };
   }
 
@@ -249,7 +432,7 @@ class Booking {
       userAge: json['userAge'] ?? json['user_age'] ?? firstPassenger?['age'],
       userPhone: json['userPhone'] ?? json['user_phone'] ?? firstPassenger?['phone'],
       userEmail: json['userEmail'] ?? json['user_email'] ?? firstPassenger?['email'],
-      status: BookingStatus.values.firstWhere((e) => e.name == json['status']),
+      status: BookingStatusX.fromString(json['status'] as String?),
       otp: json['otp'] ?? json['otp_code'],
       otpVerified: json['otpVerified'] ?? json['otp_verified'] ?? false,
       createdAt: DateTime.parse(json['createdAt'] ?? json['created_at'] ?? DateTime.now().toIso8601String()),
@@ -268,10 +451,59 @@ class Booking {
       isFullVehicleLocked: json['isFullVehicleLocked'] ?? json['is_full_vehicle_locked'] ?? metadata?['is_full_vehicle_locked'] ?? false,
       postMode: (json['postMode'] ?? json['post_mode'] ?? json['post_mode_snapshot']) != null
           ? PostModeExtension.fromDbValue(json['postMode'] ?? json['post_mode'] ?? json['post_mode_snapshot'])
-          : null, // Add PostMode parsing
+          : null,
+      // location snapshot
+      routeType: json['routeType'] ?? json['route_type'],
+      fromAddress: json['fromAddress'] ?? json['from_address'],
+      fromLat: (json['fromLat'] ?? json['from_lat'] as num?)?.toDouble(),
+      fromLng: (json['fromLng'] ?? json['from_lng'] as num?)?.toDouble(),
+      toAddress: json['toAddress'] ?? json['to_address'],
+      toLat: (json['toLat'] ?? json['to_lat'] as num?)?.toDouble(),
+      toLng: (json['toLng'] ?? json['to_lng'] as num?)?.toDouble(),
+      baseAddress: json['baseAddress'] ?? json['base_address'],
+      baseLat: (json['baseLat'] ?? json['base_lat'] as num?)?.toDouble(),
+      baseLng: (json['baseLng'] ?? json['base_lng'] as num?)?.toDouble(),
+      rangeKm: (json['rangeKm'] ?? json['range_km'] as num?)?.toDouble(),
+      // trip schedule — from Supabase start_time/end_time columns
+      tripStartTime: (json['tripStartTime'] ?? json['start_time']) != null
+          ? DateTime.tryParse(json['tripStartTime'] ?? json['start_time'])?.toLocal()
+          : null,
+      tripEndTime: (json['tripEndTime'] ?? json['end_time']) != null
+          ? DateTime.tryParse(json['tripEndTime'] ?? json['end_time'])?.toLocal()
+          : null,
+      deadlineTime: (json['deadlineTime'] ?? json['deadline_time']) != null
+          ? DateTime.tryParse(json['deadlineTime'] ?? json['deadline_time'])?.toLocal()
+          : null,
+      // trip media — new unified column (falls back to empty)
+      tripMedia: TripMedia.fromJson(
+        (json['tripMedia'] ?? json['trip_media']) as Map<String, dynamic>?,
+      ),
     );
   }
   
+  // ── Deadline helpers ────────────────────────────────────────────────────
+
+  /// Time remaining until deadline. Null if no deadline set.
+  Duration? get timeUntilDeadline {
+    if (deadlineTime == null) return null;
+    final remaining = deadlineTime!.difference(DateTime.now());
+    return remaining.isNegative ? Duration.zero : remaining;
+  }
+
+  /// True if deadline has passed and booking is still active (should auto-expire)
+  bool get isOverdue {
+    if (deadlineTime == null) return false;
+    return DateTime.now().isAfter(deadlineTime!) && status.isActive;
+  }
+
+  /// True if trip has started (now >= tripStartTime)
+  bool get tripHasStarted =>
+      tripStartTime != null && DateTime.now().isAfter(tripStartTime!);
+
+  /// True if trip has ended (now >= tripEndTime)
+  bool get tripHasEnded =>
+      tripEndTime != null && DateTime.now().isAfter(tripEndTime!);
+
   // Helper to parse booking mode from different formats
   static BookingMode _parseBookingMode(dynamic value) {
     if (value == null) return BookingMode.shared;

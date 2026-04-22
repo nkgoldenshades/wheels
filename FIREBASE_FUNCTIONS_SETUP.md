@@ -35,7 +35,7 @@ npm install
 
 ```bash
 firebase functions:config:set razorpay.key_id="rzp_test_SMpj1xxJxAcT6K"
-firebase functions:config:set razorpay.key_secret="PZKW95oZEjcavJ5flTEZVjeU"
+firebase functions:config:set razorpay.key_secret="YOUR_RAZORPAY_KEY_SECRET"
 firebase functions:config:set razorpay.webhook_secret="YOUR_WEBHOOK_SECRET"
 ```
 

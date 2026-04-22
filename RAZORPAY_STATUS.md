@@ -10,7 +10,7 @@
 - ✅ Test mode disabled (using real Razorpay checkout)
 - ✅ Test keys configured:
   - Key ID: `rzp_test_SMpj1xxJxAcT6K`
-  - Key Secret: `PZKW95oZEjcavJ5flTEZVjeU`
+  - Key Secret: `YOUR_RAZORPAY_KEY_SECRET`
 
 ### 2. Firebase Functions
 - ✅ `createRazorpayOrder` function implemented
@@ -33,7 +33,7 @@ The functions expect Razorpay keys to be set as environment variables:
 
 ```bash
 firebase functions:config:set razorpay.key_id="rzp_test_SMpj1xxJxAcT6K"
-firebase functions:config:set razorpay.key_secret="PZKW95oZEjcavJ5flTEZVjeU"
+firebase functions:config:set razorpay.key_secret="YOUR_RAZORPAY_KEY_SECRET"
 ```
 
 **For production (after KYC):**
@@ -152,7 +152,7 @@ firebase functions:config:get
 
 # If razorpay config missing, set it
 firebase functions:config:set razorpay.key_id="rzp_test_SMpj1xxJxAcT6K"
-firebase functions:config:set razorpay.key_secret="PZKW95oZEjcavJ5flTEZVjeU"
+firebase functions:config:set razorpay.key_secret="YOUR_RAZORPAY_KEY_SECRET"
 ```
 
 ### Error: "Payment verification failed"
@@ -198,7 +198,7 @@ To get Razorpay working right now:
 ```bash
 # 1. Set config
 firebase functions:config:set razorpay.key_id="rzp_test_SMpj1xxJxAcT6K"
-firebase functions:config:set razorpay.key_secret="PZKW95oZEjcavJ5flTEZVjeU"
+firebase functions:config:set razorpay.key_secret="YOUR_RAZORPAY_KEY_SECRET"
 
 # 2. Install dependencies
 cd functions

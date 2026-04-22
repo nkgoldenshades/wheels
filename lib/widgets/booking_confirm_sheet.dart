@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../models/slot.dart';
+import '../models/slot.dart' hide BookingMode;
 import '../models/slot_type.dart';
 import '../models/seat_layout.dart';
 import '../models/booking.dart';
@@ -17,6 +17,7 @@ import '../services/profile_repository.dart';
 import '../services/stripe_service.dart';
 import '../services/payment_service.dart';
 import '../services/auth_repository.dart';
+import '../services/vehicle_repository.dart';
 
 class PassengerFormData {
   final TextEditingController nameController;
@@ -282,7 +283,7 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
           (b) =>
               b.slotId == slot.id &&
               b.seatKey != null &&
-              b.status != BookingStatus.rejected,
+              b.status.isActive,
         )
         .map((b) => b.seatKey!)
         .toSet();
@@ -1101,15 +1102,11 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
                                     if (isWebRedirect) {
                                       // Don't create local booking yet - wait for payment completion
                                       Navigator.pop(context);
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        SnackBar(
-                                          content: Text(
-                                            '🔗 Opening ${gateway.contains('razorpay') ? 'Razorpay' : 'Stripe'} checkout...\n'
-                                            'Complete payment there. Your booking will be confirmed after payment.',
-                                          ),
-                                          backgroundColor: Colors.orange,
-                                          duration: const Duration(seconds: 6),
-                                        ),
+                                      
+                                      // Show popup dialog instead of just snackbar
+                                      _showWebPaymentPendingDialog(
+                                        context,
+                                        gateway.contains('razorpay') ? 'Razorpay' : 'Stripe',
                                       );
                                       return;
                                     }
@@ -1122,13 +1119,25 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
                                     }
 
                                     // Create local booking with payment details
+                                    // Get the selected seat's raw display name (e.g. "A2")
+                                    final selectedSeatKey = _selectedSeats.isNotEmpty ? _selectedSeats.first : null;
+                                    final selectedCell = selectedSeatKey != null
+                                        ? SeatLayoutRepository.instance
+                                            .getLayout(widget.slot.seatLayoutOwnerId ?? '')
+                                            ?.cells[selectedSeatKey]
+                                        : null;
+                                    final seatKeyRaw = selectedCell?.seatName ?? selectedSeatKey;
+
                                     final localBooking = await BookingRepository.instance.createBooking(
                                       slotId: widget.slot.id,
                                       providerId: widget.providerId,
+                                      // ── provider snapshot from slot ──────────
+                                      providerName: widget.slot.providerName,
                                       userId: currentUser.id,
                                       defaultCapacity: widget.slot.capacity,
                                       price: basePrice,
-                                      seatKey: _selectedSeats.isNotEmpty ? _selectedSeats.first : null,
+                                      seatKey: selectedSeatKey,
+                                      seatKeyRaw: seatKeyRaw,
                                       userName: names.isNotEmpty ? names.first : null,
                                       userAge: ages.isNotEmpty ? ages.first : null,
                                       userPhone: phones.isNotEmpty ? phones.first : null,
@@ -1142,6 +1151,61 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
                                       termsSnapshot: widget.slot.notes?.isNotEmpty == true
                                           ? widget.slot.notes
                                           : null,
+                                      // ── slot details snapshot ─────────────────
+                                      serviceType: widget.slot.serviceType,
+                                      postMode: widget.slot.postMode,
+                                      bookingMode: widget.slot.bookingMode.name == 'full'
+                                          ? BookingMode.full
+                                          : BookingMode.shared,
+                                      vehicleId: widget.slot.vehicleId,
+                                      slotStartTime: widget.slot.startTime,
+                                      slotEndTime: widget.slot.endTime,
+                                      slotCapacity: widget.slot.capacity,
+                                      pickupOption: widget.slot.pickupOption.name,
+                                      withOperator: widget.slot.withOperator,
+                                      fuelPolicy: widget.slot.fuelPolicy,
+                                      maxWeight: widget.slot.maxWeight,
+                                      maxLength: widget.slot.maxLength,
+                                      maxWidth: widget.slot.maxWidth,
+                                      maxHeight: widget.slot.maxHeight,
+                                      // lease-specific snapshot
+                                      leaseDuration: widget.slot.leaseDuration,
+                                      insuranceIncluded: widget.slot.insuranceIncluded,
+                                      leaseTerms: widget.slot.leaseTerms,
+                                      waitForFullDeadlineHours: widget.slot.waitForFullDeadlineHours,
+                                      // slot_layout: full layout JSONB snapshot
+                                      slotLayoutSnapshot: widget.slot.seatLayoutStructure?.toJson(),
+                                      // provider vehicle images snapshot
+                                      providerImageUrls: () {
+                                        final v = VehicleRepository.instance
+                                            .getById(widget.slot.vehicleId);
+                                        if (v == null) return <String>[];
+                                        return [
+                                          if (v.profileImage != null &&
+                                              v.profileImage!.isNotEmpty)
+                                            v.profileImage!,
+                                          ...v.galleryImages
+                                              .where((e) => e.isNotEmpty),
+                                        ];
+                                      }(),
+                                      // payment method
+                                      paymentMethod: gateway.contains('razorpay')
+                                          ? 'razorpay'
+                                          : 'stripe',
+                                      // ── location snapshot from slot ──────────
+                                      routeType: widget.slot.slotType.name == 'fromTo'
+                                          ? 'from_to'
+                                          : 'base_range',
+                                      fromAddress: _locName(widget.slot.fromLocation),
+                                      fromLat: _locLat(widget.slot.fromLocation),
+                                      fromLng: _locLng(widget.slot.fromLocation),
+                                      toAddress: _locName(widget.slot.toLocation),
+                                      toLat: _locLat(widget.slot.toLocation),
+                                      toLng: _locLng(widget.slot.toLocation),
+                                      baseAddress: _locName(widget.slot.baseLocation),
+                                      baseLat: _locLat(widget.slot.baseLocation),
+                                      baseLng: _locLng(widget.slot.baseLocation),
+                                      rangeKm: widget.slot.radius,
                                     );
 
                                     if (localBooking != null && context.mounted) {
@@ -1154,14 +1218,13 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
                                       Navigator.of(context).popUntil((route) => route.isFirst);
 
                                       final gatewayLabel = gateway == 'razorpay' ? 'Razorpay' : 'Stripe';
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        SnackBar(
-                                          content: Text(
-                                            '✅ Booking confirmed via $gatewayLabel! OTP: ${otp ?? "Check Requests"}',
-                                          ),
-                                          backgroundColor: Colors.green,
-                                          duration: const Duration(seconds: 5),
-                                        ),
+                                      
+                                      // Show success popup dialog with OTP
+                                      _showPaymentSuccessDialog(
+                                        context,
+                                        gatewayLabel,
+                                        otp,
+                                        localBooking.id,
                                       );
                                     }
                                   } else {
@@ -1248,6 +1311,222 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
 
   static String _formatTime(DateTime time) {
     return TimezoneUtils.formatTimeWithTimezone(time, show24Hour: true);
+  }
+
+  // ── Location string helpers ─────────────────────────────────────────────
+  // Location strings are stored as "Display Name|lat,lng|keywords"
+
+  static String? _locName(String? raw) {
+    if (raw == null || raw.isEmpty) return null;
+    return raw.contains('|') ? raw.split('|').first.trim() : raw.trim();
+  }
+
+  static double? _locLat(String? raw) {
+    if (raw == null || raw.isEmpty) return null;
+    final parts = raw.split('|');
+    if (parts.length < 2) return null;
+    final coords = parts[1].split(',');
+    if (coords.isEmpty) return null;
+    return double.tryParse(coords[0].trim());
+  }
+
+  static double? _locLng(String? raw) {
+    if (raw == null || raw.isEmpty) return null;
+    final parts = raw.split('|');
+    if (parts.length < 2) return null;
+    final coords = parts[1].split(',');
+    if (coords.length < 2) return null;
+    return double.tryParse(coords[1].trim());
+  }
+
+  /// Show success dialog after payment completion
+  void _showPaymentSuccessDialog(
+    BuildContext context,
+    String gatewayLabel,
+    String? otp,
+    String bookingId,
+  ) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            Icon(Icons.check_circle, color: Colors.green[600], size: 32),
+            const SizedBox(width: 12),
+            const Expanded(
+              child: Text(
+                'Payment Successful!',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Your booking has been confirmed via $gatewayLabel.',
+              style: const TextStyle(fontSize: 16),
+            ),
+            const SizedBox(height: 16),
+            if (otp != null) ...[
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.blue.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.blue.withValues(alpha: 0.3)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Your OTP Code:',
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: Colors.grey,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(
+                          otp,
+                          style: TextStyle(
+                            fontSize: 32,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 8,
+                            color: Colors.blue[700],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'Share this code with the provider to complete your booking.',
+                      style: TextStyle(fontSize: 12, color: Colors.grey),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+            const SizedBox(height: 16),
+            Text(
+              'Booking ID: $bookingId',
+              style: const TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context); // Close dialog
+              // Navigate to Requests tab
+              mainTabIndex.value = 1;
+              Navigator.of(context).popUntil((route) => route.isFirst);
+            },
+            child: const Text('View My Bookings'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context); // Close dialog
+              // Navigate to Requests tab
+              mainTabIndex.value = 1;
+              Navigator.of(context).popUntil((route) => route.isFirst);
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.green,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Show pending dialog for web payment redirect
+  void _showWebPaymentPendingDialog(BuildContext context, String gatewayLabel) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            Icon(Icons.open_in_new, color: Colors.orange[600], size: 32),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                'Opening $gatewayLabel',
+                style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'You will be redirected to $gatewayLabel to complete your payment.',
+              style: const TextStyle(fontSize: 16),
+            ),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.orange.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.orange.withValues(alpha: 0.3)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(Icons.info_outline, color: Colors.orange[700], size: 20),
+                      const SizedBox(width: 8),
+                      const Text(
+                        'Important',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    '• Complete the payment on the checkout page\n'
+                    '• Your booking will be confirmed automatically\n'
+                    '• Check "My Bookings" tab after payment',
+                    style: TextStyle(fontSize: 13, height: 1.5),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.orange,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Got it'),
+          ),
+        ],
+      ),
+    );
   }
 }
 

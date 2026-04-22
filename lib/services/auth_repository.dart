@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'profile_name_registry.dart';
+import 'device_info_service.dart';
 
 class AppAuthUser {
   final String id;
@@ -145,6 +147,9 @@ class AuthRepository {
       } catch (e) {
         debugPrint('⚠️  Supabase sync failed: $e - continuing anyway');
       }
+
+      // Record device session (fire-and-forget, non-blocking)
+      unawaited(DeviceInfoService.instance.recordLoginSession(user.id));
       
       return user;
     } catch (e) {
@@ -152,8 +157,6 @@ class AuthRepository {
       throw msg ?? 'Sign up failed: $e';
     }
   }
-
-  // Sync Firebase user to Supabase database
   Future<void> syncUserToSupabase() async {
     final firebaseUser = _firebaseAuth.currentUser;
     
@@ -236,6 +239,9 @@ class AuthRepository {
       } catch (e) {
         debugPrint('⚠️  Supabase sync failed: $e - continuing anyway');
       }
+
+      // Record device session (fire-and-forget, non-blocking)
+      unawaited(DeviceInfoService.instance.recordLoginSession(user.id));
       
       return user;
     } catch (e) {

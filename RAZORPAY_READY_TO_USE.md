@@ -14,7 +14,7 @@
 
 3. **Razorpay Keys**
    - ✅ Test Key ID: `rzp_test_SMpj1xxJxAcT6K`
-   - ✅ Test Key Secret: `PZKW95oZEjcavJ5flTEZVjeU`
+   - ✅ Test Key Secret: `YOUR_RAZORPAY_KEY_SECRET`
    - ✅ Keys loaded from environment variables
 
 ## 🎉 You Can Now Make Payments!
@@ -127,7 +127,7 @@ If invalid: Payment rejected ❌
 ### Local Development (.env file)
 ```env
 RAZORPAY_KEY_ID=rzp_test_SMpj1xxJxAcT6K
-RAZORPAY_KEY_SECRET=PZKW95oZEjcavJ5flTEZVjeU
+RAZORPAY_KEY_SECRET=YOUR_RAZORPAY_KEY_SECRET
 ```
 
 ### Production (Firebase Console)

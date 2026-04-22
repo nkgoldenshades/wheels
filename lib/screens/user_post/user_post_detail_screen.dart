@@ -9,6 +9,7 @@ import '../../models/user_post_acceptance.dart';
 import '../../models/service_type.dart';
 import '../../models/slot_type.dart';
 import 'package:razorpay_flutter/razorpay_flutter.dart';
+import '../../services/razorpay_service.dart';
 
 class UserPostDetailScreen extends StatefulWidget {
   final UserPost post;
@@ -497,7 +498,7 @@ class _UserPostDetailScreenState extends State<UserPostDetailScreen> {
     if (currentUser == null) return;
 
     var options = {
-      'key': 'rzp_test_SMpj1xxJxAcT6K',
+      'key': RazorpayService.keyId,
       'amount': orderData['amount'],
       'currency': orderData['currency'],
       'name': 'VaultWheels',
@@ -542,11 +543,11 @@ class _UserPostDetailScreenState extends State<UserPostDetailScreen> {
         );
 
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Payment successful!'),
-              backgroundColor: Colors.green,
-            ),
+          // Show success popup dialog
+          _showPaymentSuccessDialog(
+            paymentId: response.paymentId ?? '',
+            orderId: response.orderId ?? '',
+            amount: acceptance.amount,
           );
           _otpController.clear();
         }
@@ -564,12 +565,8 @@ class _UserPostDetailScreenState extends State<UserPostDetailScreen> {
   }
 
   void _handlePaymentError(PaymentFailureResponse response) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Payment failed: ${response.message}'),
-        backgroundColor: Colors.red,
-      ),
-    );
+    // Show error popup dialog instead of just snackbar
+    _showPaymentErrorDialog(response.message ?? 'Payment failed');
   }
 
   void _handleExternalWallet(ExternalWalletResponse response) {
@@ -619,5 +616,204 @@ class _UserPostDetailScreenState extends State<UserPostDetailScreen> {
       case AcceptanceStatus.cancelled:
         return Colors.red;
     }
+  }
+
+  /// Show success dialog after Razorpay payment
+  void _showPaymentSuccessDialog({
+    required String paymentId,
+    required String orderId,
+    required double amount,
+  }) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            Icon(Icons.check_circle, color: Colors.green[600], size: 32),
+            const SizedBox(width: 12),
+            const Expanded(
+              child: Text(
+                'Payment Successful!',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Your payment has been completed successfully via Razorpay.',
+              style: TextStyle(fontSize: 16),
+            ),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.green.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.green.withValues(alpha: 0.3)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _buildPaymentDetailRow('Amount', '₹${amount.toStringAsFixed(2)}'),
+                  const SizedBox(height: 8),
+                  _buildPaymentDetailRow('Payment ID', paymentId),
+                  const SizedBox(height: 8),
+                  _buildPaymentDetailRow('Order ID', orderId),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.blue.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.info_outline, color: Colors.blue[700], size: 20),
+                  const SizedBox(width: 8),
+                  const Expanded(
+                    child: Text(
+                      'Your request has been updated with payment details.',
+                      style: TextStyle(fontSize: 13),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.green,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Show error dialog for payment failure
+  void _showPaymentErrorDialog(String errorMessage) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            Icon(Icons.error_outline, color: Colors.red[600], size: 32),
+            const SizedBox(width: 12),
+            const Expanded(
+              child: Text(
+                'Payment Failed',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Your payment could not be processed.',
+              style: TextStyle(fontSize: 16),
+            ),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.red.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.red.withValues(alpha: 0.3)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Error Details:',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    errorMessage,
+                    style: const TextStyle(fontSize: 13),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'Please try again or contact support if the issue persists.',
+              style: TextStyle(fontSize: 13, color: Colors.grey),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+            },
+            child: const Text('Close'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              // Retry payment by triggering the payment flow again
+              setState(() {});
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.blue,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Try Again'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPaymentDetailRow(String label, String value) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 90,
+          child: Text(
+            label,
+            style: const TextStyle(
+              fontSize: 13,
+              color: Colors.grey,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ),
+        Expanded(
+          child: Text(
+            value,
+            style: const TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      ],
+    );
   }
 }

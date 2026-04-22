@@ -3,6 +3,7 @@ import 'slot_type.dart';
 import 'pickup_mode.dart';
 import 'user_tier.dart';
 import 'post_mode.dart';
+import 'post_status.dart';
 import 'simple_seat_layout.dart';
 
 enum BookingMode {
@@ -58,6 +59,9 @@ class Slot {
   // Post Mode - How this post can be booked
   final PostMode postMode; // 'instant', 'wait_for_full', or 'full_vehicle'
   
+  // Post lifecycle status
+  final PostStatus postStatus;
+
   // Wait for full deadline (hours before start time)
   final int? waitForFullDeadlineHours; // Only used when postMode = waitForFull
 
@@ -98,6 +102,7 @@ class Slot {
     this.minCustomerTier = UserTier.basic,
     this.fullVehiclePrice,
     this.postMode = PostMode.instant,
+    this.postStatus = PostStatus.active,
     this.waitForFullDeadlineHours,
   });
 
@@ -153,6 +158,7 @@ class Slot {
     double? fullVehiclePrice,
     bool setFullVehiclePriceNull = false,
     PostMode? postMode,
+    PostStatus? postStatus,
     int? waitForFullDeadlineHours,
   }) {
     return Slot(
@@ -196,6 +202,7 @@ class Slot {
       minCustomerTier: minCustomerTier ?? this.minCustomerTier,
       fullVehiclePrice: setFullVehiclePriceNull ? null : (fullVehiclePrice ?? this.fullVehiclePrice),
       postMode: postMode ?? this.postMode,
+      postStatus: postStatus ?? this.postStatus,
       waitForFullDeadlineHours: waitForFullDeadlineHours ?? this.waitForFullDeadlineHours,
     );
   }
@@ -208,14 +215,14 @@ class Slot {
       'service_type': serviceType.name,
       'slot_type': slotType.name,
       'seat_layout_owner_id': seatLayoutOwnerId,
-      'seat_layout_structure': seatLayoutStructure?.toJson(),
+      'slot_layout_structure': seatLayoutStructure?.toJson(),
       'requires_approval': requiresApproval,
       'from_location': fromLocation,
       'to_location': toLocation,
       'base_location': baseLocation,
       'radius': radius,
-      'start_time': startTime.toIso8601String(),
-      'end_time': endTime.toIso8601String(),
+      'start_time': startTime.toUtc().toIso8601String(),
+      'end_time': endTime.toUtc().toIso8601String(),
       'price': price,
       'capacity': capacity,
       'notes': notes,
@@ -237,6 +244,7 @@ class Slot {
       'min_customer_tier': minCustomerTier.name,
       'full_vehicle_price': fullVehiclePrice,
       'postmode': postMode.dbValue,
+      'post_status': postStatus.dbValue,
       'wait_for_full_deadline_hours': waitForFullDeadlineHours,
       'updated_at': DateTime.now().toIso8601String(),
     };
@@ -267,8 +275,8 @@ class Slot {
         (s) => s.name == (json['slot_type'] ?? json['slotType']),
       ),
       seatLayoutOwnerId: json['seat_layout_owner_id'] ?? json['seatLayoutOwnerId'],
-      seatLayoutStructure: json['seat_layout_structure'] != null
-          ? SimpleSeatLayout.fromJson(json['seat_layout_structure'] as Map<String, dynamic>)
+      seatLayoutStructure: (json['slot_layout_structure'] ?? json['seat_layout_structure']) != null
+          ? SimpleSeatLayout.fromJson((json['slot_layout_structure'] ?? json['seat_layout_structure']) as Map<String, dynamic>)
           : null,
       requiresApproval: json['requires_approval'] ?? json['requiresApproval'] ?? true,
       fromLocation: json['from_location'] ?? json['fromLocation'],
@@ -312,6 +320,11 @@ class Slot {
       postMode: json['postmode'] != null || json['postMode'] != null
           ? PostModeExtension.fromDbValue(json['postmode'] ?? json['postMode'])
           : PostMode.instant,
+      postStatus: PostStatusX.fromFields(
+        isAvailable: json['is_available'] ?? json['isAvailable'] ?? true,
+        endTime: DateTime.parse(json['end_time'] ?? json['endTime']),
+        explicitStatus: json['post_status'] as String?,
+      ),
       waitForFullDeadlineHours: json['wait_for_full_deadline_hours'] ?? json['waitForFullDeadlineHours'],
     );
   }

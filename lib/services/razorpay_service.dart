@@ -10,7 +10,10 @@ class RazorpayService {
   static final RazorpayService instance = RazorpayService._();
 
   // Razorpay test key — replace with live key for production
-  static const String _keyId = 'rzp_test_YourRazorpayKeyHere';
+  static const String _keyId = 'rzp_test_SMpj1xxJxAcT6K';
+
+  // Expose for direct Razorpay SDK usage outside this service
+  static const String keyId = _keyId;
 
   Razorpay? _razorpay;
 

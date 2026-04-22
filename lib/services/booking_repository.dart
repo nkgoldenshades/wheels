@@ -8,6 +8,7 @@ import '../models/booking.dart';
 import '../models/seat_layout.dart';
 import '../models/post_mode.dart';
 import '../models/service_type.dart';
+import '../models/trip_media.dart';
 import 'auth_repository.dart';
 import 'slot_repository.dart';
 import 'vehicle_repository.dart';
@@ -32,13 +33,42 @@ class BookingRepository {
     await _load();
   }
 
+  /// Refresh bookings from Supabase (called after auth).
+  /// Also triggers server-side expiry of overdue bookings.
+  Future<void> refreshFromSupabase() async {
+    // Expire overdue bookings on the server first (fire-and-forget)
+    _expireOverdueBookings();
+    bookings.value = [];
+    await _loadFromSupabase();
+    await _persist();
+  }
+
+  /// Calls the server-side expire function. Silent — never throws.
+  Future<void> _expireOverdueBookings() async {
+    try {
+      final supabase = Supabase.instance.client;
+
+      // Expire overdue bookings
+      final r1 = await supabase.rpc('expire_overdue_bookings');
+      if (r1 != null) {
+        final count = (r1 as Map<String, dynamic>)['expired_count'] ?? 0;
+        if (count > 0) debugPrint('⏰ Auto-expired $count overdue booking(s)');
+      }
+
+      // Deactivate posts whose end_time has passed
+      final r2 = await supabase.rpc('auto_deactivate_expired_posts');
+      if (r2 != null) {
+        final count = (r2 as Map<String, dynamic>)['deactivated_posts'] ?? 0;
+        if (count > 0) debugPrint('📴 Auto-deactivated $count expired post(s)');
+      }
+    } catch (e) {
+      debugPrint('⚠️ auto-maintenance: $e');
+    }
+  }
+
   Future<void> _load() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      
-      // TEMPORARY: Clear local storage to force fresh load from Supabase
-      await prefs.remove(_storageKey);
-      debugPrint('🧹 Cleared local bookings storage');
       
       // Clear existing bookings before loading (prevent duplicates)
       bookings.value = [];
@@ -47,11 +77,9 @@ class BookingRepository {
       bool supabaseSuccess = false;
       try {
         await _loadFromSupabase();
-        supabaseSuccess = bookings.value.isNotEmpty;
+        supabaseSuccess = true; // ✅ FIX: Supabase responded without error = success
         
-        if (supabaseSuccess) {
-          debugPrint('✅ Successfully loaded from Supabase');
-        }
+        debugPrint('✅ Successfully loaded ${bookings.value.length} bookings from Supabase');
       } catch (e) {
         debugPrint('❌ Supabase load failed: $e');
         supabaseSuccess = false;
@@ -154,6 +182,7 @@ class BookingRepository {
     }
 
     debugPrint('🔍 Loading bookings for user: ${currentUser.id}');
+    debugPrint('🔑 Current user ID: ${currentUser.id}'); // ✅ FIX: Debug log to confirm user ID
 
     // Load bookings where user is either customer OR provider (CORRECT field names)
     final response = await supabase
@@ -227,7 +256,7 @@ class BookingRepository {
     final activeBookings = bookings.value
         .where((b) =>
             b.slotId == slotId &&
-            b.status != BookingStatus.rejected)
+            b.status.isActive)
         .length;
     final newRemaining = (newCapacity - activeBookings).clamp(0, newCapacity);
     remainingCapacityBySlotId.value = {
@@ -250,6 +279,7 @@ class BookingRepository {
     required int defaultCapacity,
     required double price,
     String? seatKey,
+    String? seatKeyRaw,       // human-readable seat name e.g. "A2"
     SeatGender? userGender,
     String? userName,
     int? userAge,
@@ -263,8 +293,41 @@ class BookingRepository {
     String? termsSnapshot,
     BookingMode bookingMode = BookingMode.shared,
     int? totalCapacityBooked,
-    PostMode? postMode, // Add PostMode parameter
-    ServiceType? serviceType, // Add ServiceType parameter
+    PostMode? postMode,
+    ServiceType? serviceType,
+    // ── slot details snapshot ─────────────────────────────────
+    String? vehicleId,
+    DateTime? slotStartTime,
+    DateTime? slotEndTime,
+    int? slotCapacity,
+    String? pickupOption,
+    bool? withOperator,
+    String? fuelPolicy,
+    double? maxWeight,
+    double? maxLength,
+    double? maxWidth,
+    double? maxHeight,
+    // lease-specific snapshot
+    String? leaseDuration,
+    bool? insuranceIncluded,
+    String? leaseTerms,
+    int? waitForFullDeadlineHours,
+    Map<String, dynamic>? slotLayoutSnapshot,
+    List<String>? providerImageUrls,  // vehicle photos
+    String? paymentMethod,            // "razorpay" or "stripe"
+    String? deviceId,                 // from DeviceInfoService
+    // ── location snapshot from the slot ──────────────────────
+    String? routeType,
+    String? fromAddress,
+    double? fromLat,
+    double? fromLng,
+    String? toAddress,
+    double? toLat,
+    double? toLng,
+    String? baseAddress,
+    double? baseLat,
+    double? baseLng,
+    double? rangeKm,
   }) async {
     // Prevent self-booking: User cannot book their own post
     if (userId == providerId) {
@@ -276,10 +339,7 @@ class BookingRepository {
     if (bookingMode == BookingMode.full) {
       // Check if slot already has any active bookings
       final hasActiveBookings = bookings.value.any(
-        (b) =>
-            b.slotId == slotId &&
-            b.status != BookingStatus.rejected &&
-            b.status != BookingStatus.refunded,
+        (b) => b.slotId == slotId && b.status.isActive,
       );
       if (hasActiveBookings) {
         debugPrint('❌ Cannot book full post - slot already has active bookings');
@@ -292,8 +352,7 @@ class BookingRepository {
             b.slotId == slotId &&
             b.bookingMode == BookingMode.full &&
             b.isFullVehicleLocked &&
-            b.status != BookingStatus.rejected &&
-            b.status != BookingStatus.refunded,
+            b.status.isActive,
       );
       if (isLockedByFullVehicle) {
         debugPrint('❌ Cannot book - slot is locked by full post booking');
@@ -306,7 +365,7 @@ class BookingRepository {
         (b) =>
             b.slotId == slotId &&
             b.seatKey == seatKey &&
-            b.status != BookingStatus.rejected,
+            b.status.isActive,
       );
       if (exists) return null;
     }
@@ -364,14 +423,53 @@ class BookingRepository {
       bookingMode: bookingMode,
       totalCapacityBooked: bookingMode == BookingMode.full ? (totalCapacityBooked ?? defaultCapacity) : null,
       isFullVehicleLocked: bookingMode == BookingMode.full,
-      postMode: postMode, // Add PostMode to booking
+      postMode: postMode,
+      // location snapshot
+      routeType: routeType,
+      fromAddress: fromAddress,
+      fromLat: fromLat,
+      fromLng: fromLng,
+      toAddress: toAddress,
+      toLat: toLat,
+      toLng: toLng,
+      baseAddress: baseAddress,
+      baseLat: baseLat,
+      baseLng: baseLng,
+      rangeKm: rangeKm,
+      // trip schedule
+      tripStartTime: slotStartTime,
+      tripEndTime: slotEndTime,
     );
 
     bookings.value = [booking, ...bookings.value];
     await _persist();
     
     // Sync to Supabase (OTP will be auto-generated by trigger)
-    await _syncBookingToSupabase(booking, serviceType: serviceType, totalPrice: price);
+    await _syncBookingToSupabase(
+      booking,
+      serviceType: serviceType,
+      totalPrice: price,
+      vehicleId: vehicleId,
+      slotStartTime: slotStartTime,
+      slotEndTime: slotEndTime,
+      slotCapacity: slotCapacity,
+      pickupOption: pickupOption,
+      withOperator: withOperator,
+      fuelPolicy: fuelPolicy,
+      maxWeight: maxWeight,
+      maxLength: maxLength,
+      maxWidth: maxWidth,
+      maxHeight: maxHeight,
+      leaseDuration: leaseDuration,
+      insuranceIncluded: insuranceIncluded,
+      leaseTerms: leaseTerms,
+      waitForFullDeadlineHours: waitForFullDeadlineHours,
+      slotLayoutSnapshot: slotLayoutSnapshot,
+      seatKeyRaw: seatKeyRaw,
+      providerImageUrls: providerImageUrls,
+      paymentMethod: paymentMethod,
+      deviceId: deviceId,
+    );
     
     // Deduplicate after sync (in case of any race conditions)
     final uniqueBookings = <String, Booking>{};
@@ -383,7 +481,31 @@ class BookingRepository {
     return booking;
   }
 
-  Future<void> _syncBookingToSupabase(Booking booking, {ServiceType? serviceType, double? totalPrice}) async {
+  Future<void> _syncBookingToSupabase(
+    Booking booking, {
+    ServiceType? serviceType,
+    double? totalPrice,
+    String? vehicleId,
+    DateTime? slotStartTime,
+    DateTime? slotEndTime,
+    int? slotCapacity,
+    String? pickupOption,
+    bool? withOperator,
+    String? fuelPolicy,
+    double? maxWeight,
+    double? maxLength,
+    double? maxWidth,
+    double? maxHeight,
+    String? leaseDuration,
+    bool? insuranceIncluded,
+    String? leaseTerms,
+    int? waitForFullDeadlineHours,
+    Map<String, dynamic>? slotLayoutSnapshot,
+    String? seatKeyRaw,
+    List<String>? providerImageUrls,
+    String? paymentMethod,
+    String? deviceId,
+  }) async {
     final payload = <String, dynamic>{}; // Declare outside try block
     try {
       final supabase = Supabase.instance.client;
@@ -411,7 +533,6 @@ class BookingRepository {
         'deposit_snapshot': booking.securityDeposit ?? 0,
         'currency_snapshot': 'INR',
         'persons_snapshot': 1,
-        'seat_keys': booking.seatKey,
         'booking_strategy_snapshot': booking.bookingMode == BookingMode.full ? 'full_vehicle' : 'instant',
         'post_mode': booking.postMode?.dbValue ?? 'instant', // FIXED: Use 'post_mode' not 'post_mode_snapshot'
         
@@ -436,6 +557,11 @@ class BookingRepository {
           'is_full_vehicle_locked': booking.isFullVehicleLocked,
           'terms_snapshot': booking.termsSnapshot,
           'total_capacity_booked': booking.totalCapacityBooked,
+          // lease-specific
+          if (leaseDuration != null) 'lease_duration': leaseDuration,
+          if (insuranceIncluded != null) 'insurance_included': insuranceIncluded,
+          if (leaseTerms != null) 'lease_terms': leaseTerms,
+          if (waitForFullDeadlineHours != null) 'wait_for_full_deadline_hours': waitForFullDeadlineHours,
         },
         
         // Payment
@@ -446,9 +572,95 @@ class BookingRepository {
         // 'otp_code': null, // Backend will generate
         'otp_verified': booking.otpVerified,
         
-        // Timestamps
-        'start_time': booking.createdAt.toIso8601String(),
-        'end_time': booking.createdAt.add(Duration(hours: 1)).toIso8601String(),
+        // Timestamps — use actual slot times, not booking creation time
+        'start_time': (slotStartTime ?? booking.createdAt).toUtc().toIso8601String(),
+        'end_time': (slotEndTime ?? booking.createdAt.add(const Duration(hours: 1))).toUtc().toIso8601String(),
+
+        // ── Slot details snapshot ─────────────────────────────
+        if (vehicleId != null) 'vehicle_id': vehicleId,
+        if (slotCapacity != null) 'persons_snapshot': slotCapacity,
+        if (pickupOption != null) 'pickup_option': pickupOption,
+        if (pickupOption != null) 'booking_option': pickupOption,
+        if (withOperator != null) 'with_operator': withOperator,
+        if (fuelPolicy != null) 'fuel_policy': fuelPolicy,
+        if (maxWeight != null) 'max_weight': maxWeight,
+        if (maxLength != null) 'max_length': maxLength,
+        if (maxWidth != null) 'max_width': maxWidth,
+        if (maxHeight != null) 'max_height': maxHeight,
+        if (booking.rangeKm != null) 'radius': booking.rangeKm,
+
+        // parcel_snapshot — JSONB with all parcel dimensions
+        if (maxWeight != null || maxLength != null || maxWidth != null || maxHeight != null)
+          'parcel_snapshot': {
+            if (maxWeight != null) 'max_weight': maxWeight,
+            if (maxLength != null) 'max_length': maxLength,
+            if (maxWidth != null) 'max_width': maxWidth,
+            if (maxHeight != null) 'max_height': maxHeight,
+          },
+
+        // route_snapshot — JSONB with full route details
+        'route_snapshot': {
+          'route_type': booking.routeType,
+          'from_address': booking.fromAddress,
+          'from_lat': booking.fromLat,
+          'from_lng': booking.fromLng,
+          'to_address': booking.toAddress,
+          'to_lat': booking.toLat,
+          'to_lng': booking.toLng,
+          'base_address': booking.baseAddress,
+          'base_lat': booking.baseLat,
+          'base_lng': booking.baseLng,
+          'range_km': booking.rangeKm,
+        },
+
+        // trip_media — vehicle photos go into start.provider.images as initial snapshot
+        'trip_media': {
+          'start': {
+            'provider': {
+              'images': providerImageUrls ?? <String>[],
+              'video_url': null,
+            },
+            'customer': {'images': <String>[], 'video_url': null},
+          },
+          'end': {
+            'provider': {'images': <String>[], 'video_url': null},
+            'customer': {'images': <String>[], 'video_url': null},
+          },
+        },
+
+        // payment details
+        if (paymentMethod != null) 'payment_method': paymentMethod,
+        'payment_amount': totalPrice ?? booking.price,
+        'payment_currency': 'INR',
+        if (booking.stripePaymentIntentId != null)
+          'paid_at': DateTime.now().toUtc().toIso8601String(),
+
+        // device_id from DeviceInfoService (if available)
+        if (deviceId != null) 'device_id': deviceId,
+        // slot_layout: same structure as posts.slot_layout_structure
+        // booked seat → "booked", all others → "locked", gaps stay "gap"
+        if (slotLayoutSnapshot != null)
+          'slot_layout': _buildBookingLayoutSnapshot(
+            slotLayoutSnapshot,
+            booking.seatKey,
+          ),
+        // seat_keys: the key of the booked slot e.g. "1:2"
+        'seat_keys': booking.seatKey,
+        // seat_keys_raw: human-readable name e.g. "A2" or "Window Seat"
+        if (seatKeyRaw != null) 'seat_keys_raw': seatKeyRaw,
+
+        // ── Route / location snapshot ─────────────────────────
+        'route_type': booking.routeType,
+        'from_address': booking.fromAddress,
+        'from_lat': booking.fromLat,
+        'from_lng': booking.fromLng,
+        'to_address': booking.toAddress,
+        'to_lat': booking.toLat,
+        'to_lng': booking.toLng,
+        'base_address': booking.baseAddress,
+        'base_lat': booking.baseLat,
+        'base_lng': booking.baseLng,
+        'range_km': booking.rangeKm,
       });
 
       final response = await supabase
@@ -465,8 +677,9 @@ class BookingRepository {
         final index = bookings.value.indexWhere((b) => b.id == booking.id);
         if (index != -1) {
           final updatedBookings = List<Booking>.from(bookings.value);
-          // Update with backend-generated OTP
+          // Update with backend-generated ID and OTP
           updatedBookings[index] = booking.copyWith(
+            id: generatedId,  // ← IMPORTANT: Update with Supabase ID
             otp: generatedOtp, // Use backend-generated OTP
           );
           
@@ -604,5 +817,60 @@ class BookingRepository {
         .map((b) => b.id == bookingId ? b.copyWith(status: BookingStatus.refunded) : b)
         .toList(growable: false);
     await _persist();
+  }
+
+  /// Update trip_media for a booking — called by TripMediaWidget after upload.
+  /// Patches only the trip_media column in Supabase and updates local state.
+  Future<void> updateTripMedia(String bookingId, TripMedia media) async {
+    // Update local state immediately
+    bookings.value = bookings.value
+        .map((b) => b.id == bookingId ? b.copyWith(tripMedia: media) : b)
+        .toList(growable: false);
+    await _persist();
+
+    // Patch Supabase
+    try {
+      await Supabase.instance.client
+          .from('bookings')
+          .update({'trip_media': media.toJson()})
+          .eq('id', int.parse(bookingId));
+      debugPrint('✅ trip_media updated for booking $bookingId');
+    } catch (e) {
+      debugPrint('❌ Failed to update trip_media: $e');
+    }
+  }
+
+  /// Builds the slot_layout snapshot for a booking.
+  /// The booked seat is marked "booked", all other non-gap seats are "locked".
+  /// This mirrors posts.slot_layout_structure so the same widget can render both.
+  static Map<String, dynamic> _buildBookingLayoutSnapshot(
+    Map<String, dynamic> fullLayout,
+    String? bookedSeatKey,
+  ) {
+    final type = fullLayout['type'] as String? ?? 'passenger';
+    final rawLayout = fullLayout['layout'] as List<dynamic>? ?? [];
+
+    final modifiedLayout = rawLayout.map((item) {
+      final map = Map<String, dynamic>.from(item as Map);
+      final key = map['key'] as String?;
+      final status = map['status'] as String? ?? 'available';
+
+      // Gaps stay as gaps
+      if (status == 'gap') return map;
+
+      if (key == bookedSeatKey) {
+        // This is the seat the customer booked
+        map['status'] = 'booked';
+      } else {
+        // All other seats are locked in this booking's view
+        map['status'] = 'locked';
+      }
+      return map;
+    }).toList();
+
+    return {
+      'type': type,
+      'layout': modifiedLayout,
+    };
   }
 }

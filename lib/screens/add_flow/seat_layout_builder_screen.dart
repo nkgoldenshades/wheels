@@ -49,7 +49,7 @@ class _SeatLayoutBuilderScreenState extends State<SeatLayoutBuilderScreen> {
           (b) =>
               slotIds.contains(b.slotId) &&
               b.seatKey != null &&
-              b.status != BookingStatus.rejected,
+              b.status.isActive,
         )
         .map((b) => b.seatKey!)
         .toSet();

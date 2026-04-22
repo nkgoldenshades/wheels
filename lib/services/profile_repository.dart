@@ -7,6 +7,7 @@ import 'profile_name_registry.dart';
 import 'auth_repository.dart' as auth;
 import 'vehicle_repository.dart';
 import 'slot_repository.dart';
+import 'booking_repository.dart'; // ✅ Add this import
 
 class ProfileInfo {
   final String id; // Firebase UID
@@ -275,6 +276,7 @@ class ProfileRepository {
             if (kDebugMode) print('🔄 Reloading vehicles and posts after auth...');
             await VehicleRepository.instance.loadVehicles();
             await SlotRepository.instance.loadSlots();
+            await BookingRepository.instance.refreshFromSupabase(); // ✅ Reload bookings after auth
             if (kDebugMode) print('✅ Vehicles and posts reloaded');
           } catch (e) {
             if (kDebugMode) print('⚠️ Profile not found, creating default: $e');

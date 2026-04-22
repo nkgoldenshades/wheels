@@ -43,3 +43,16 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Secrets & environment files — never commit these
+.env
+.env.*
+!.env.example
+functions/.env
+functions/.env.*
+!functions/.env.example
+
+# Firebase service account keys
+*service-account*.json
+*serviceAccount*.json
+firebase-adminsdk*.json

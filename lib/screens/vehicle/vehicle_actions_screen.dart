@@ -7,6 +7,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import '../../models/booking.dart';
+import '../../models/exceptions.dart';
 import '../../models/review.dart';
 import '../../models/service_type.dart';
 import '../../models/slot_entry.dart';
@@ -26,6 +27,24 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../services/location_autocomplete_service.dart';
 import '../../services/app_preferences.dart';
 import '../../services/payment_service.dart';
+
+Color _bookingStatusColor(BookingStatus s) {
+  switch (s) {
+    case BookingStatus.pending:             return Colors.orange;
+    case BookingStatus.accepted:
+    case BookingStatus.confirmed:           return Colors.blue;
+    case BookingStatus.inProgress:          return Colors.teal;
+    case BookingStatus.completed:           return Colors.green;
+    case BookingStatus.rejected:
+    case BookingStatus.noShow:              return Colors.red;
+    case BookingStatus.disputed:            return Colors.deepOrange;
+    case BookingStatus.expired:             return Colors.grey;
+    case BookingStatus.refunded:
+    case BookingStatus.cancelled:
+    case BookingStatus.cancelledByCustomer:
+    case BookingStatus.cancelledByProvider: return Colors.purple;
+  }
+}
 
 class VehicleActionsScreen extends StatefulWidget {
   final String vehicleId;
@@ -219,7 +238,7 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                   builder: (ctx) => AlertDialog(
                     title: const Text('Delete post?'),
                     content: const Text(
-                        'This will permanently remove this post. Existing bookings are not affected.'),
+                        'This will permanently remove this post.\n\nNote: posts with active bookings cannot be deleted.'),
                     actions: [
                       TextButton(
                         onPressed: () => Navigator.pop(ctx, false),
@@ -234,14 +253,30 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                   ),
                 );
                 if (confirm != true || !context.mounted) return;
-                if (widget.isUserMode) {
-                  await CustomerSlotRepository.instance.deleteSlot(entry.slot.id);
-                } else {
-                  await SlotRepository.instance.deleteSlot(entry.slot.id);
-                }
-                if (context.mounted) {
+                try {
+                  if (widget.isUserMode) {
+                    await CustomerSlotRepository.instance.deleteSlot(entry.slot.id);
+                  } else {
+                    await SlotRepository.instance.deleteSlot(entry.slot.id);
+                  }
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('✅ Post deleted'),
+                        backgroundColor: Colors.green,
+                      ),
+                    );
+                  }
+                } on ActiveBookingsException catch (e) {
+                  if (!context.mounted) return;
+                  _showActiveBookingsDialog(context, e.activeCount, entry);
+                } catch (e) {
+                  if (!context.mounted) return;
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Post deleted')),
+                    SnackBar(
+                      content: Text('Failed to delete: ${e.toString().split('\n').first}'),
+                      backgroundColor: Colors.red,
+                    ),
                   );
                 }
               },
@@ -256,6 +291,133 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
           ),
         ),
       ],
+    );
+  }
+
+  void _showActiveBookingsDialog(
+      BuildContext context, int activeCount, SlotEntry entry) {
+    // Find the latest deadline_time across active bookings for this slot
+    final activeBookings = BookingRepository.instance.bookings.value
+        .where((b) => b.slotId == entry.slot.id && b.status.isActive)
+        .toList();
+
+    DateTime? latestDeadline;
+    for (final b in activeBookings) {
+      if (b.deadlineTime != null) {
+        if (latestDeadline == null || b.deadlineTime!.isAfter(latestDeadline)) {
+          latestDeadline = b.deadlineTime;
+        }
+      }
+    }
+
+    final String unlockHint;
+    if (latestDeadline != null && latestDeadline.isAfter(DateTime.now())) {
+      final h = latestDeadline.hour.toString().padLeft(2, '0');
+      final m = latestDeadline.minute.toString().padLeft(2, '0');
+      final d = '${latestDeadline.day}/${latestDeadline.month}';
+      unlockHint = 'Delete will be available after $d $h:$m (booking deadline).';
+    } else if (latestDeadline != null) {
+      unlockHint = 'Deadline has passed — try deleting again.';
+    } else {
+      unlockHint = 'Wait for all bookings to complete or cancel them.';
+    }
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            Icon(Icons.lock_outline, color: Colors.orange[700]),
+            const SizedBox(width: 8),
+            const Text('Cannot Delete Post'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '$activeCount active booking${activeCount == 1 ? '' : 's'} still within deadline.',
+              style: const TextStyle(fontSize: 15),
+            ),
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: Colors.blue.shade50,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.blue.shade200),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.schedule, size: 16, color: Colors.blue[700]),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      unlockHint,
+                      style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.blue[800],
+                          fontWeight: FontWeight.w500),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: Colors.orange.shade50,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.orange.shade200),
+              ),
+              child: const Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Or do this now:',
+                      style: TextStyle(
+                          fontWeight: FontWeight.bold, fontSize: 13)),
+                  SizedBox(height: 4),
+                  Text('• Mark post inactive — stops new bookings',
+                      style: TextStyle(fontSize: 13)),
+                  Text('• Cancel/refund active bookings first',
+                      style: TextStyle(fontSize: 13)),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('OK'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              final updated = entry.slot.copyWith(isAvailable: false);
+              if (widget.isUserMode) {
+                CustomerSlotRepository.instance.updateSlot(updated);
+              } else {
+                SlotRepository.instance.updateSlot(updated);
+              }
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Post marked inactive — no new bookings allowed'),
+                  backgroundColor: Colors.orange,
+                ),
+              );
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.orange,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Mark Inactive Instead'),
+          ),
+        ],
+      ),
     );
   }
 
@@ -1578,24 +1740,7 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
   }
 
   Widget _buildBookingTile(Booking booking) {
-    Color statusColor;
-    switch (booking.status) {
-      case BookingStatus.completed:
-        statusColor = Colors.green;
-        break;
-      case BookingStatus.accepted:
-        statusColor = Colors.blue;
-        break;
-      case BookingStatus.pending:
-        statusColor = Colors.orange;
-        break;
-      case BookingStatus.rejected:
-        statusColor = Colors.red;
-        break;
-      case BookingStatus.refunded:
-        statusColor = Colors.purple;
-        break;
-    }
+    final statusColor = _bookingStatusColor(booking.status);
 
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
@@ -2431,15 +2576,7 @@ class _SlotHistoryTile extends StatefulWidget {
 class _SlotHistoryTileState extends State<_SlotHistoryTile> {
   bool _expanded = false;
 
-  Color _colorFor(Booking b) {
-    switch (b.status) {
-      case BookingStatus.completed: return Colors.green;
-      case BookingStatus.accepted:  return Colors.blue;
-      case BookingStatus.pending:   return Colors.orange;
-      case BookingStatus.rejected:  return Colors.red;
-      case BookingStatus.refunded:  return Colors.purple;
-    }
-  }
+  Color _colorFor(Booking b) => _bookingStatusColor(b.status);
 
   String _fmtTime(DateTime d) {
     final h = d.hour.toString().padLeft(2, '0');

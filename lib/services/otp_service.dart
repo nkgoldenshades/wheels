@@ -21,6 +21,8 @@ class OtpService {
   }) async {
     try {
       debugPrint('🔐 Verifying OTP for booking $bookingId');
+      debugPrint('   User ID: $userId');
+      debugPrint('   Entered OTP: $enteredOtp');
 
       final response = await _supabase.rpc(
         'verify_otp',
@@ -37,6 +39,7 @@ class OtpService {
       return OtpVerificationResult.fromString(result);
     } catch (e) {
       debugPrint('❌ OTP verification error: $e');
+      debugPrint('   Error type: ${e.runtimeType}');
       return OtpVerificationResult.error;
     }
   }

@@ -7,6 +7,7 @@ import '../models/slot.dart';
 import '../models/slot_entry.dart';
 import '../models/post_mode.dart';
 import '../models/vehicle.dart';
+import '../models/exceptions.dart';
 import 'auth_repository.dart';
 import 'customer_vehicle_repository.dart';
 
@@ -193,44 +194,63 @@ class CustomerSlotRepository {
   }
 
   Future<void> deleteSlot(String id) async {
-    try {
-      // Check for active bookings first
-      final activeBookings = await _getActiveBookingsForSlot(id);
-      
-      if (activeBookings.isNotEmpty) {
-        throw Exception('Cannot delete post: ${activeBookings.length} active booking(s) exist. Please wait for bookings to complete or cancel them first.');
-      }
-      
+    final user = firebase_auth.FirebaseAuth.instance.currentUser;
+    if (user == null) throw Exception('Not authenticated');
+
+    debugPrint('🗑️ Deleting user slot: $id (user: ${user.uid})');
+
+    final supabase = Supabase.instance.client;
+    final raw = await supabase.rpc(
+      'safe_delete_post',
+      params: {
+        'p_post_id': id,
+        'p_profile_id': user.uid,
+      },
+    );
+
+    debugPrint('🔍 safe_delete_post raw: $raw (${raw.runtimeType})');
+
+    // RPC not deployed yet — fall back to direct delete
+    if (raw == null) {
+      debugPrint('⚠️ safe_delete_post returned null — using direct delete');
+      await supabase
+          .from('user_posts')
+          .delete()
+          .eq('id', id)
+          .eq('profile_id', user.uid);
+      debugPrint('✅ User slot deleted directly: $id');
       _slots.value = _slots.value.where((s) => s.id != id).toList();
       _buildSlotEntries();
       await _saveSlots();
-      debugPrint('✅ User slot deleted locally: $id');
-      
-      // Delete from Supabase
-      await _deleteSlotFromSupabase(id);
-    } catch (e) {
-      debugPrint('❌ Failed to delete user slot: $e');
-      rethrow;
+      return;
     }
-  }
 
-  /// Check if slot has active bookings that would prevent deletion
-  Future<List<Map<String, dynamic>>> _getActiveBookingsForSlot(String slotId) async {
-    try {
-      final supabase = Supabase.instance.client;
-      
-      // Query Supabase for active bookings on this slot
-      final response = await supabase
-          .from('bookings')
-          .select('id, status, user_name')
-          .eq('slot_id', slotId)
-          .not('status', 'in', '(rejected,cancelled,completed,refunded)');
-      
-      return List<Map<String, dynamic>>.from(response);
-    } catch (e) {
-      debugPrint('⚠️ Could not check active bookings, allowing deletion: $e');
-      return []; // Allow deletion if we can't check Supabase
+    final Map<String, dynamic> result;
+    if (raw is Map<String, dynamic>) {
+      result = raw;
+    } else if (raw is Map) {
+      result = Map<String, dynamic>.from(raw);
+    } else {
+      throw Exception('Unexpected response from safe_delete_post: $raw');
     }
+
+    debugPrint('🗑️ safe_delete_post result: $result');
+
+    final success = result['success'] as bool? ?? false;
+    final code = result['code'] as String? ?? '';
+
+    if (!success) {
+      if (code == 'has_active_bookings') {
+        final count = result['active_count'] as int? ?? 0;
+        throw ActiveBookingsException(count);
+      }
+      throw Exception(result['message'] ?? 'Delete failed');
+    }
+
+    debugPrint('✅ User slot deleted from Supabase: $id');
+    _slots.value = _slots.value.where((s) => s.id != id).toList();
+    _buildSlotEntries();
+    await _saveSlots();
   }
 
   Future<void> _syncSlotToSupabase(Slot slot, {bool isUpdate = false}) async {
@@ -252,7 +272,7 @@ class CustomerSlotRepository {
         'vehicle_id': slot.vehicleId,
         'service_type': slot.serviceType.name,
         'slot_type': slot.slotType.name,
-        'seat_layout_structure': slot.seatLayoutStructure?.toJson(),
+        'slot_layout_structure': slot.seatLayoutStructure?.toJson(),
         'from_location': slot.fromLocation,
         'to_location': slot.toLocation,
         'base_location': slot.baseLocation,
@@ -290,15 +310,5 @@ class CustomerSlotRepository {
     }
   }
 
-  Future<void> _deleteSlotFromSupabase(String id) async {
-    try {
-      final supabase = Supabase.instance.client;
-      
-      await supabase.from('user_posts').delete().eq('id', id);
-
-      debugPrint('✅ User slot deleted from Supabase: $id');
-    } catch (e) {
-      debugPrint('❌ Failed to delete user slot from Supabase: $e');
-    }
-  }
 }
+
