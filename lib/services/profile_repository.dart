@@ -127,7 +127,7 @@ class ProfileInfo {
     );
   }
 
-  // Public data only (for profiles table)
+  // Public data only (for profiles_public table)
   Map<String, dynamic> toPublicJson() {
     return {
       'id': id,
@@ -141,7 +141,7 @@ class ProfileInfo {
   // Contact data (for profiles_contact table)
   Map<String, dynamic> toContactJson() {
     return {
-      'id': id,
+      'profile_id': id,
       'phone_number': phone,
       'email': email,
     };
@@ -150,7 +150,7 @@ class ProfileInfo {
   // Private/confidential data (for profiles_private table)
   Map<String, dynamic> toPrivateJson() {
     return {
-      'id': id,
+      'profile_id': id,
       'ai_credits_available': aiCredits,
       'wallet_balance': walletBalance,
       'national_id_number': aadhaar,
@@ -320,9 +320,9 @@ class ProfileRepository {
 
       // Query all 3 tables in parallel
       final results = await Future.wait([
-        _supabase.from('profiles').select().eq('id', userId).maybeSingle(),
-        _supabase.from('profiles_contact').select().eq('id', userId).maybeSingle(),
-        _supabase.from('profiles_private').select().eq('id', userId).maybeSingle(),
+        _supabase.from('profiles_public').select().eq('id', userId).maybeSingle(),
+        _supabase.from('profiles_contact').select().eq('profile_id', userId).maybeSingle(),
+        _supabase.from('profiles_private').select().eq('profile_id', userId).maybeSingle(),
       ]);
 
       final publicData = results[0];
@@ -359,7 +359,7 @@ class ProfileRepository {
     try {
       // Upsert all 3 tables in parallel
       await Future.wait([
-        _supabase.from('profiles').upsert(profileInfo.toPublicJson()),
+        _supabase.from('profiles_public').upsert(profileInfo.toPublicJson()),
         _supabase.from('profiles_contact').upsert(profileInfo.toContactJson()),
         _supabase.from('profiles_private').upsert(profileInfo.toPrivateJson()),
       ]);
@@ -578,7 +578,7 @@ class ProfileRepository {
       final contactData = await _supabase
           .from('profiles_contact')
           .select('phone_number, email')
-          .eq('id', partnerId)
+          .eq('profile_id', partnerId)
           .maybeSingle();
 
       if (contactData == null) return {'phone': null, 'email': null};

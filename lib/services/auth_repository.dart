@@ -180,7 +180,7 @@ class AuthRepository {
 
       // Check if user already exists
       final existingUser = await supabase
-          .from('profiles')
+          .from('profiles_public')
           .select()
           .eq('id', uid)
           .maybeSingle();
@@ -191,7 +191,7 @@ class AuthRepository {
       }
 
       // Insert new user into all 3 tables
-      await supabase.from('profiles').insert({
+      await supabase.from('profiles_public').insert({
         'id': uid,
         'full_name': firebaseUser.displayName ?? 'User',
         'profile_photo_url': firebaseUser.photoURL,
@@ -199,13 +199,13 @@ class AuthRepository {
       });
 
       await supabase.from('profiles_contact').insert({
-        'id': uid,
+        'profile_id': uid,
         'email': firebaseUser.email,
         'phone_number': firebaseUser.phoneNumber,
       });
 
       await supabase.from('profiles_private').insert({
-        'id': uid,
+        'profile_id': uid,
         'ai_credits_available': 50,
         'wallet_balance': 0.0,
         'payment_provider': 'razorpay',
