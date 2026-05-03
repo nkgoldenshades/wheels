@@ -359,9 +359,9 @@ class ProfileRepository {
     try {
       // Upsert all 3 tables in parallel
       await Future.wait([
-        _supabase.from('profiles_public').upsert(profileInfo.toPublicJson()),
-        _supabase.from('profiles_contact').upsert(profileInfo.toContactJson()),
-        _supabase.from('profiles_private').upsert(profileInfo.toPrivateJson()),
+        _supabase.from('profiles_public').upsert(profileInfo.toPublicJson(), onConflict: 'id'),
+        _supabase.from('profiles_contact').upsert(profileInfo.toContactJson(), onConflict: 'profile_id'),
+        _supabase.from('profiles_private').upsert(profileInfo.toPrivateJson(), onConflict: 'profile_id'),
       ]);
 
       profile.value = profileInfo;
