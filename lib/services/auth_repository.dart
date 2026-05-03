@@ -207,8 +207,6 @@ class AuthRepository {
       await supabase.from('profiles_private').insert({
         'profile_id': uid,
         'ai_credits_available': 50,
-        'wallet_balance': 0.0,
-        'payment_provider': 'razorpay',
       });
 
       debugPrint('✅ User synced to Supabase (3 tables): $uid');

@@ -134,7 +134,7 @@ class ProfileInfo {
       'full_name': profileName,
       'profile_photo_url': avatarUrl,
       'business_type': businessType ?? 'solo',
-      'country': country,
+      if (country != null) 'country': country,
     };
   }
 
@@ -151,9 +151,9 @@ class ProfileInfo {
   Map<String, dynamic> toPrivateJson() {
     return {
       'profile_id': id,
-      'ai_credits_available': aiCredits,
-      // Only include non-null values to avoid missing column errors
-      if (walletBalance != 0.0) 'wallet_balance': walletBalance,
+      // AI credits
+      if (aiCredits != 50) 'ai_credits_available': aiCredits,
+      // Documents - only send if not null
       if (aadhaar != null) 'national_id_number': aadhaar,
       if (aadhaarVerified) 'national_id_verified': aadhaarVerified,
       if (aadhaarFrontImage != null) 'national_id_front_url': aadhaarFrontImage,
@@ -164,14 +164,10 @@ class ProfileInfo {
       if (dlVerified) 'driving_license_verified': dlVerified,
       if (dlFrontImage != null) 'driving_license_front_url': dlFrontImage,
       if (dlBackImage != null) 'driving_license_back_url': dlBackImage,
+      // Payment provider
       if (paymentProvider != 'razorpay') 'payment_provider': paymentProvider,
       if (stripeAccountId != null) 'stripe_account_id': stripeAccountId,
       if (razorpayAccountId != null) 'razorpay_account_id': razorpayAccountId,
-      if (bankAccountHolder != null) 'bank_account_holder': bankAccountHolder,
-      if (bankAccountNumber != null) 'bank_account_number': bankAccountNumber,
-      if (bankName != null) 'bank_name': bankName,
-      if (bankIFSC != null) 'bank_ifsc': bankIFSC,
-      if (bankAccountType != null) 'bank_account_type': bankAccountType,
     };
   }
 
