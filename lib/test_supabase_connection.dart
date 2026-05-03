@@ -13,7 +13,7 @@ class SupabaseConnectionTest {
       
       // Test basic query
       final response = await _supabase
-          .from('profiles')
+          .from('profiles_public')
           .select('id')
           .limit(1);
       
@@ -54,7 +54,7 @@ class SupabaseConnectionTest {
       debugPrint('🔍 Testing profiles table access...');
       
       final response = await _supabase
-          .from('profiles')
+          .from('profiles_public')
           .select('id, full_name')
           .limit(5);
       

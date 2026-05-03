@@ -1,4 +1,4 @@
-﻿ 
+ 
 import 'dart:async';
 import 'dart:math' as math;
 import 'dart:convert';
@@ -66,7 +66,7 @@ import 'utils/timezone_utils.dart';
 // Don't use 'final' here because it evaluates immediately before Supabase.initialize()
 SupabaseClient get supabase => Supabase.instance.client;
 
-/// Strip |lat,lon|keywords from stored location string — returns display name only
+/// Strip |lat,lon|keywords from stored location string � returns display name only
 String _cleanLoc(String? raw) {
   if (raw == null || raw.isEmpty) return '';
   final t = raw.trim();
@@ -94,14 +94,14 @@ void main() async {
   FlutterError.onError = (FlutterErrorDetails details) {
     FlutterError.presentError(details);
     if (kDebugMode) {
-      print('❌ Flutter Error: ${details.exception}');
+      print('? Flutter Error: ${details.exception}');
       print('Stack: ${details.stack}');
     }
   };
 
   PlatformDispatcher.instance.onError = (error, stack) {
     if (kDebugMode) {
-      print('❌ Platform Error: $error');
+      print('? Platform Error: $error');
       print('Stack: $stack');
     }
     return true; // Prevent crash
@@ -111,33 +111,33 @@ void main() async {
 
   // CRITICAL: Initialize Firebase FIRST before starting app
   // This prevents splash screen from accessing Firebase before it's ready
-  if (kDebugMode) print('⏳ Initializing Firebase...');
+  if (kDebugMode) print('? Initializing Firebase...');
   try {
     await Firebase.initializeApp(
       options: DefaultFirebaseOptions.currentPlatform,
     );
-    if (kDebugMode) print('✅ Firebase initialized');
+    if (kDebugMode) print('? Firebase initialized');
   } catch (e) {
     // Check if already initialized
     try {
       Firebase.app();
-      if (kDebugMode) print('✅ Firebase already initialized');
+      if (kDebugMode) print('? Firebase already initialized');
     } catch (_) {
-      if (kDebugMode) print('⚠️ Firebase unavailable: $e');
+      if (kDebugMode) print('?? Firebase unavailable: $e');
     }
   }
   
   // Initialize AuthRepository immediately (splash screen needs it)
-  if (kDebugMode) print('⏳ Initializing AuthRepository...');
+  if (kDebugMode) print('? Initializing AuthRepository...');
   try {
     await AuthRepository.instance.init();
-    if (kDebugMode) print('✅ AuthRepository initialized');
+    if (kDebugMode) print('? AuthRepository initialized');
   } catch (e) {
-    if (kDebugMode) print('⚠️ AuthRepository init failed: $e');
+    if (kDebugMode) print('?? AuthRepository init failed: $e');
   }
   
   // Now start app - Firebase and Auth are ready
-  if (kDebugMode) print('🚀 Starting app...');
+  if (kDebugMode) print('?? Starting app...');
   runApp(const MyApp());
   
   // Initialize other services in background (non-blocking)
@@ -147,22 +147,22 @@ void main() async {
 // Background initialization that doesn't block app startup
 void _initializeServicesInBackground() async {
   try {
-    if (kDebugMode) print('🔧 Starting background initialization...');
+    if (kDebugMode) print('?? Starting background initialization...');
     
     // Helper function to wrap repository inits with timeout
     Future<void> initWithTimeout(Future<void> future, String name) async {
       try {
-        if (kDebugMode) print('⏳ Starting $name...');
+        if (kDebugMode) print('? Starting $name...');
         await future.timeout(
           const Duration(seconds: 5),
           onTimeout: () {
             throw TimeoutException('$name initialization timed out', const Duration(seconds: 5));
           },
         );
-        if (kDebugMode) print('✅ $name initialized');
+        if (kDebugMode) print('? $name initialized');
       } catch (e) {
-        if (kDebugMode) print('⚠️ $name init failed/timed out: $e');
-        // Don't rethrow — let app continue
+        if (kDebugMode) print('?? $name init failed/timed out: $e');
+        // Don't rethrow � let app continue
       }
     }
     
@@ -171,18 +171,18 @@ void _initializeServicesInBackground() async {
     // Check if running on web and warn about CORS
     if (kIsWeb) {
       if (kDebugMode) {
-        print('⚠️ ═══════════════════════════════════════════════════════');
-        print('⚠️ WARNING: Running on WEB - CORS issues may occur!');
-        print('⚠️ If you see "Failed to fetch" errors:');
-        print('⚠️   1. Run on mobile/desktop instead: flutter run -d android');
-        print('⚠️   2. Or configure CORS in Supabase Dashboard');
-        print('⚠️   3. See FIX_SUPABASE_CORS_FOR_WEB.md for details');
-        print('⚠️ ═══════════════════════════════════════════════════════');
+        print('?? -------------------------------------------------------');
+        print('?? WARNING: Running on WEB - CORS issues may occur!');
+        print('?? If you see "Failed to fetch" errors:');
+        print('??   1. Run on mobile/desktop instead: flutter run -d android');
+        print('??   2. Or configure CORS in Supabase Dashboard');
+        print('??   3. See FIX_SUPABASE_CORS_FOR_WEB.md for details');
+        print('?? -------------------------------------------------------');
       }
     }
     
     // Initialize Supabase with Firebase JWT
-    if (kDebugMode) print('⏳ Starting Supabase...');
+    if (kDebugMode) print('? Starting Supabase...');
     try {
       await Supabase.initialize(
         url: SupabaseConfig.url,
@@ -190,22 +190,22 @@ void _initializeServicesInBackground() async {
         accessToken: () async {
           final user = firebase_auth.FirebaseAuth.instance.currentUser;
           if (user == null) {
-            if (kDebugMode) print('🔑 No Firebase user - guest mode (using anon key)');
+            if (kDebugMode) print('?? No Firebase user - guest mode (using anon key)');
             return null; // Supabase will use anon key automatically
           }
           try {
             final token = await user.getIdToken(true);
             if (token == null || token.isEmpty) {
-              if (kDebugMode) print('⚠️ Firebase token is empty - falling back to anon');
+              if (kDebugMode) print('?? Firebase token is empty - falling back to anon');
               return null;
             }
             if (kDebugMode) {
-              print('🔑 Firebase UID: ${user.uid}');
-              print('🔑 Sending Firebase JWT to Supabase');
+              print('?? Firebase UID: ${user.uid}');
+              print('?? Sending Firebase JWT to Supabase');
             }
             return token;
           } catch (e) {
-            if (kDebugMode) print('⚠️ Failed to get Firebase token: $e');
+            if (kDebugMode) print('?? Failed to get Firebase token: $e');
             return null; // Fallback to anon key on error
           }
         },
@@ -215,9 +215,9 @@ void _initializeServicesInBackground() async {
           throw TimeoutException('Supabase initialization timed out', const Duration(seconds: 10));
         },
       );
-      if (kDebugMode) print('✅ Supabase initialized');
+      if (kDebugMode) print('? Supabase initialized');
     } catch (e) {
-      if (kDebugMode) print('❌ Supabase initialization error: $e');
+      if (kDebugMode) print('? Supabase initialization error: $e');
       // Continue anyway - app can work with limited functionality
     }
 
@@ -225,18 +225,18 @@ void _initializeServicesInBackground() async {
     await initWithTimeout(AppPreferences.instance.init(), 'AppPreferences');
     
     // Initialize ProfileRepository with timeout protection (already had timeout)
-    if (kDebugMode) print('⏳ Starting ProfileRepository...');
+    if (kDebugMode) print('? Starting ProfileRepository...');
     try {
       await ProfileRepository.instance.init().timeout(
         const Duration(seconds: 10), // Reduced from 30 to 10 seconds
         onTimeout: () {
-          if (kDebugMode) print('⏰ ProfileRepository init timed out');
+          if (kDebugMode) print('? ProfileRepository init timed out');
           throw TimeoutException('ProfileRepository initialization timed out', const Duration(seconds: 10));
         },  
       );
-      if (kDebugMode) print('✅ ProfileRepository initialized');
+      if (kDebugMode) print('? ProfileRepository initialized');
     } catch (e) {
-      if (kDebugMode) print('❌ ProfileRepository init failed: $e');
+      if (kDebugMode) print('? ProfileRepository init failed: $e');
       // Continue with app initialization even if profile fails
     }
     
@@ -259,20 +259,20 @@ void _initializeServicesInBackground() async {
     
     // Force refresh slot entries after all data is loaded
     // This ensures slots find their vehicles even if there was a timing issue
-    if (kDebugMode) print('🔄 Refreshing slot entries after all data loaded...');
+    if (kDebugMode) print('?? Refreshing slot entries after all data loaded...');
     try {
       await SlotRepository.instance.loadSlots();
       await CustomerSlotRepository.instance.init(); // Reload to rebuild entries
-      if (kDebugMode) print('✅ Slot entries refreshed');
+      if (kDebugMode) print('? Slot entries refreshed');
     } catch (e) {
-      if (kDebugMode) print('⚠️ Failed to refresh slot entries: $e');
+      if (kDebugMode) print('?? Failed to refresh slot entries: $e');
     }
 
     // Test Supabase connection (only in debug mode)
     if (kDebugMode) {
-      debugPrint('🔗 Supabase connection configured');
-      debugPrint('📍 URL: ${SupabaseConfig.url}');
-      debugPrint('🔑 Auth: Firebase JWT → Supabase RLS');
+      debugPrint('?? Supabase connection configured');
+      debugPrint('?? URL: ${SupabaseConfig.url}');
+      debugPrint('?? Auth: Firebase JWT ? Supabase RLS');
       
       // Run backend connection tests
       await BackendConnectionTest.runAllTests();
@@ -284,13 +284,13 @@ void _initializeServicesInBackground() async {
     // Initialize Voice AI service with timeout (this was the last call - likely culprit!)
     await initWithTimeout(VoiceAIService().initialize(), 'VoiceAIService');
     
-    if (kDebugMode) print('🎉 All services initialized successfully!');
+    if (kDebugMode) print('?? All services initialized successfully!');
     
   } catch (e, stackTrace) {
     if (kDebugMode) {
-      print('❌ Background initialization error: $e');
-      print('📍 Stack trace: $stackTrace');
-      print('ℹ️ App will continue running with limited functionality');
+      print('? Background initialization error: $e');
+      print('?? Stack trace: $stackTrace');
+      print('?? App will continue running with limited functionality');
     }
   }
 }
@@ -1261,7 +1261,7 @@ String? _extractCoordsFromLocation(String? raw) {
   }
   // Fallback: if no pipe, check if it's already "lat,lng"
   if (raw.contains(',') && !raw.contains(' ')) return raw.trim();
-  debugPrint('⚠️ Could not extract coords from: $raw');
+  debugPrint('?? Could not extract coords from: $raw');
   return null;
 }
 
@@ -1650,7 +1650,7 @@ class _CreateUserPostPageState extends State<CreateUserPostPage> {
               border: OutlineInputBorder(),
             ),
           ),
-          // Parcel dimensions — only shown for parcel service type
+          // Parcel dimensions � only shown for parcel service type
           if (_serviceType == ServiceType.parcel) ...[
             const SizedBox(height: 16),
             const Text(
@@ -1895,7 +1895,7 @@ class UserMyPostsPage extends StatelessWidget {
                               if (context.mounted) {
                                 ScaffoldMessenger.of(context).showSnackBar(
                                   const SnackBar(
-                                    content: Text('✅ Post deleted'),
+                                    content: Text('? Post deleted'),
                                     backgroundColor: Colors.green,
                                   ),
                                 );
@@ -1952,15 +1952,15 @@ class UserMyPostsPage extends StatelessWidget {
                                                     fontSize: 13)),
                                             SizedBox(height: 4),
                                             Text(
-                                                '• Mark post inactive — stops new bookings',
+                                                '� Mark post inactive � stops new bookings',
                                                 style:
                                                     TextStyle(fontSize: 13)),
                                             Text(
-                                                '• Wait for active bookings to complete',
+                                                '� Wait for active bookings to complete',
                                                 style:
                                                     TextStyle(fontSize: 13)),
                                             Text(
-                                                '• Cancel/refund active bookings first',
+                                                '� Cancel/refund active bookings first',
                                                 style:
                                                     TextStyle(fontSize: 13)),
                                           ],
@@ -2019,7 +2019,7 @@ class UserMyPostsPage extends StatelessWidget {
 
   String _userPostTitle(UserPost p) {
     if (p.fromLocation != null && p.toLocation != null) {
-      return '${_cleanLoc(p.fromLocation)} → ${_cleanLoc(p.toLocation)}';
+      return '${_cleanLoc(p.fromLocation)} ? ${_cleanLoc(p.toLocation)}';
     }
     if (p.baseLocation != null) return _cleanLoc(p.baseLocation);
     return 'Post';
@@ -2101,7 +2101,7 @@ class UserPostHistoryPage extends StatelessWidget {
 
   String _userPostTitle(UserPost p) {
     if (p.fromLocation != null && p.toLocation != null) {
-      return '${_cleanLoc(p.fromLocation)} → ${_cleanLoc(p.toLocation)}';
+      return '${_cleanLoc(p.fromLocation)} ? ${_cleanLoc(p.toLocation)}';
     }
     if (p.baseLocation != null) return _cleanLoc(p.baseLocation);
     return 'Post';
@@ -2229,7 +2229,7 @@ class MyPostsPage extends StatelessWidget {
 
   String _slotTitle(Slot slot) {
     if (slot.fromLocation != null && slot.toLocation != null) {
-      return '${_cleanLoc(slot.fromLocation)} → ${_cleanLoc(slot.toLocation)}';
+      return '${_cleanLoc(slot.fromLocation)} ? ${_cleanLoc(slot.toLocation)}';
     }
     if (slot.baseLocation != null) return _cleanLoc(slot.baseLocation);
     return 'Posted ride';
@@ -2334,7 +2334,7 @@ class _EarningsPageState extends State<EarningsPage> {
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        '₹${totalEarnings.toStringAsFixed(2)}',
+                        '?${totalEarnings.toStringAsFixed(2)}',
                         style: const TextStyle(
                           fontSize: 36,
                           fontWeight: FontWeight.bold,
@@ -2449,7 +2449,7 @@ class _EarningsPageState extends State<EarningsPage> {
         ),
         title: Text(title),
         trailing: Text(
-          '₹${amount.toStringAsFixed(2)}',
+          '?${amount.toStringAsFixed(2)}',
           style: TextStyle(
             fontSize: 16,
             fontWeight: FontWeight.bold,
@@ -2491,7 +2491,7 @@ class _EarningsPageState extends State<EarningsPage> {
                   ),
                 ),
                 Text(
-                  '₹${booking.price.toStringAsFixed(2)}',
+                  '?${booking.price.toStringAsFixed(2)}',
                   style: const TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.bold,
@@ -2824,7 +2824,7 @@ class SettingsPage extends StatelessWidget {
                         items: const [
                           DropdownMenuItem(
                             value: 'INR',
-                            child: Text('INR (₹)'),
+                            child: Text('INR (?)'),
                           ),
                           DropdownMenuItem(
                             value: 'USD',
@@ -2832,11 +2832,11 @@ class SettingsPage extends StatelessWidget {
                           ),
                           DropdownMenuItem(
                             value: 'EUR',
-                            child: Text('EUR (€)'),
+                            child: Text('EUR (�)'),
                           ),
                           DropdownMenuItem(
                             value: 'GBP',
-                            child: Text('GBP (£)'),
+                            child: Text('GBP (�)'),
                           ),
                         ],
                         onChanged: (code) {
@@ -4016,7 +4016,7 @@ class _PostsPageState extends State<PostsPage> {
             (e) => SlotFeedItem(
               slot: e.slot,
               vehicle: e.vehicle,
-              providerName: e.vehicle.userName, // ✅ Show real name to everyone
+              providerName: e.vehicle.userName, // ? Show real name to everyone
               providerAvatar: '',
               providerRating: 5.0,
               isOffer: false,
@@ -4024,7 +4024,7 @@ class _PostsPageState extends State<PostsPage> {
             ),
           )
           .toList();
-      debugPrint('📊 User posts after expiry filter: ${repoItems.length}');
+      debugPrint('?? User posts after expiry filter: ${repoItems.length}');
     } else {
       // Provider Posts tab - show ALL provider offers (common feed)
       final allProviderSlots = SlotRepository.instance.allSlots;
@@ -4056,7 +4056,7 @@ class _PostsPageState extends State<PostsPage> {
             );
           })
           .toList();
-      debugPrint('📊 Provider posts after expiry filter: ${repoItems.length}');
+      debugPrint('?? Provider posts after expiry filter: ${repoItems.length}');
     }
 
     final query = _searchController.text.trim().toLowerCase();
@@ -4072,7 +4072,7 @@ class _PostsPageState extends State<PostsPage> {
               })
               .toList(growable: false)
         : repoItems;
-    debugPrint('📊 After search filter: ${searched.length}');
+    debugPrint('?? After search filter: ${searched.length}');
 
     final dateTimeFiltered = searched
         .where((e) {
@@ -4087,7 +4087,7 @@ class _PostsPageState extends State<PostsPage> {
           return true;
         })
         .toList(growable: false);
-    debugPrint('📊 After date/time filter: ${dateTimeFiltered.length}');
+    debugPrint('?? After date/time filter: ${dateTimeFiltered.length}');
 
     // Apply price filter
     final priceFiltered = dateTimeFiltered
@@ -4099,7 +4099,7 @@ class _PostsPageState extends State<PostsPage> {
         })
         .toList(growable: false);
     debugPrint(
-      '📊 After price filter (${_minPrice ?? "any"}-${_maxPrice ?? "any"}): ${priceFiltered.length}',
+      '?? After price filter (${_minPrice ?? "any"}-${_maxPrice ?? "any"}): ${priceFiltered.length}',
     );
 
     // Apply service type filter
@@ -4273,12 +4273,12 @@ class _PostsPageState extends State<PostsPage> {
 
     if (!_nearestEnabled) {
       final result = _applySorting(distanceFiltered);
-      debugPrint('📊 FINAL RESULT: ${result.length} posts after all filters');
+      debugPrint('?? FINAL RESULT: ${result.length} posts after all filters');
       return result;
     }
 
     final result = _sortByDistance(distanceFiltered);
-    debugPrint('📊 FINAL RESULT: ${result.length} posts after all filters (sorted by distance)');
+    debugPrint('?? FINAL RESULT: ${result.length} posts after all filters (sorted by distance)');
     return result;
   }
 
@@ -5231,7 +5231,7 @@ class _PostsPageState extends State<PostsPage> {
   }
 
   /// Extracts unique human-readable location names from all slots in the app.
-  /// Locations are stored as "Name|lat,lon" — we return just the Name part.
+  /// Locations are stored as "Name|lat,lon" � we return just the Name part.
   Set<String> _allLocationNames({required String field}) {
     final allSlots = [
       ...SlotRepository.instance.allSlots.map((e) => e.slot),
@@ -5283,11 +5283,11 @@ class _PostsPageState extends State<PostsPage> {
       return;
     }
 
-    debugPrint('🎫 Booking action started for slot: ${slot.id}');
+    debugPrint('?? Booking action started for slot: ${slot.id}');
 
     final canBook = BookingRepository.instance.canBook(slot.id, slot.capacity);
     if (!canBook) {
-      debugPrint('❌ Cannot book: No capacity remaining');
+      debugPrint('? Cannot book: No capacity remaining');
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('No capacity remaining')));
@@ -5295,19 +5295,19 @@ class _PostsPageState extends State<PostsPage> {
     }
 
     debugPrint(
-      '✅ Capacity check passed, looking for vehicle: ${slot.vehicleId}',
+      '? Capacity check passed, looking for vehicle: ${slot.vehicleId}',
     );
 
     final vehicleToUse = vehicle ?? VehicleRepository.instance.getById(slot.vehicleId);
     if (vehicleToUse == null) {
-      debugPrint('❌ Vehicle not found in VehicleRepository: ${slot.vehicleId}');
+      debugPrint('? Vehicle not found in VehicleRepository: ${slot.vehicleId}');
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('Vehicle not found')));
       return;
     }
 
-    debugPrint('✅ Vehicle found, showing booking sheet');
+    debugPrint('? Vehicle found, showing booking sheet');
 
     final result = await showModalBottomSheet<BookingConfirmResult>(
       context: context,
@@ -5322,8 +5322,8 @@ class _PostsPageState extends State<PostsPage> {
 
     if (result == null) {
       // null means either: user cancelled, OR booking was already created inside the sheet (test mode / payment flow)
-      // Both cases are fine — if booking was created, the sheet already navigated to Requests tab
-      debugPrint('ℹ️ Sheet closed without result (booking created internally or user cancelled)');
+      // Both cases are fine � if booking was created, the sheet already navigated to Requests tab
+      debugPrint('?? Sheet closed without result (booking created internally or user cancelled)');
       return;
     }
 
@@ -5344,7 +5344,7 @@ class _PostsPageState extends State<PostsPage> {
 
     final confirmedCount = result.seatKeys.length;
     if (confirmedCount == 0) {
-      debugPrint('⚠️ No seats selected, booking already created in sheet');
+      debugPrint('?? No seats selected, booking already created in sheet');
       return;
     }
 
@@ -5972,12 +5972,12 @@ class _RequestsBodyState extends State<_RequestsBody> {
             if (post != null) ...[
               const SizedBox(height: 8),
               Text(
-                '${_getServiceTypeName(post.serviceType)} · ${_fmtDateTime(post.startTime)}',
+                '${_getServiceTypeName(post.serviceType)} � ${_fmtDateTime(post.startTime)}',
                 style: TextStyle(fontSize: 13, color: Colors.grey[700]),
               ),
               if (post.fromLocation != null && post.toLocation != null)
                 Text(
-                  '${post.fromLocation} → ${post.toLocation}',
+                  '${post.fromLocation} ? ${post.toLocation}',
                   style: TextStyle(fontSize: 13, color: Colors.grey[700]),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
@@ -6077,7 +6077,7 @@ class _RequestsBodyState extends State<_RequestsBody> {
                         if (!context.mounted) return;
                         messenger.showSnackBar(
                           SnackBar(
-                            content: Text(ok ? '✅ OTP verified' : 'Invalid OTP'),
+                            content: Text(ok ? '? OTP verified' : 'Invalid OTP'),
                             backgroundColor: ok ? Colors.green : Colors.red,
                           ),
                         );
@@ -6101,7 +6101,7 @@ class _RequestsBodyState extends State<_RequestsBody> {
                   children: [
                     Icon(Icons.verified, size: 16, color: Colors.blue),
                     SizedBox(width: 8),
-                    Text('OTP verified — awaiting payment', style: TextStyle(fontSize: 13)),
+                    Text('OTP verified � awaiting payment', style: TextStyle(fontSize: 13)),
                   ],
                 ),
               ),
@@ -6223,7 +6223,7 @@ class _RequestsBodyState extends State<_RequestsBody> {
                         ),
                       ),
                       Text(
-                        '${b.userAge ?? '?'} yrs · ${b.userGender?.name ?? 'Any'}${b.seatKey != null ? ' · Seat: ${b.seatKey}' : ''}',
+                        '${b.userAge ?? '?'} yrs � ${b.userGender?.name ?? 'Any'}${b.seatKey != null ? ' � Seat: ${b.seatKey}' : ''}',
                         style: TextStyle(fontSize: 12, color: Colors.grey[600]),
                       ),
                     ],
@@ -6237,7 +6237,7 @@ class _RequestsBodyState extends State<_RequestsBody> {
               style: TextStyle(color: Colors.grey[700], fontSize: 13),
             ),
             const SizedBox(height: 4),
-            // ── Trip schedule + deadline (from booking snapshot) ──────────
+            // -- Trip schedule + deadline (from booking snapshot) ----------
             _BookingTimeBanner(booking: b),
             const SizedBox(height: 4),
             if (bookingSlot != null) ...[
@@ -6374,7 +6374,7 @@ class _RequestsBodyState extends State<_RequestsBody> {
                     child: Text(
                       (slotForMap.fromLocation != null &&
                               slotForMap.toLocation != null)
-                          ? '${_cleanLoc(slotForMap.fromLocation!)} → ${_cleanLoc(slotForMap.toLocation!)}'
+                          ? '${_cleanLoc(slotForMap.fromLocation!)} ? ${_cleanLoc(slotForMap.toLocation!)}'
                           : _cleanLoc(slotForMap.baseLocation),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
@@ -6650,10 +6650,10 @@ class _RequestsBodyState extends State<_RequestsBody> {
                     isRiderView: isRiderView,
                   ),
                   const SizedBox(height: 6),
-                  // Timing section — from booking snapshot
+                  // Timing section � from booking snapshot
                   _BookingTimeBanner(booking: b),
                 ],
-                // Refund section — shown regardless of bookingSlot
+                // Refund section � shown regardless of bookingSlot
                 if (bookingSlot == null && b.tripEndTime != null && DateTime.now().isAfter(b.tripEndTime!)) ...[
                   const SizedBox(height: 6),
                   Row(
@@ -6693,7 +6693,7 @@ class _RequestsBodyState extends State<_RequestsBody> {
                     ],
                   ),
                 ],
-                // Trip Media — upload photos/video for start & end of trip
+                // Trip Media � upload photos/video for start & end of trip
                 if (b.status == BookingStatus.accepted ||
                     b.status == BookingStatus.completed ||
                     b.status == BookingStatus.pending ||
@@ -6934,7 +6934,7 @@ class _RequestsBodyState extends State<_RequestsBody> {
                                   if (success) {
                                     await BookingRepository.instance.updateBookingAfterPayment(bookingId: b.id, status: BookingStatus.completed, otpVerified: true);
                                     if (context.mounted) {
-                                      messenger.showSnackBar(const SnackBar(content: Text('✅ Payment released!'), backgroundColor: Colors.green));
+                                      messenger.showSnackBar(const SnackBar(content: Text('? Payment released!'), backgroundColor: Colors.green));
                                       _promptForReview(context, b, isProvider: true);
                                     }
                                   } else {
@@ -6956,7 +6956,7 @@ class _RequestsBodyState extends State<_RequestsBody> {
                                       otpVerified: true,
                                     );
                                     messenger.showSnackBar(const SnackBar(
-                                      content: Text('✅ OTP verified! Trip completed.'),
+                                      content: Text('? OTP verified! Trip completed.'),
                                       backgroundColor: Colors.green,
                                     ));
                                     if (context.mounted) _promptForReview(context, b, isProvider: true);
@@ -7037,7 +7037,7 @@ class _RequestsBodyState extends State<_RequestsBody> {
 
                                 messenger.showSnackBar(
                                   const SnackBar(
-                                    content: Text('✅ Payment released! Funds transferred to your account.'),
+                                    content: Text('? Payment released! Funds transferred to your account.'),
                                     backgroundColor: Colors.green,
                                     duration: Duration(seconds: 4),
                                   ),
@@ -7076,7 +7076,7 @@ class _RequestsBodyState extends State<_RequestsBody> {
                                   messenger.showSnackBar(
                                     SnackBar(
                                       content: Text(
-                                        '✅ OTP verified! Security deposit of ${AppPreferences.instance.formatMoney(b.securityDeposit!.toInt())} refunded to user.',
+                                        '? OTP verified! Security deposit of ${AppPreferences.instance.formatMoney(b.securityDeposit!.toInt())} refunded to user.',
                                       ),
                                       backgroundColor: Colors.green,
                                       duration: const Duration(seconds: 4),
@@ -7084,7 +7084,7 @@ class _RequestsBodyState extends State<_RequestsBody> {
                                   );
                                 } else {
                                   messenger.showSnackBar(const SnackBar(
-                                    content: Text('✅ OTP verified! Trip completed.'),
+                                    content: Text('? OTP verified! Trip completed.'),
                                     backgroundColor: Colors.green,
                                   ));
                                 }
@@ -7170,7 +7170,7 @@ class _RequestsBodyState extends State<_RequestsBody> {
               ],
               if (isRiderView) ...[const SizedBox(height: 12)],
 
-              // ── Expired state ────────────────────────────────────────
+              // -- Expired state ----------------------------------------
               if (b.status == BookingStatus.expired) ...[
                 const SizedBox(height: 10),
                 Container(
@@ -7198,7 +7198,7 @@ class _RequestsBodyState extends State<_RequestsBody> {
                       Text(
                         isRiderView
                             ? 'The service was not completed within the deadline. Your payment has been refunded.'
-                            : 'This booking expired — trip not completed within deadline. Payment refunded to customer.',
+                            : 'This booking expired � trip not completed within deadline. Payment refunded to customer.',
                         style: TextStyle(fontSize: 12, color: Colors.grey[600]),
                       ),
                     ],
@@ -7206,7 +7206,7 @@ class _RequestsBodyState extends State<_RequestsBody> {
                 ),
               ],
 
-              // ── Disputed state ───────────────────────────────────────
+              // -- Disputed state ---------------------------------------
               if (b.status == BookingStatus.disputed) ...[
                 const SizedBox(height: 10),
                 Container(
@@ -7240,7 +7240,7 @@ class _RequestsBodyState extends State<_RequestsBody> {
                 ),
               ],
 
-              // ── Raise dispute (only when expired — trip ended without OTP) ──
+              // -- Raise dispute (only when expired � trip ended without OTP) --
               if (b.status == BookingStatus.expired && isRiderView) ...[
                 const SizedBox(height: 10),
                 OutlinedButton.icon(
@@ -7771,7 +7771,7 @@ class _BookingTimeBannerState extends State<_BookingTimeBanner> {
       } else if (now.isBefore(b.tripEndTime!)) {
         final diff = b.tripEndTime!.difference(now);
         icon = Icons.play_circle_outline;
-        label = 'In progress · ends in ${_fmt(diff)}';
+        label = 'In progress � ends in ${_fmt(diff)}';
         color = Colors.green;
       } else {
         icon = Icons.timer_off_outlined;
@@ -7786,7 +7786,7 @@ class _BookingTimeBannerState extends State<_BookingTimeBanner> {
       if (b.isOverdue) {
         rows.add(_timeRow(
           Icons.warning_amber_rounded,
-          'OVERDUE — deadline was ${_fmtDate(b.deadlineTime!)}',
+          'OVERDUE � deadline was ${_fmtDate(b.deadlineTime!)}',
           Colors.red,
           bold: true,
         ));
@@ -7940,7 +7940,7 @@ class _CountdownTextState extends State<CountdownText> {
       );
     }
 
-    // In progress — counting to end time (no text, just return empty)
+    // In progress � counting to end time (no text, just return empty)
     return const SizedBox.shrink();
   }
 }

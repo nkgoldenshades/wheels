@@ -14,7 +14,7 @@ class ConnectionTest {
       
       // Test profiles table
       final profilesResponse = await _supabase
-          .from('profiles')
+          .from('profiles_public')
           .select('id')
           .limit(1);
       debugPrint('✅ Profiles table: ${profilesResponse.length} records found');

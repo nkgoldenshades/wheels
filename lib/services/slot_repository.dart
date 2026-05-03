@@ -243,7 +243,7 @@ class SlotRepository {
       // Check if profile exists first
       try {
         final profileCheck = await supabase
-            .from('profiles')
+            .from('profiles_public')
             .select('id')
             .eq('id', currentUser.id)
             .maybeSingle();

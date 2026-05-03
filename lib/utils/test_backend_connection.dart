@@ -65,7 +65,7 @@ class BackendConnectionTest {
       // Test: Can read own profile
       try {
         final profile = await supabase
-            .from('profiles')
+            .from('profiles_public')
             .select()
             .eq('id', currentUser.id)
             .maybeSingle();
@@ -157,7 +157,7 @@ class BackendConnectionTest {
 
       // Check if profile exists
       final existing = await supabase
-          .from('profiles')
+          .from('profiles_public')
           .select()
           .eq('id', currentUser.id)
           .maybeSingle();
@@ -168,7 +168,7 @@ class BackendConnectionTest {
       }
 
       // Create profile
-      await supabase.from('profiles').insert({
+      await supabase.from('profiles_public').insert({
         'id': currentUser.id,
         'full_name': currentUser.profileName ?? 'User',
         'email': currentUser.email,
