@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:firebase_vertexai/firebase_vertexai.dart';
+import 'package:firebase_ai/firebase_ai.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/auth_repository.dart';
 import '../services/profile_repository.dart';
-// import 'package:image_picker/image_picker.dart'; // Commented out for Windows compatibility
+import 'package:image_picker/image_picker.dart';
 // import 'package:speech_to_text/speech_to_text.dart'; // Commented out for Windows compatibility
 // import 'package:permission_handler/permission_handler.dart'; // Not needed
 
@@ -24,7 +24,6 @@ class _AIChatPageState extends State<AIChatPage> {
   ChatSession? _chat;
   bool _isLoading = false;
   bool _aiInitialized = false;
-  String? _initError;
   int? _currentConversationId; // Track current conversation
   
   // Guest user conversation limit
@@ -32,8 +31,8 @@ class _AIChatPageState extends State<AIChatPage> {
   int _guestConversationCount = 0;
   bool _isGuest = false;
   
-  // Image and voice functionality (disabled for Windows compatibility)
-  // final ImagePicker _imagePicker = ImagePicker();
+  // Image and voice functionality
+  final ImagePicker _imagePicker = ImagePicker();
   // final SpeechToText _speechToText = SpeechToText();
   bool _isListening = false;
 
@@ -63,7 +62,7 @@ class _AIChatPageState extends State<AIChatPage> {
       
       // Use Firebase Gemini API (free tier available, no API key needed)
       // This uses Google AI's Gemini API through Firebase
-      _model = FirebaseVertexAI.instance.generativeModel(
+      _model = FirebaseAI.googleAI().generativeModel(
         model: 'gemini-2.5-flash',  // Latest, faster, lighter model
         systemInstruction: Content.system('''
 You are a helpful AI assistant for QuickOHunt, a ride-sharing and vehicle rental app.
@@ -117,10 +116,11 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
       if (!mounted) return;
       setState(() {
         _aiInitialized = false;
-        _initError = e.toString();
         _messages.add(ChatMessage(
           text:
-              "⚠️ AI connection failed.\n\nError: $e\n\nPlease check:\n1. 'Vertex AI in Firebase' is enabled in Firebase Console\n2. Gemini API is enabled\n3. Your Firebase project is configured correctly\n4. You have internet connection\n\nYou can still use the app - just tap back to continue.",
+              "⚠️ AI Assistant is temporarily unavailable.\n\n"
+              "Our AI service is currently offline. Please try again later or contact support if the issue persists.\n\n"
+              "You can still use all other features of the app — just tap back to continue.",
           isUser: false,
           timestamp: DateTime.now(),
           isError: true,
@@ -138,12 +138,38 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
 
   // Image picker functionality
   Future<void> _pickImage() async {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Image picker not available on this platform. Use web version for full functionality.'),
-        backgroundColor: Colors.orange,
-      ),
-    );
+    try {
+      final picked = await _imagePicker.pickImage(
+        source: ImageSource.gallery,
+        imageQuality: 80,
+      );
+      if (picked == null) return;
+
+      final bytes = await picked.readAsBytes();
+      final sizeKb = bytes.length ~/ 1024;
+
+      if (!mounted) return;
+      setState(() {
+        _messages.add(ChatMessage(
+          text: '📎 Image attached: ${picked.name} (${sizeKb}KB)',
+          isUser: true,
+          timestamp: DateTime.now(),
+        ));
+      });
+      _scrollToBottom();
+
+      // Send image context to AI
+      await _sendToFirebaseAI('I have attached an image: ${picked.name}. Please acknowledge it.');
+    } catch (e) {
+      debugPrint('❌ Image picker failed: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Could not pick image: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 
   // Voice input functionality
@@ -233,10 +259,9 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
     if (!mounted) return;
     setState(() {
       _aiInitialized = false;
-      _initError = null;
     });
     _initializeFirebaseAI();
-    Navigator.pop(context); // Close settings
+    Navigator.pop(context);
   }
 
   Future<void> _sendMessage() async {
@@ -484,7 +509,7 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
   Future<void> _sendToFirebaseAI(String userText) async {
     if (!_aiInitialized || _chat == null) {
       _addAIMessage(
-        "⚠️ AI is not connected.\n\nError: ${_initError ?? 'Unknown error during initialization.'}\n\nPlease restart the app.",
+        "⚠️ AI Assistant is temporarily unavailable. Please try again later.",
         isError: true,
       );
       return;
@@ -505,7 +530,7 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
     } catch (e) {
       debugPrint('❌ Firebase Gemini API error: $e');
       _addAIMessage(
-        "AI error: $e\n\nPlease check your internet connection and try again.",
+        "Sorry, I couldn't process your message. Please check your connection and try again.",
         isError: true,
       );
     }
@@ -659,7 +684,7 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Text(
-                _aiInitialized ? 'Gemini ✓' : 'Offline',
+                _aiInitialized ? 'Online' : 'Offline',
                 style: const TextStyle(color: Colors.white, fontSize: 10),
               ),
             ),
@@ -678,7 +703,7 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                       decoration: BoxDecoration(
-                        color: Colors.blue.withOpacity(0.1),
+                        color: Colors.blue.withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(12),
                         border: Border.all(color: Colors.blue, width: 1),
                       ),
@@ -729,8 +754,8 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                   decoration: BoxDecoration(
                     color: _guestConversationCount >= _guestConversationLimit
-                        ? Colors.red.withOpacity(0.2)
-                        : Colors.orange.withOpacity(0.2),
+                        ? Colors.red.withValues(alpha: 0.2)
+                        : Colors.orange.withValues(alpha: 0.2),
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(
                       color: _guestConversationCount >= _guestConversationLimit
@@ -786,7 +811,7 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
                       children: [
                         CircularProgressIndicator(),
                         SizedBox(height: 16),
-                        Text('Connecting to Gemini AI...'),
+                        Text('Connecting to AI Assistant...'),
                       ],
                     ),
                   )
@@ -846,7 +871,7 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
                           height: 48,
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
-                            color: Colors.red.withOpacity(0.2),
+                            color: Colors.red.withValues(alpha: 0.2),
                           ),
                         ),
                       IconButton(
@@ -1159,8 +1184,8 @@ class AISettingsBottomSheet extends StatelessWidget {
                       ),
                       Text(
                         aiInitialized 
-                          ? 'Firebase AI Logic is working'
-                          : 'Check Firebase AI Logic setup',
+                          ? 'AI Assistant is connected'
+                          : 'AI Assistant is offline',
                         style: TextStyle(
                           fontSize: 12,
                           color: aiInitialized ? Colors.green[600] : Colors.orange[600],
@@ -1178,7 +1203,7 @@ class AISettingsBottomSheet extends StatelessWidget {
           _buildSettingsTile(
             icon: Icons.refresh,
             title: 'Reconnect AI',
-            subtitle: 'Retry Firebase AI connection',
+            subtitle: 'Reconnect to AI Assistant',
             onTap: onReconnectAI,
           ),
           _buildSettingsTile(
@@ -1190,10 +1215,10 @@ class AISettingsBottomSheet extends StatelessWidget {
           _buildSettingsTile(
             icon: Icons.info_outline,
             title: 'AI Model',
-            subtitle: 'Gemini 2.0 Flash (Firebase AI Logic)',
+            subtitle: 'VaultWheels AI Assistant',
             onTap: () {
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Model: Gemini 2.0 Flash via Firebase AI Logic')),
+                const SnackBar(content: Text('VaultWheels AI Assistant')),
               );
             },
           ),

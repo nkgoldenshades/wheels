@@ -38,11 +38,11 @@ import 'services/customer_vehicle_repository.dart';
 import 'services/customer_slot_repository.dart';
 import 'services/user_post_repository.dart';
 import 'services/user_post_acceptance_repository.dart';
-import 'services/otp_service.dart';
 import 'models/user_post_acceptance.dart';
 import 'services/review_repository.dart';
 import 'widgets/slot_card.dart';
 import 'widgets/booking_confirm_sheet.dart';
+import 'widgets/trip_media_widget.dart';
 import 'widgets/review_dialog.dart';
 import 'services/profile_repository.dart';
 import 'services/profile_name_registry.dart';
@@ -360,21 +360,30 @@ class _EditUserPostPageState extends State<EditUserPostPage> {
   }
 
   Future<void> _pickTime({required bool isStart}) async {
-    final initial = TimeOfDay.fromDateTime(isStart ? _startTime! : _endTime!);
+    final current = isStart ? _startTime! : _endTime!;
+
+    final pickedDate = await showDatePicker(
+      context: context,
+      initialDate: current,
+      firstDate: DateTime.now().subtract(const Duration(days: 1)),
+      lastDate: DateTime.now().add(const Duration(days: 365)),
+    );
+    if (pickedDate == null || !mounted) return;
+
     final picked = await showTimePicker(
       context: context,
-      initialTime: initial,
+      initialTime: TimeOfDay.fromDateTime(current),
       builder: (ctx, child) => MediaQuery(
         data: MediaQuery.of(ctx).copyWith(alwaysUse24HourFormat: true),
         child: child!,
       ),
     );
     if (picked == null) return;
-    final date = isStart ? _startTime! : _endTime!;
+
     final newDt = DateTime(
-      date.year,
-      date.month,
-      date.day,
+      pickedDate.year,
+      pickedDate.month,
+      pickedDate.day,
       picked.hour,
       picked.minute,
     );
@@ -1242,40 +1251,66 @@ class _PlanCard extends StatelessWidget {
   }
 }
 
-Future<void> _openExternalMapForSlot(BuildContext context, Slot slot) async {
-  String? origin;
-  String? destination;
+/// Extract lat,lng string from location format "Name|lat,lng|keywords"
+String? _extractCoordsFromLocation(String? raw) {
+  if (raw == null || raw.isEmpty) return null;
+  final parts = raw.split('|');
+  if (parts.length >= 2) {
+    final coords = parts[1].trim();
+    if (coords.contains(',')) return coords; // "lat,lng"
+  }
+  // Fallback: if no pipe, check if it's already "lat,lng"
+  if (raw.contains(',') && !raw.contains(' ')) return raw.trim();
+  debugPrint('⚠️ Could not extract coords from: $raw');
+  return null;
+}
 
-  if (slot.fromLocation != null && slot.fromLocation!.trim().isNotEmpty) {
-    origin = slot.fromLocation!.trim();
-  } else if (slot.baseLocation != null &&
-      slot.baseLocation!.trim().isNotEmpty) {
-    origin = slot.baseLocation!.trim();
+Future<void> _openExternalMapForSlot(BuildContext context, Slot slot, {
+  double? vehicleLat,
+  double? vehicleLng,
+  double? userLat,
+  double? userLng,
+}) async {
+  // Try extracting coords from pipe-format string first
+  // Then fall back to slot's direct lat/lng fields
+  String? originCoords;
+  String? destCoords;
+
+  // Origin: from_location or base_location
+  final fromCoords = _extractCoordsFromLocation(slot.fromLocation);
+  final baseCoords = _extractCoordsFromLocation(slot.baseLocation);
+  if (fromCoords != null) {
+    originCoords = fromCoords;
+  } else if (baseCoords != null) {
+    originCoords = baseCoords;
   }
 
-  if (slot.toLocation != null && slot.toLocation!.trim().isNotEmpty) {
-    destination = slot.toLocation!.trim();
+  // Destination: to_location
+  final toCoords = _extractCoordsFromLocation(slot.toLocation);
+  if (toCoords != null) {
+    destCoords = toCoords;
   }
 
-  if (origin == null && destination == null) {
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('Location not available')));
+  if (originCoords == null && destCoords == null) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Location coordinates not available')),
+    );
     return;
   }
 
-  final uri = Uri.https('www.google.com', '/maps/dir/', {
-    'origin': ?origin,
-    'destination': ?destination,
-    'api': '1',
-    'travelmode': 'driving',
-  });
+  // Build multi-stop URL: google.com/maps/dir/lat,lng/lat,lng/lat,lng/
+  final segments = <String>[];
+  if (originCoords != null) segments.add(originCoords);
+  if (vehicleLat != null && vehicleLng != null) segments.add('$vehicleLat,$vehicleLng');
+  if (userLat != null && userLng != null) segments.add('$userLat,$userLng');
+  if (destCoords != null) segments.add(destCoords);
 
+  final uri = Uri.parse('https://www.google.com/maps/dir/${segments.join('/')}');
   final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
   if (!ok && context.mounted) {
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('Could not open maps')));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Could not open maps')),
+    );
   }
 }
 
@@ -1358,21 +1393,30 @@ class _CreateUserPostPageState extends State<CreateUserPostPage> {
   }
 
   Future<void> _pickTime({required bool isStart}) async {
-    final initial = TimeOfDay.fromDateTime(isStart ? _startTime! : _endTime!);
+    final current = isStart ? _startTime! : _endTime!;
+
+    final pickedDate = await showDatePicker(
+      context: context,
+      initialDate: current,
+      firstDate: DateTime.now().subtract(const Duration(days: 1)),
+      lastDate: DateTime.now().add(const Duration(days: 365)),
+    );
+    if (pickedDate == null || !mounted) return;
+
     final picked = await showTimePicker(
       context: context,
-      initialTime: initial,
+      initialTime: TimeOfDay.fromDateTime(current),
       builder: (ctx, child) => MediaQuery(
         data: MediaQuery.of(ctx).copyWith(alwaysUse24HourFormat: true),
         child: child!,
       ),
     );
     if (picked == null) return;
-    final date = isStart ? _startTime! : _endTime!;
+
     final newDt = DateTime(
-      date.year,
-      date.month,
-      date.day,
+      pickedDate.year,
+      pickedDate.month,
+      pickedDate.day,
       picked.hour,
       picked.minute,
     );
@@ -3788,6 +3832,7 @@ class _PostsPageState extends State<PostsPage> {
 
                   _handleBookingAction(
                     slot: item.slot,
+                    vehicle: item.vehicle,
                     providerId: item.slot.profileId, // Use post owner
                     userId: currentUser.id,
                     isOffer: item.isOffer,
@@ -5213,6 +5258,7 @@ class _PostsPageState extends State<PostsPage> {
 
   Future<void> _handleBookingAction({
     required Slot slot,
+    Vehicle? vehicle,
     required String providerId,
     required String userId,
     required bool isOffer,
@@ -5252,8 +5298,8 @@ class _PostsPageState extends State<PostsPage> {
       '✅ Capacity check passed, looking for vehicle: ${slot.vehicleId}',
     );
 
-    final vehicle = VehicleRepository.instance.getById(slot.vehicleId);
-    if (vehicle == null) {
+    final vehicleToUse = vehicle ?? VehicleRepository.instance.getById(slot.vehicleId);
+    if (vehicleToUse == null) {
       debugPrint('❌ Vehicle not found in VehicleRepository: ${slot.vehicleId}');
       ScaffoldMessenger.of(
         context,
@@ -5275,7 +5321,9 @@ class _PostsPageState extends State<PostsPage> {
     );
 
     if (result == null) {
-      debugPrint('❌ Booking cancelled by user or already created');
+      // null means either: user cancelled, OR booking was already created inside the sheet (test mode / payment flow)
+      // Both cases are fine — if booking was created, the sheet already navigated to Requests tab
+      debugPrint('ℹ️ Sheet closed without result (booking created internally or user cancelled)');
       return;
     }
 
@@ -5283,13 +5331,13 @@ class _PostsPageState extends State<PostsPage> {
 
     // Use fallback provider info if not provided
     // Priority: 1. Operator contact (if assigned), 2. Provided contact, 3. Owner contact
-    final finalProviderName = providerName ?? vehicle.userName;
+    final finalProviderName = providerName ?? vehicleToUse.userName;
     final finalProviderPhone = providerPhone ?? 
-        (vehicle.operatorPhone ?? _providerPhone(vehicle.userId));
+        (vehicleToUse.operatorPhone ?? _providerPhone(vehicleToUse.userId));
 
     debugPrint('=== BOOKING DEBUG ===');
     debugPrint('Post profileId: ${slot.profileId}');
-    debugPrint('Vehicle userId: ${vehicle.userId}');
+    debugPrint('Vehicle userId: ${vehicleToUse.userId}');
     debugPrint('Current user ID: ${AuthRepository.instance.currentUser?.id}');
     debugPrint('Provider ID for booking: ${slot.profileId}');
     debugPrint('====================');
@@ -5354,7 +5402,7 @@ class _PostsPageState extends State<PostsPage> {
         builder: (context) => BookingMapScreen(
           booking: createdBookings.first,
           slot: slot,
-          vehicle: vehicle,
+          vehicle: vehicleToUse,
           isProviderView: false,
           autoCloseSeconds: 3,
         ),
@@ -5632,7 +5680,7 @@ class _RequestsBodyState extends State<_RequestsBody> {
                   BookingStatus.completed,
                 }),
                 const SizedBox(width: 8),
-                _buildFilterChip('Overdue', Colors.red, {
+                _buildFilterChip('Expired', Colors.red, {
                   BookingStatus.expired,
                 }),
                 const SizedBox(width: 8),
@@ -6286,6 +6334,25 @@ class _RequestsBodyState extends State<_RequestsBody> {
                               constraints: const BoxConstraints(),
                               onPressed: () => _openGoogleMapsLatLng(context, lat!, lng!),
                             ),
+                            IconButton(
+                              icon: const Icon(Icons.navigation, size: 18, color: Colors.green),
+                              tooltip: 'Track on Map',
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(),
+                              onPressed: () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) => BookingMapScreen(
+                                      booking: b,
+                                      slot: bookingSlot,
+                                      vehicle: vehicle,
+                                      isProviderView: isRiderView ? false : true,
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
                           ],
                         ),
                       ],
@@ -6316,8 +6383,21 @@ class _RequestsBodyState extends State<_RequestsBody> {
                   ),
                   IconButton(
                     tooltip: 'Open map',
-                    onPressed: () =>
-                        _openExternalMapForSlot(context, slotForMap),
+                    onPressed: () {
+                      // Get vehicle GPS coords for this booking
+                      final slotEntry = SlotRepository.instance.allSlots
+                          .where((e) => e.slot.id == slotForMap.id)
+                          .firstOrNull;
+                      final v = slotEntry?.vehicle;
+                      final vLat = v?.lastKnownLat ?? v?.manualLat;
+                      final vLng = v?.lastKnownLng ?? v?.manualLng;
+                      _openExternalMapForSlot(
+                        context,
+                        slotForMap,
+                        vehicleLat: vLat,
+                        vehicleLng: vLng,
+                      );
+                    },
                     icon: const Icon(Icons.map_outlined),
                   ),
                 ],
@@ -6432,6 +6512,68 @@ class _RequestsBodyState extends State<_RequestsBody> {
                   ),
                 ),
                 const SizedBox(height: 10),
+                
+                // Track Vehicle Button (for active bookings with GPS)
+                Builder(
+                  builder: (context) {
+                    // Get vehicle for this booking
+                    final bookingSlotId = b.slotId;
+                    final slotEntry = SlotRepository.instance.allSlots
+                        .where((e) => e.slot.id == bookingSlotId)
+                        .firstOrNull;
+                    final vehicle = slotEntry?.vehicle;
+                    final slot = slotEntry?.slot;
+                    
+                    // Only show for active bookings with vehicle GPS data
+                    if (vehicle != null && 
+                        (b.status == BookingStatus.accepted || b.status == BookingStatus.pending) &&
+                        (vehicle.lastKnownLat != null || vehicle.manualLat != null)) {
+                      return Column(
+                        children: [
+                          SizedBox(
+                            width: double.infinity,
+                            child: ElevatedButton.icon(
+                              onPressed: () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) => BookingMapScreen(
+                                      booking: b,
+                                      slot: slot,
+                                      vehicle: vehicle,
+                                      isProviderView: false,
+                                    ),
+                                  ),
+                                );
+                              },
+                              icon: Icon(
+                                vehicle.gpsMode == VehicleGpsMode.deviceLive
+                                    ? Icons.gps_fixed
+                                    : Icons.location_on,
+                                size: 20,
+                              ),
+                              label: Text(
+                                vehicle.gpsMode == VehicleGpsMode.deviceLive
+                                    ? 'Track Vehicle Live'
+                                    : 'View Vehicle Location',
+                              ),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: vehicle.gpsMode == VehicleGpsMode.deviceLive
+                                    ? Colors.green
+                                    : Colors.blue,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(vertical: 12),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                        ],
+                      );
+                    }
+                    return const SizedBox.shrink();
+                  },
+                ),
+                
                 Container(
                   width: double.infinity,
                   padding: const EdgeInsets.all(12),
@@ -6501,51 +6643,6 @@ class _RequestsBodyState extends State<_RequestsBody> {
                 ),
                 // After end time: user can extend or request refund
                 if (bookingSlot != null) ...[
-                  const SizedBox(height: 10),
-                  // Start and End times at the bottom
-                  Container(
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: Colors.grey[50],
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: Colors.grey[300]!),
-                    ),
-                    child: Column(
-                      children: [
-                        Row(
-                          children: [
-                            const Icon(Icons.access_time, size: 16, color: Colors.blue),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                'Start: ${_fmtDateTime(bookingSlot.startTime)}',
-                                style: const TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 6),
-                        Row(
-                          children: [
-                            const Icon(Icons.event_available, size: 16, color: Colors.green),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                'End:   ${_fmtDateTime(bookingSlot.endTime)}',
-                                style: const TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
                   const SizedBox(height: 6),
                   _AutoRefundSection(
                     booking: b,
@@ -6556,7 +6653,61 @@ class _RequestsBodyState extends State<_RequestsBody> {
                   // Timing section — from booking snapshot
                   _BookingTimeBanner(booking: b),
                 ],
-                // Add review button for completed trips (user view)
+                // Refund section — shown regardless of bookingSlot
+                if (bookingSlot == null && b.tripEndTime != null && DateTime.now().isAfter(b.tripEndTime!)) ...[
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      Icon(Icons.timer_off_outlined, size: 12, color: Colors.grey[600]),
+                      const SizedBox(width: 4),
+                      Expanded(child: Text('Trip time over', style: TextStyle(fontSize: 11, color: Colors.grey[600]))),
+                      GestureDetector(
+                        onTap: () async {
+                          final confirm = await showDialog<bool>(
+                            context: context,
+                            builder: (ctx) => AlertDialog(
+                              title: const Text('Issue Refund'),
+                              content: const Text('Mark this booking as refunded?'),
+                              actions: [
+                                TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+                                ElevatedButton(
+                                  onPressed: () => Navigator.pop(ctx, true),
+                                  style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+                                  child: const Text('Refund'),
+                                ),
+                              ],
+                            ),
+                          );
+                          if (confirm != true || !context.mounted) return;
+                          await BookingRepository.instance.markRefunded(b.id);
+                        },
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.currency_rupee, size: 12, color: Colors.red[700]),
+                            const SizedBox(width: 4),
+                            Text('Refund', style: TextStyle(fontSize: 11, color: Colors.red[700], fontWeight: FontWeight.w600)),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+                // Trip Media — upload photos/video for start & end of trip
+                if (b.status == BookingStatus.accepted ||
+                    b.status == BookingStatus.completed ||
+                    b.status == BookingStatus.pending ||
+                    b.status == BookingStatus.inProgress) ...[
+                  const SizedBox(height: 12),
+                  const Divider(),
+                  TripMediaWidget(
+                    booking: b,
+                    isProvider: !isRiderView,
+                    onUpdated: (updated) async {
+                      await BookingRepository.instance.updateTripMedia(b.id, updated);
+                    },
+                  ),
+                ],
                 if (b.status == BookingStatus.completed) ...[
                   const SizedBox(height: 10),
                   OutlinedButton.icon(
@@ -6790,31 +6941,28 @@ class _RequestsBodyState extends State<_RequestsBody> {
                                     messenger.showSnackBar(const SnackBar(content: Text('Invalid OTP'), backgroundColor: Colors.red));
                                   }
                                 } else {
-                                  // Use OtpService for better error messages
-                                  final result = await OtpService().verifyOtp(
-                                    bookingId: int.parse(b.id),
-                                    userId: b.userId,
-                                    enteredOtp: otpText,
+                                  // Use repository verifyOtp (has local OTP fallback)
+                                  final success = await BookingRepository.instance.verifyOtp(
+                                    bookingId: b.id,
+                                    otp: otpText,
                                   );
                                   if (!context.mounted) return;
                                   Navigator.pop(context);
                                   
-                                  if (result.isSuccess) {
-                                    // Update local state
+                                  if (success) {
                                     await BookingRepository.instance.updateBookingAfterPayment(
                                       bookingId: b.id,
                                       status: BookingStatus.completed,
                                       otpVerified: true,
                                     );
-                                    messenger.showSnackBar(SnackBar(
-                                      content: Text(result.message),
+                                    messenger.showSnackBar(const SnackBar(
+                                      content: Text('✅ OTP verified! Trip completed.'),
                                       backgroundColor: Colors.green,
                                     ));
                                     if (context.mounted) _promptForReview(context, b, isProvider: true);
                                   } else {
-                                    // Show specific error message
-                                    messenger.showSnackBar(SnackBar(
-                                      content: Text(result.message),
+                                    messenger.showSnackBar(const SnackBar(
+                                      content: Text('Incorrect OTP. Please try again.'),
                                       backgroundColor: Colors.red,
                                     ));
                                   }
@@ -6908,18 +7056,16 @@ class _RequestsBodyState extends State<_RequestsBody> {
                                 );
                               }
                             } else {
-                              // Use OtpService for better error messages
-                              final result = await OtpService().verifyOtp(
-                                bookingId: int.parse(b.id),
-                                userId: b.userId,
-                                enteredOtp: otpText,
+                              // Use repository verifyOtp (has local OTP fallback)
+                              final success = await BookingRepository.instance.verifyOtp(
+                                bookingId: b.id,
+                                otp: otpText,
                               );
 
                               if (!context.mounted) return;
-                              Navigator.pop(context); // Close loading
+                              Navigator.pop(context);
 
-                              if (result.isSuccess) {
-                                // Update local booking status
+                              if (success) {
                                 await BookingRepository.instance.updateBookingAfterPayment(
                                   bookingId: b.id,
                                   status: BookingStatus.completed,
@@ -6937,26 +7083,20 @@ class _RequestsBodyState extends State<_RequestsBody> {
                                     ),
                                   );
                                 } else {
-                                  messenger.showSnackBar(
-                                    SnackBar(
-                                      content: Text(result.message),
-                                      backgroundColor: Colors.green,
-                                    ),
-                                  );
+                                  messenger.showSnackBar(const SnackBar(
+                                    content: Text('✅ OTP verified! Trip completed.'),
+                                    backgroundColor: Colors.green,
+                                  ));
                                 }
 
-                                // Prompt for review if successful
                                 if (context.mounted) {
                                   _promptForReview(context, b, isProvider: true);
                                 }
                               } else {
-                                // Show specific error message
-                                messenger.showSnackBar(
-                                  SnackBar(
-                                    content: Text(result.message),
-                                    backgroundColor: Colors.red,
-                                  ),
-                                );
+                                messenger.showSnackBar(const SnackBar(
+                                  content: Text('Incorrect OTP. Please try again.'),
+                                  backgroundColor: Colors.red,
+                                ));
                               }
                             }
                           } catch (e) {
@@ -7454,7 +7594,7 @@ class _AutoRefundSectionState extends State<_AutoRefundSection> {
       return const SizedBox.shrink();
     }
 
-    // Provider view: Show message to ask user for extension
+    // Provider view: Show refund option too
     if (!widget.isRiderView) {
       return Row(
         children: [
@@ -7464,6 +7604,41 @@ class _AutoRefundSectionState extends State<_AutoRefundSection> {
             child: Text(
               'Trip time over - Ask extension from user',
               style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+            ),
+          ),
+          const SizedBox(width: 8),
+          GestureDetector(
+            onTap: () async {
+              final confirm = await showDialog<bool>(
+                context: context,
+                builder: (ctx) => AlertDialog(
+                  title: const Text('Issue Refund'),
+                  content: const Text('Mark this booking as refunded?'),
+                  actions: [
+                    TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+                    ElevatedButton(
+                      onPressed: () => Navigator.pop(ctx, true),
+                      style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+                      child: const Text('Refund'),
+                    ),
+                  ],
+                ),
+              );
+              if (confirm != true || !context.mounted) return;
+              await BookingRepository.instance.markRefunded(booking.id);
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Refund issued'), backgroundColor: Colors.orange),
+                );
+              }
+            },
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.currency_rupee, size: 12, color: Colors.red[700]),
+                const SizedBox(width: 4),
+                Text('Refund', style: TextStyle(fontSize: 11, color: Colors.red[700], fontWeight: FontWeight.w600)),
+              ],
             ),
           ),
         ],

@@ -2,7 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:firebase_vertexai/firebase_vertexai.dart';
+import 'package:firebase_ai/firebase_ai.dart';
 
 class VoiceAIService extends ChangeNotifier {
   static final VoiceAIService _instance = VoiceAIService._internal();
@@ -105,7 +105,7 @@ class VoiceAIService extends ChangeNotifier {
       debugPrint('🚀 Voice AI: Starting Firebase Gemini API initialization...');
       
       // Use Firebase Gemini API (free tier available, no API key needed)
-      _model = FirebaseVertexAI.instance.generativeModel(
+      _model = FirebaseAI.googleAI().generativeModel(
         model: 'gemini-2.5-flash',  // Latest, faster, lighter model
         systemInstruction: Content.system('''
 You are a helpful AI assistant for QuickOHunt, a ride-sharing and vehicle rental app.

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'dart:convert';
 import 'dart:typed_data';
 import '../models/seat_layout.dart';
+import '../models/simple_seat_layout.dart';
 import '../models/booking.dart';
 import '../models/slot.dart';
 import '../models/slot_type.dart';
@@ -187,36 +188,92 @@ class SlotDetailScreen extends StatelessWidget {
                             );
                           },
                         ),
-                        const SizedBox(height: 16),
-                        if (resolvedSlot.seatLayoutOwnerId != null) ...[
-                          ValueListenableBuilder<Map<String, SeatLayout>>(
-                            valueListenable:
-                                SeatLayoutRepository.instance.layoutsByOwnerId,
-                            builder: (context, layouts, _) {
-                              final layout = layouts[resolvedSlot.seatLayoutOwnerId];
-                              if (layout == null) {
-                                return const SizedBox.shrink();
-                              }
-
-                              return Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  const Text(
-                                    'Seat Layout',
-                                    style: TextStyle(
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 8),
-                                  _SeatLayoutPreview(layout: layout),
-                                  const SizedBox(height: 16),
-                                  const _Legend(),
-                                  const SizedBox(height: 16),
-                                ],
-                              );
-                            },
+                        // Parcel dimensions — only shown for parcel service type
+                        if (resolvedSlot.serviceType == ServiceType.parcel &&
+                            (resolvedSlot.maxWeight != null ||
+                             resolvedSlot.maxLength != null ||
+                             resolvedSlot.maxWidth != null ||
+                             resolvedSlot.maxHeight != null)) ...[
+                          const SizedBox(height: 12),
+                          const Text(
+                            'Parcel Dimensions',
+                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                           ),
+                          const SizedBox(height: 8),
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Colors.orange.shade50,
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: Colors.orange.shade200),
+                            ),
+                            child: Wrap(
+                              spacing: 16,
+                              runSpacing: 8,
+                              children: [
+                                if (resolvedSlot.maxWeight != null)
+                                  _DimensionChip(
+                                    icon: Icons.scale,
+                                    label: 'Weight',
+                                    value: '${resolvedSlot.maxWeight} kg',
+                                  ),
+                                if (resolvedSlot.maxLength != null)
+                                  _DimensionChip(
+                                    icon: Icons.straighten,
+                                    label: 'Length',
+                                    value: '${resolvedSlot.maxLength} cm',
+                                  ),
+                                if (resolvedSlot.maxWidth != null)
+                                  _DimensionChip(
+                                    icon: Icons.straighten,
+                                    label: 'Width',
+                                    value: '${resolvedSlot.maxWidth} cm',
+                                  ),
+                                if (resolvedSlot.maxHeight != null)
+                                  _DimensionChip(
+                                    icon: Icons.height,
+                                    label: 'Height',
+                                    value: '${resolvedSlot.maxHeight} cm',
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ],
+                        const SizedBox(height: 16),
+                        if (resolvedSlot.seatLayoutOwnerId != null ||
+                            resolvedSlot.seatLayoutStructure != null) ...[
+                          Builder(builder: (context) {
+                            // Try local repository first
+                            SeatLayout? layout = resolvedSlot.seatLayoutOwnerId != null
+                                ? SeatLayoutRepository.instance.getLayout(resolvedSlot.seatLayoutOwnerId!)
+                                : null;
+
+                            // Fallback: convert from Supabase structure
+                            if (layout == null && resolvedSlot.seatLayoutStructure != null) {
+                              layout = _simpleSeatLayoutToSeatLayout(
+                                resolvedSlot.seatLayoutStructure!,
+                                resolvedSlot.id,
+                              );
+                            }
+
+                            if (layout == null) return const SizedBox.shrink();
+
+                            return Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text(
+                                  'Seat Layout',
+                                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                                ),
+                                const SizedBox(height: 8),
+                                _SeatLayoutPreview(layout: layout),
+                                const SizedBox(height: 16),
+                                const _Legend(),
+                                const SizedBox(height: 16),
+                              ],
+                            );
+                          }),
                         ],
                         if (resolvedSlot.notes != null &&
                             resolvedSlot.notes!.trim().isNotEmpty) ...[
@@ -297,6 +354,7 @@ class SlotDetailScreen extends StatelessWidget {
                     _handleBookingAction(
                       context,
                       slot: resolvedSlot,
+                      vehicle: vehicle,
                       providerId: resolvedSlot.profileId, // Use post owner
                       providerName: providerName,
                       providerAvatar: providerAvatar,
@@ -372,23 +430,36 @@ class SlotDetailScreen extends StatelessWidget {
     DateTime endTime = slot.endTime;
 
     Future<void> pickTime({required bool isStart, required void Function(void Function()) setSheetState}) async {
+      final current = isStart ? startTime : endTime;
+
+      // Step 1: Pick date
+      final pickedDate = await showDatePicker(
+        context: context,
+        initialDate: current,
+        firstDate: DateTime.now().subtract(const Duration(days: 1)),
+        lastDate: DateTime.now().add(const Duration(days: 365)),
+      );
+      if (pickedDate == null || !context.mounted) return;
+
+      // Step 2: Pick time
       final picked = await showTimePicker(
         context: context,
-        initialTime: TimeOfDay.fromDateTime(isStart ? startTime : endTime),
+        initialTime: TimeOfDay.fromDateTime(current),
         builder: (ctx, child) => MediaQuery(
           data: MediaQuery.of(ctx).copyWith(alwaysUse24HourFormat: true),
           child: child!,
         ),
       );
       if (picked == null) return;
-      final base = isStart ? startTime : endTime;
+
       final newDt = DateTime(
-        base.year,
-        base.month,
-        base.day,
+        pickedDate.year,
+        pickedDate.month,
+        pickedDate.day,
         picked.hour,
         picked.minute,
       );
+
       setSheetState(() {
         if (isStart) {
           startTime = newDt;
@@ -690,6 +761,46 @@ class SlotDetailScreen extends StatelessWidget {
     }
   }
 
+  static SeatLayout _simpleSeatLayoutToSeatLayout(SimpleSeatLayout simple, String slotId) {
+    final cells = <String, LayoutCell>{};
+    int maxRow = 0;
+    int maxCol = 0;
+
+    for (final item in simple.layout) {
+      final row = item.row;
+      final col = item.col;
+      if (row > maxRow) maxRow = row;
+      if (col > maxCol) maxCol = col;
+
+      final key = '$row:$col';
+      SeatGender gender = SeatGender.any;
+      if (item is PassengerSeat) {
+        final g = item.allowedGender.toLowerCase();
+        if (g == 'male') {
+          gender = SeatGender.male;
+        } else if (g == 'female') gender = SeatGender.female;
+      }
+
+      cells[key] = LayoutCell(
+        row: row,
+        col: col,
+        type: item.isGap ? CellType.space : CellType.seat,
+        seatName: item.key,
+        price: item.price,
+        gender: gender,
+        isLocked: item.isLocked || item.isBooked,
+      );
+    }
+
+    return SeatLayout(
+      id: slotId,
+      name: 'Seat Layout',
+      rows: maxRow + 1,
+      cols: maxCol + 1,
+      cells: cells,
+    );
+  }
+
   static IconData _capacityIcon(Slot slot) {
     switch (slot.serviceType) {
       case ServiceType.passenger:
@@ -723,6 +834,7 @@ class SlotDetailScreen extends StatelessWidget {
   static Future<void> _handleBookingAction(
     BuildContext context, {
     required Slot slot,
+    Vehicle? vehicle,
     required String providerId,
     String? providerName,
     String? providerPhone,
@@ -778,7 +890,7 @@ class SlotDetailScreen extends StatelessWidget {
           builder: (context) => BookingMapScreen(
             booking: booking,
             slot: slot,
-            vehicle: null,
+            vehicle: vehicle,
             isProviderView: false,
             autoCloseSeconds: 3,
           ),
@@ -853,7 +965,7 @@ class SlotDetailScreen extends StatelessWidget {
         builder: (context) => BookingMapScreen(
           booking: createdBookings.first,
           slot: slot,
-          vehicle: null,
+          vehicle: vehicle,
           isProviderView: false,
           autoCloseSeconds: 3,
         ),
@@ -1538,6 +1650,44 @@ class _LegendItem extends StatelessWidget {
         ),
         const SizedBox(width: 4),
         Text(label, style: const TextStyle(fontSize: 12)),
+      ],
+    );
+  }
+}
+
+class _DimensionChip extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String value;
+
+  const _DimensionChip({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 16, color: Colors.orange.shade700),
+        const SizedBox(width: 4),
+        Text(
+          '$label: ',
+          style: TextStyle(
+            fontSize: 13,
+            color: Colors.orange.shade700,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+        Text(
+          value,
+          style: const TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
       ],
     );
   }

@@ -190,17 +190,28 @@ class AuthRepository {
         return;
       }
 
-      // Insert new user
+      // Insert new user into all 3 tables
       await supabase.from('profiles').insert({
         'id': uid,
         'full_name': firebaseUser.displayName ?? 'User',
-        'email': firebaseUser.email,
-        'phone_number': firebaseUser.phoneNumber,
         'profile_photo_url': firebaseUser.photoURL,
         'business_type': 'solo',
       });
 
-      debugPrint('✅ User synced to Supabase: $uid');
+      await supabase.from('profiles_contact').insert({
+        'id': uid,
+        'email': firebaseUser.email,
+        'phone_number': firebaseUser.phoneNumber,
+      });
+
+      await supabase.from('profiles_private').insert({
+        'id': uid,
+        'ai_credits_available': 50,
+        'wallet_balance': 0.0,
+        'payment_provider': 'razorpay',
+      });
+
+      debugPrint('✅ User synced to Supabase (3 tables): $uid');
     } catch (e) {
       debugPrint('❌ Failed to sync user to Supabase: $e');
       // Don't throw - allow login to succeed even if Supabase sync fails
