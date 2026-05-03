@@ -1,3 +1,4 @@
 {
-    "cmake.sourceDirectory": "C:/codings/quickohunt/linux"
+    "cmake.sourceDirectory": "C:/codings/quickohunt/linux",
+    "kiroAgent.configureMCP": "Disabled"
 }

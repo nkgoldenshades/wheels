@@ -156,6 +156,8 @@ class PaymentService {
     }
   }
 
+  String generateTestOtp(int seed) => _generateOtp(seed);
+
   String _generateOtp(int seed) {
     final base = (seed % 900000) + 100000;
     return base.toString().padLeft(6, '0');

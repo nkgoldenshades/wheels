@@ -173,35 +173,46 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   }
 
   Future<void> _selectTime({required bool isStart}) async {
-    final TimeOfDay? picked = await showTimePicker(
+    final current = isStart ? _startTime! : _endTime!;
+
+    // Step 1: Pick date
+    final DateTime? pickedDate = await showDatePicker(
       context: context,
-      initialTime: TimeOfDay.fromDateTime(isStart ? _startTime! : _endTime!),
+      initialDate: current,
+      firstDate: DateTime.now().subtract(const Duration(days: 1)),
+      lastDate: DateTime.now().add(const Duration(days: 365)),
+    );
+    if (pickedDate == null || !mounted) return;
+
+    // Step 2: Pick time
+    final TimeOfDay? pickedTime = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(current),
       builder: (ctx, child) => MediaQuery(
         data: MediaQuery.of(ctx).copyWith(alwaysUse24HourFormat: true),
         child: child!,
       ),
     );
-    if (picked != null) {
-      final date = (isStart ? _startTime! : _endTime!);
-      final newDateTime = DateTime(
-        date.year,
-        date.month,
-        date.day,
-        picked.hour,
-        picked.minute,
-      );
-      setState(() {
-        if (isStart) {
-          _startTime = newDateTime;
-          // Ensure end time is after start time
-          if (_endTime != null && _endTime!.isBefore(_startTime!)) {
-            _endTime = _startTime!.add(const Duration(hours: 2));
-          }
-        } else {
-          _endTime = newDateTime;
+    if (pickedTime == null) return;
+
+    final newDateTime = DateTime(
+      pickedDate.year,
+      pickedDate.month,
+      pickedDate.day,
+      pickedTime.hour,
+      pickedTime.minute,
+    );
+
+    setState(() {
+      if (isStart) {
+        _startTime = newDateTime;
+        if (_endTime != null && _endTime!.isBefore(_startTime!)) {
+          _endTime = _startTime!.add(const Duration(hours: 2));
         }
-      });
-    }
+      } else {
+        _endTime = newDateTime;
+      }
+    });
   }
 
   String _formatLocationValue({
@@ -309,32 +320,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     );
     if (!opened && mounted) {
       _showError('Unable to open maps');
-    }
-  }
-
-  Future<void> _selectDate({required bool isStart}) async {
-    final DateTime? picked = await showDatePicker(
-      context: context,
-      initialDate: isStart ? _startTime! : _endTime!,
-      firstDate: DateTime.now(),
-      lastDate: DateTime.now().add(const Duration(days: 30)),
-    );
-    if (picked != null) {
-      final time = TimeOfDay.fromDateTime(isStart ? _startTime! : _endTime!);
-      final newDateTime = DateTime(
-        picked.year,
-        picked.month,
-        picked.day,
-        time.hour,
-        time.minute,
-      );
-      setState(() {
-        if (isStart) {
-          _startTime = newDateTime;
-        } else {
-          _endTime = newDateTime;
-        }
-      });
     }
   }
 
@@ -1177,10 +1162,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                   ),
                   const SizedBox(height: 4),
                   InkWell(
-                    onTap: () async {
-                      await _selectDate(isStart: true);
-                      await _selectTime(isStart: true);
-                    },
+                    onTap: () => _selectTime(isStart: true),
                     child: Container(
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
@@ -1189,12 +1171,12 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                       ),
                       child: Row(
                         children: [
-                          const Icon(Icons.access_time),
+                          const Icon(Icons.calendar_today, size: 18),
                           const SizedBox(width: 8),
                           Text(
                             _startTime != null
                                 ? _fmtTime24(_startTime!)
-                                : 'Select start time',
+                                : 'Select start date & time',
                           ),
                         ],
                       ),
@@ -1214,10 +1196,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                   ),
                   const SizedBox(height: 4),
                   InkWell(
-                    onTap: () async {
-                      await _selectDate(isStart: false);
-                      await _selectTime(isStart: false);
-                    },
+                    onTap: () => _selectTime(isStart: false),
                     child: Container(
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
@@ -1226,12 +1205,12 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                       ),
                       child: Row(
                         children: [
-                          const Icon(Icons.access_time),
+                          const Icon(Icons.calendar_today, size: 18),
                           const SizedBox(width: 8),
                           Text(
                             _endTime != null
                                 ? _fmtTime24(_endTime!)
-                                : 'Select end time',
+                                : 'Select end date & time',
                           ),
                         ],
                       ),
@@ -1801,148 +1780,125 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
             borderRadius: BorderRadius.circular(8),
           ),
           padding: const EdgeInsets.all(12),
-          child: Column(
-            children: [
-              // Instant Booking
-              InkWell(
-                onTap: () => setState(() => _postMode = PostMode.instant),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 4.0),
-                  child: Row(
-                    children: [
-                      Radio<PostMode>(
-                        value: PostMode.instant,
-                        groupValue: _postMode,
-                        onChanged: (v) => setState(() => _postMode = v!),
-                      ),
-                      const Icon(Icons.flash_on, color: Colors.blue),
-                      const SizedBox(width: 8),
-                      const Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text('Instant Booking',
-                                style: TextStyle(
-                                    fontSize: 14, fontWeight: FontWeight.w600)),
-                            Text('Customers can book immediately',
-                                style:
-                                    TextStyle(fontSize: 12, color: Colors.grey)),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              const Divider(),
-              // Wait for Full
-              InkWell(
-                onTap: () => setState(() => _postMode = PostMode.waitForFull),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 4.0),
-                  child: Row(
-                    children: [
-                      Radio<PostMode>(
-                        value: PostMode.waitForFull,
-                        groupValue: _postMode,
-                        onChanged: (v) => setState(() => _postMode = v!),
-                      ),
-                      const Icon(Icons.groups, color: Colors.orange),
-                      const SizedBox(width: 8),
-                      const Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text('Wait for Full',
-                                style: TextStyle(
-                                    fontSize: 14, fontWeight: FontWeight.w600)),
-                            Text('Wait until all seats are filled',
-                                style:
-                                    TextStyle(fontSize: 12, color: Colors.grey)),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              // Deadline input (only for Wait for Full)
-              if (_postMode == PostMode.waitForFull) ...[
-                const SizedBox(height: 8),
-                Padding(
-                  padding: const EdgeInsets.only(left: 48),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: _deadlineHoursController,
-                          keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(
-                            labelText: 'Hours',
-                            hintText: '0-48',
-                            border: OutlineInputBorder(),
-                            contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          child: RadioGroup<PostMode>(
+            groupValue: _postMode,
+            onChanged: (v) { if (v != null) setState(() => _postMode = v); },
+            child: Column(
+              children: [
+                // Instant Booking
+                InkWell(
+                  onTap: () => setState(() => _postMode = PostMode.instant),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4.0),
+                    child: Row(
+                      children: [
+                        Radio<PostMode>(value: PostMode.instant),
+                        const Icon(Icons.flash_on, color: Colors.blue),
+                        const SizedBox(width: 8),
+                        const Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('Instant Booking', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+                              Text('Customers can book immediately', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                            ],
                           ),
                         ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: TextField(
-                          controller: _deadlineMinutesController,
-                          keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(
-                            labelText: 'Minutes',
-                            hintText: '0-59',
-                            border: OutlineInputBorder(),
-                            contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                          ),
-                        ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
-                const SizedBox(height: 4),
-                Padding(
-                  padding: const EdgeInsets.only(left: 48),
-                  child: Text(
-                    'Deadline before start time',
-                    style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                const Divider(),
+                // Wait for Full
+                InkWell(
+                  onTap: () => setState(() => _postMode = PostMode.waitForFull),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4.0),
+                    child: Row(
+                      children: [
+                        Radio<PostMode>(value: PostMode.waitForFull),
+                        const Icon(Icons.groups, color: Colors.orange),
+                        const SizedBox(width: 8),
+                        const Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('Wait for Full', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+                              Text('Wait until all seats are filled', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                // Deadline input (only for Wait for Full)
+                if (_postMode == PostMode.waitForFull) ...[
+                  const SizedBox(height: 8),
+                  Padding(
+                    padding: const EdgeInsets.only(left: 48),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: _deadlineHoursController,
+                            keyboardType: TextInputType.number,
+                            decoration: const InputDecoration(
+                              labelText: 'Hours',
+                              hintText: '0-48',
+                              border: OutlineInputBorder(),
+                              contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: TextField(
+                            controller: _deadlineMinutesController,
+                            keyboardType: TextInputType.number,
+                            decoration: const InputDecoration(
+                              labelText: 'Minutes',
+                              hintText: '0-59',
+                              border: OutlineInputBorder(),
+                              contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Padding(
+                    padding: const EdgeInsets.only(left: 48),
+                    child: Text('Deadline before start time', style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+                  ),
+                ],
+                const Divider(),
+                // Full Post Mode
+                InkWell(
+                  onTap: () => setState(() => _postMode = PostMode.fullPost),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4.0),
+                    child: Row(
+                      children: [
+                        Radio<PostMode>(value: PostMode.fullPost),
+                        const Icon(Icons.directions_car, color: Colors.green),
+                        const SizedBox(width: 8),
+                        const Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('Full Post Mode', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+                              Text('Customer must book all remaining slots', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ],
-              const Divider(),
-              // Full Post Mode
-              InkWell(
-                onTap: () => setState(() => _postMode = PostMode.fullPost),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 4.0),
-                  child: Row(
-                    children: [
-                      Radio<PostMode>(
-                        value: PostMode.fullPost,
-                        groupValue: _postMode,
-                        onChanged: (v) => setState(() => _postMode = v!),
-                      ),
-                      const Icon(Icons.directions_car, color: Colors.green),
-                      const SizedBox(width: 8),
-                      const Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text('Full Post Mode',
-                                style: TextStyle(
-                                    fontSize: 14, fontWeight: FontWeight.w600)),
-                            Text('Customer must book all remaining slots',
-                                style:
-                                    TextStyle(fontSize: 12, color: Colors.grey)),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
+            ),
           ),
         ),
       ],

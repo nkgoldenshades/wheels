@@ -11,6 +11,7 @@
 ///     "customer": {"images": [], "video_url": null, "uploaded_at": null}
 ///   }
 /// }
+library;
 
 class TripMediaParty {
   final List<String> images;   // Supabase Storage URLs

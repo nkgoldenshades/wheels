@@ -18,6 +18,60 @@
   
   <title>VaultWheels</title>
   <link rel="manifest" href="manifest.json">
+  
+  <!-- Razorpay Checkout.js for web payments -->
+  <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+  
+  <!-- Razorpay Flutter Bridge -->
+  <script>
+    window.openRazorpay = function(options) {
+      return new Promise(function(resolve, reject) {
+        try {
+          var rzpOptions = {
+            key: options.key,
+            amount: options.amount,
+            currency: options.currency || 'INR',
+            name: options.name || 'VaultWheels',
+            description: options.description || '',
+            prefill: {
+              name: options.prefill_name || '',
+              email: options.prefill_email || '',
+              contact: options.prefill_contact || '',
+            },
+            theme: { color: options.theme_color || '#1976D2' },
+            modal: {
+              ondismiss: function() {
+                resolve(JSON.stringify({ error: 'Payment cancelled by user' }));
+              }
+            },
+            handler: function(response) {
+              resolve(JSON.stringify({
+                payment_id: response.razorpay_payment_id,
+                order_id: response.razorpay_order_id || '',
+                signature: response.razorpay_signature || '',
+              }));
+            }
+          };
+
+          // Only set order_id if provided and non-empty
+          if (options.order_id && options.order_id !== '') {
+            rzpOptions.order_id = options.order_id;
+          }
+
+          var rzp = new Razorpay(rzpOptions);
+          rzp.on('payment.failed', function(response) {
+            resolve(JSON.stringify({
+              error: response.error.description || 'Payment failed',
+              code: response.error.code || '',
+            }));
+          });
+          rzp.open();
+        } catch(e) {
+          resolve(JSON.stringify({ error: e.toString() }));
+        }
+      });
+    };
+  </script>
 </head>
 <body>
   <script src="flutter_bootstrap.js" async></script>

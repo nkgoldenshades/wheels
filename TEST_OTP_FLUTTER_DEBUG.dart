@@ -1,3 +1,4 @@
+
 // ============================================
 // FLUTTER OTP DEBUGGING TEST
 // ============================================
@@ -9,7 +10,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class OtpDebugTest extends StatefulWidget {
-  const OtpDebugTest({Key? key}) : super(key: key);
+  const OtpDebugTest({super.key});
 
   @override
   State<OtpDebugTest> createState() => _OtpDebugTestState();
@@ -111,7 +112,7 @@ class _OtpDebugTestState extends State<OtpDebugTest> {
           params: {
             'p_booking_id': bookingId,
             'p_profile_customer_id': customerId,
-            'p_entered_otp': '${i}${i}${i}${i}${i}${i}',
+            'p_entered_otp': '$i$i$i$i$i$i',
           },
         );
         _log('   Attempt $i result: $result');

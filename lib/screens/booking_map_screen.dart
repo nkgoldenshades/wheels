@@ -5,6 +5,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:geodesy/geodesy.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/booking.dart';
 import '../models/slot.dart';
 import '../models/vehicle.dart';
@@ -104,8 +105,10 @@ class _BookingMapScreenState extends State<BookingMapScreen> {
       // Ignore timeout or permission errors
     }
 
-    // Mock vehicle location
+    // Get vehicle location from actual GPS data
     final slot = widget.slot ?? _slot;
+    final vehicle = widget.vehicle ?? slotEntry?.vehicle;
+    
     if (slot != null) {
       final from = slot.fromLocation != null
           ? _resolveLocation(slot.fromLocation!)
@@ -113,14 +116,31 @@ class _BookingMapScreenState extends State<BookingMapScreen> {
       final to = slot.toLocation != null
           ? _resolveLocation(slot.toLocation!)
           : null;
-      _vehicleLocation = from ?? to;
+
+      // Use vehicle's actual GPS location if available
+      if (vehicle != null) {
+        if (vehicle.lastKnownLat != null && vehicle.lastKnownLng != null) {
+          _vehicleLocation = LatLng(vehicle.lastKnownLat!, vehicle.lastKnownLng!);
+        } else if (vehicle.manualLat != null && vehicle.manualLng != null) {
+          _vehicleLocation = LatLng(vehicle.manualLat!, vehicle.manualLng!);
+        } else {
+          // Fallback to route start if no GPS data
+          _vehicleLocation = from ?? to;
+        }
+      } else {
+        // No vehicle data, use route start
+        _vehicleLocation = from ?? to;
+      }
 
       if (from != null && to != null) {
         _calculateDistance(from, to);
         _generateRoute(from, to);
       }
 
-      _startVehicleUpdates(from, to);
+      // Start live updates if vehicle has GPS tracking
+      if (vehicle?.gpsMode == VehicleGpsMode.deviceLive) {
+        _startVehicleUpdates(from, to);
+      }
     }
 
     if (!mounted) return;
@@ -182,6 +202,33 @@ class _BookingMapScreenState extends State<BookingMapScreen> {
     );
   }
 
+  Widget _buildMapLegendItem(IconData icon, String label, Color color) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 24,
+          height: 24,
+          decoration: BoxDecoration(
+            color: color,
+            shape: BoxShape.circle,
+            border: Border.all(color: Colors.white, width: 1.5),
+          ),
+          child: Icon(icon, color: Colors.white, size: 14),
+        ),
+        const SizedBox(width: 6),
+        Text(
+          label,
+          style: const TextStyle(
+            fontSize: 12,
+            color: Colors.black87,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+      ],
+    );
+  }
+
   String _formatDate(DateTime dt) {
     String two(int v) => v.toString().padLeft(2, '0');
     return '${two(dt.day)}/${two(dt.month)}/${dt.year} ${two(dt.hour)}:${two(dt.minute)}';
@@ -190,12 +237,44 @@ class _BookingMapScreenState extends State<BookingMapScreen> {
   void _startVehicleUpdates(LatLng? from, LatLng? to) {
     if (from == null || to == null) return;
 
-    _vehicleUpdateTimer = Timer.periodic(const Duration(seconds: 3), (timer) {
+    _vehicleUpdateTimer = Timer.periodic(const Duration(seconds: 3), (timer) async {
       if (!mounted) {
         timer.cancel();
         return;
       }
 
+      // Get vehicle ID from booking
+      final bookingSlotId = widget.booking?.slotId;
+      final slotEntry = SlotRepository.instance.allSlots
+          .where((e) => e.slot.id == bookingSlotId)
+          .firstOrNull;
+      final vehicle = widget.vehicle ?? slotEntry?.vehicle;
+      
+      if (vehicle != null && vehicle.gpsMode == VehicleGpsMode.deviceLive) {
+        // Fetch latest GPS coordinates from database
+        try {
+          final response = await Supabase.instance.client
+              .from('vehicles')
+              .select('last_known_lat, last_known_lng')
+              .eq('id', vehicle.id)
+              .single();
+          
+          final lat = response['last_known_lat'] as double?;
+          final lng = response['last_known_lng'] as double?;
+          
+          if (lat != null && lng != null && mounted) {
+            setState(() {
+              _vehicleLocation = LatLng(lat, lng);
+            });
+            return;
+          }
+        } catch (e) {
+          debugPrint('⚠️ Failed to fetch vehicle GPS: $e');
+          // Fall through to simulated movement
+        }
+      }
+
+      // Fallback: Simulated movement for demo/testing
       final current = _vehicleLocation ?? from;
       final newLat = current.latitude + (to.latitude - from.latitude) * 0.1;
       final newLng = current.longitude + (to.longitude - from.longitude) * 0.1;
@@ -290,15 +369,31 @@ class _BookingMapScreenState extends State<BookingMapScreen> {
         markers.add(
           Marker(
             point: p,
-            width: 40,
-            height: 40,
-            child: Container(
-              decoration: BoxDecoration(
-                color: Colors.green,
-                shape: BoxShape.circle,
-                border: Border.all(color: Colors.white, width: 2),
-              ),
-              child: const Icon(Icons.play_arrow, color: Colors.white),
+            width: 80,
+            height: 70,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: Colors.green,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: const Text('Start', style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+                ),
+                const SizedBox(height: 2),
+                Container(
+                  width: 36, height: 36,
+                  decoration: BoxDecoration(
+                    color: Colors.green,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.white, width: 2),
+                    boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 4)],
+                  ),
+                  child: const Icon(Icons.trip_origin, color: Colors.white, size: 20),
+                ),
+              ],
             ),
           ),
         );
@@ -311,15 +406,31 @@ class _BookingMapScreenState extends State<BookingMapScreen> {
         markers.add(
           Marker(
             point: p,
-            width: 40,
-            height: 40,
-            child: Container(
-              decoration: BoxDecoration(
-                color: Colors.red,
-                shape: BoxShape.circle,
-                border: Border.all(color: Colors.white, width: 2),
-              ),
-              child: const Icon(Icons.flag, color: Colors.white),
+            width: 80,
+            height: 70,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: Colors.red,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: const Text('End', style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+                ),
+                const SizedBox(height: 2),
+                Container(
+                  width: 36, height: 36,
+                  decoration: BoxDecoration(
+                    color: Colors.red,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.white, width: 2),
+                    boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 4)],
+                  ),
+                  child: const Icon(Icons.flag, color: Colors.white, size: 20),
+                ),
+              ],
             ),
           ),
         );
@@ -327,18 +438,87 @@ class _BookingMapScreenState extends State<BookingMapScreen> {
     }
 
     if (_vehicleLocation != null) {
+      final slot = widget.slot ?? _slot;
+      final slotEntry = SlotRepository.instance.allSlots
+          .where((e) => e.slot.id == (widget.booking?.slotId ?? slot?.id))
+          .firstOrNull;
+      final vehicle = widget.vehicle ?? slotEntry?.vehicle;
+      
+      // Determine vehicle marker color based on GPS mode
+      Color vehicleColor = Colors.blue;
+      IconData vehicleIcon = Icons.directions_car;
+      
+      if (vehicle != null) {
+        switch (vehicle.gpsMode) {
+          case VehicleGpsMode.deviceLive:
+            vehicleColor = Colors.green;
+            vehicleIcon = Icons.gps_fixed;
+            break;
+          case VehicleGpsMode.externalLink:
+            vehicleColor = Colors.orange;
+            vehicleIcon = Icons.link;
+            break;
+          case VehicleGpsMode.manual:
+            vehicleColor = Colors.grey;
+            vehicleIcon = Icons.location_on;
+            break;
+        }
+      }
+      
       markers.add(
         Marker(
           point: _vehicleLocation!,
-          width: 40,
-          height: 40,
-          child: Container(
-            decoration: BoxDecoration(
-              color: Colors.blue,
-              shape: BoxShape.circle,
-              border: Border.all(color: Colors.white, width: 2),
-            ),
-            child: const Icon(Icons.directions_car, color: Colors.white),
+          width: 120,
+          height: 70,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Coordinate label above marker
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(4),
+                  boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 2)],
+                ),
+                child: Text(
+                  '${_vehicleLocation!.latitude.toStringAsFixed(4)},\n${_vehicleLocation!.longitude.toStringAsFixed(4)}',
+                  style: TextStyle(fontSize: 9, color: vehicleColor, fontWeight: FontWeight.bold),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Stack(
+                alignment: Alignment.center,
+                children: [
+                  Container(
+                    width: 50,
+                    height: 50,
+                    decoration: BoxDecoration(
+                      color: vehicleColor.withValues(alpha: 0.3),
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: vehicleColor,
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.white, width: 2),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.3),
+                          blurRadius: 4,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                    child: Icon(vehicleIcon, color: Colors.white, size: 20),
+                  ),
+                ],
+              ),
+            ],
           ),
         ),
       );
@@ -348,15 +528,31 @@ class _BookingMapScreenState extends State<BookingMapScreen> {
       markers.add(
         Marker(
           point: _userLocation!,
-          width: 40,
-          height: 40,
-          child: Container(
-            decoration: BoxDecoration(
-              color: Colors.orange,
-              shape: BoxShape.circle,
-              border: Border.all(color: Colors.white, width: 2),
-            ),
-            child: const Icon(Icons.my_location, color: Colors.white),
+          width: 80,
+          height: 70,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: Colors.orange,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: const Text('You', style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+              ),
+              const SizedBox(height: 2),
+              Container(
+                width: 36, height: 36,
+                decoration: BoxDecoration(
+                  color: Colors.orange,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white, width: 2),
+                  boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 4)],
+                ),
+                child: const Icon(Icons.person_pin_circle, color: Colors.white, size: 20),
+              ),
+            ],
           ),
         ),
       );
@@ -396,6 +592,8 @@ class _BookingMapScreenState extends State<BookingMapScreen> {
               MarkerLayer(markers: markers),
             ],
           ),
+          
+          // Trip Details Card (Top)
           Positioned(
             top: 16,
             left: 16,
@@ -425,16 +623,93 @@ class _BookingMapScreenState extends State<BookingMapScreen> {
                     ),
                   ),
                   const SizedBox(height: 8),
+                  
+                  // Vehicle GPS Status
+                  if (_vehicleLocation != null) ...[
+                    Builder(
+                      builder: (context) {
+                        final slotEntry = SlotRepository.instance.allSlots
+                            .where((e) => e.slot.id == (widget.booking?.slotId ?? _slot?.id))
+                            .firstOrNull;
+                        final vehicle = widget.vehicle ?? slotEntry?.vehicle;
+                        
+                        if (vehicle != null) {
+                          String gpsStatus;
+                          Color gpsColor;
+                          IconData gpsIcon;
+                          
+                          switch (vehicle.gpsMode) {
+                            case VehicleGpsMode.deviceLive:
+                              gpsStatus = 'Live GPS Tracking';
+                              gpsColor = Colors.green;
+                              gpsIcon = Icons.gps_fixed;
+                              break;
+                            case VehicleGpsMode.externalLink:
+                              gpsStatus = 'External GPS Link';
+                              gpsColor = Colors.orange;
+                              gpsIcon = Icons.link;
+                              break;
+                            case VehicleGpsMode.manual:
+                              gpsStatus = 'Manual Location';
+                              gpsColor = Colors.grey;
+                              gpsIcon = Icons.location_on;
+                              break;
+                          }
+                          
+                          return Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: gpsColor.withValues(alpha: 0.1),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: gpsColor.withValues(alpha: 0.3)),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(gpsIcon, size: 16, color: gpsColor),
+                                const SizedBox(width: 6),
+                                Text(
+                                  gpsStatus,
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                    color: gpsColor,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        }
+                        return const SizedBox.shrink();
+                      },
+                    ),
+                    const SizedBox(height: 8),
+                  ],
+                  
                   if (_totalDistance != null) ...[
                     Text(
                       'Total Distance: ${_totalDistance!.toStringAsFixed(1)} km',
-                      style: const TextStyle(
-                        fontSize: 14,
-                        color: Colors.black54,
-                      ),
+                      style: const TextStyle(fontSize: 14, color: Colors.black54),
                     ),
+                    const SizedBox(height: 4),
                   ],
-                  const SizedBox(height: 8),
+                  // Vehicle coordinates
+                  if (_vehicleLocation != null) ...[
+                    Row(
+                      children: [
+                        const Icon(Icons.directions_car, size: 14, color: Colors.blue),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            'Vehicle: ${_vehicleLocation!.latitude.toStringAsFixed(6)}, ${_vehicleLocation!.longitude.toStringAsFixed(6)}',
+                            style: const TextStyle(fontSize: 12, color: Colors.blue),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                  ],
                   _buildLegendItem(
                     Icons.location_on,
                     'From',
@@ -466,6 +741,52 @@ class _BookingMapScreenState extends State<BookingMapScreen> {
                       _formatDate(widget.booking!.createdAt),
                     ),
                   ],
+                ],
+              ),
+            ),
+          ),
+          
+          // Map Legend (Bottom)
+          Positioned(
+            bottom: 16,
+            left: 16,
+            right: 16,
+            child: Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.95),
+                borderRadius: BorderRadius.circular(12),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.1),
+                    blurRadius: 4,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Map Legend',
+                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                      fontWeight: FontWeight.bold,
+                      color: Colors.black87,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 16,
+                    runSpacing: 8,
+                    children: [
+                      _buildMapLegendItem(Icons.play_arrow, 'Start', Colors.green),
+                      _buildMapLegendItem(Icons.flag, 'End', Colors.red),
+                      _buildMapLegendItem(Icons.directions_car, 'Vehicle', Colors.blue),
+                      if (_userLocation != null)
+                        _buildMapLegendItem(Icons.my_location, 'You', Colors.orange),
+                    ],
+                  ),
                 ],
               ),
             ),

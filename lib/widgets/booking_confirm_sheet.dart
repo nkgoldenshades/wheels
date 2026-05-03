@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/slot.dart' hide BookingMode;
 import '../models/slot_type.dart';
 import '../models/seat_layout.dart';
+import '../models/simple_seat_layout.dart';
 import '../models/booking.dart';
 import '../models/passenger.dart';
 import '../models/service_type.dart';
@@ -16,6 +17,7 @@ import '../services/passenger_repository.dart';
 import '../services/profile_repository.dart';
 import '../services/stripe_service.dart';
 import '../services/payment_service.dart';
+import '../services/razorpay_service.dart';
 import '../services/auth_repository.dart';
 import '../services/vehicle_repository.dart';
 
@@ -246,9 +248,20 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
         : 'Based in ${slot.baseLocation} · ${slot.radius?.toInt()} km range';
 
     final layoutOwnerId = slot.seatLayoutOwnerId;
-    final SeatLayout? layout = layoutOwnerId == null
+    // First try the local repository (for layouts the user created)
+    SeatLayout? layout = layoutOwnerId == null
         ? null
         : SeatLayoutRepository.instance.getLayout(layoutOwnerId);
+
+    // Fallback: convert SimpleSeatLayout from the slot itself (loaded from Supabase)
+    if (layout == null && slot.seatLayoutStructure != null) {
+      layout = _simpleSeatLayoutToSeatLayout(slot.seatLayoutStructure!);
+    }
+
+    // Debug: log layout status
+    debugPrint('🪑 Layout check: ownerId=${slot.seatLayoutOwnerId}, '
+        'structure=${slot.seatLayoutStructure != null ? "present (${slot.seatLayoutStructure!.layout.length} items)" : "null"}, '
+        'layout=${layout != null ? "resolved" : "null → showing capacity"}');
 
     final hasSeatLayout = layout != null;
 
@@ -291,29 +304,22 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
     // Validate selected seats against all passenger genders
     if (layout != null) {
       _selectedSeats.removeWhere((seatKey) {
-        final selected = layout.cells[seatKey];
-        if (selected == null ||
-            selected.type != CellType.seat ||
-            selected.isLocked) {
-          return true;
-        }
-        // Check if any passenger gender matches this seat
+        final selected = layout!.cells[seatKey];
+        if (selected == null || selected.type != CellType.seat || selected.isLocked) return true;
         if (selected.gender == SeatGender.any) return false;
-        return !_passengerForms.any((form) => 
-          form.gender == SeatGender.any || form.gender == selected.gender
-        );
+        return !_passengerForms.any((form) =>
+          form.gender == SeatGender.any || form.gender == selected.gender);
       });
     }
 
     // Calculate total price for all selected seats
     final int totalPrice;
     if (isFullPostMode) {
-      // Full post mode: price × remaining capacity
       totalPrice = slot.price.toInt() * (remainingCapacity > 0 ? remainingCapacity : slot.capacity);
     } else if (layout != null && _selectedSeats.isNotEmpty) {
       totalPrice = _selectedSeats.fold<int>(
         0,
-        (sum, seatKey) => sum + (layout.cells[seatKey]?.price ?? 0),
+        (sum, seatKey) => sum + (layout!.cells[seatKey]?.price ?? 0),
       );
     } else {
       totalPrice = slot.price.toInt() * _quantity;
@@ -447,108 +453,29 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
               if (layout != null) ...[
                 const Text(
                   'Select your seat',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                  ),
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 12),
-                Center(
-                  child: SizedBox(
-                    height: layout.rows * _cellSize,
-                    width: layout.cols * _cellSize,
-                    child: GridView.builder(
-                      physics: const NeverScrollableScrollPhysics(),
-                      shrinkWrap: true,
-                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: layout.cols,
-                        childAspectRatio: 1,
-                      ),
-                      itemCount: layout.rows * layout.cols,
-                      itemBuilder: (context, index) {
-                        final row = index ~/ layout.cols;
-                        final col = index % layout.cols;
-                        final key = '$row:$col';
-                        final cell = layout.cells[key];
-                        final type = cell?.type ?? CellType.empty;
-
-                        if (type == CellType.space || type == CellType.empty) {
-                          return const SizedBox.expand();
-                        }
-
-                        final isBooked = bookedSeatKeys.contains(key);
-                        final isSelected = _selectedSeats.contains(key);
-                        final isLocked = cell?.isLocked ?? false;
-                        final seatGender = cell?.gender ?? SeatGender.any;
-                        
-                        // Check if any passenger can sit here
-                        final genderMatch = seatGender == SeatGender.any ||
-                            _passengerForms.any((form) => 
-                              form.gender == SeatGender.any || form.gender == seatGender
-                            );
-
-                        Color bgColor;
-                        if (isBooked) {
-                          bgColor = Colors.red.shade300;
-                        } else if (isLocked) {
-                          bgColor = Colors.grey.shade400;
-                        } else if (isSelected) {
-                          bgColor = Colors.green;
-                        } else if (!genderMatch) {
-                          bgColor = Colors.orange.shade200;
-                        } else {
-                          bgColor = Colors.blue.shade100;
-                        }
-
-                        return GestureDetector(
-                          onTap: () {
-                            if (isBooked || isLocked || !genderMatch) return;
-                            setState(() {
-                              if (isSelected) {
-                                _selectedSeats.remove(key);
-                              } else {
-                                if (_selectedSeats.length >= remainingCapacity) {
-                                  return;
-                                }
-                                _selectedSeats.add(key);
-                              }
-                              _updatePassengerFormsCount();
-                            });
-                          },
-                          child: Container(
-                            margin: const EdgeInsets.all(2),
-                            decoration: BoxDecoration(
-                              color: bgColor,
-                              borderRadius: BorderRadius.circular(4),
-                              border: Border.all(
-                                color: isSelected
-                                    ? Colors.green.shade700
-                                    : Colors.grey.shade300,
-                                width: isSelected ? 2 : 1,
-                              ),
-                            ),
-                            child: Center(
-                              child: Text(
-                                cell?.seatName ?? '',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: isSelected
-                                      ? FontWeight.bold
-                                      : FontWeight.normal,
-                                  color: isBooked || isLocked
-                                      ? Colors.white
-                                      : Colors.black87,
-                                ),
-                              ),
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-                  ),
+                _SeatGrid(
+                  layout: layout,
+                  cellSize: _cellSize,
+                  bookedSeatKeys: bookedSeatKeys,
+                  selectedSeats: _selectedSeats,
+                  remainingCapacity: remainingCapacity,
+                  passengerForms: _passengerForms,
+                  onSeatToggled: (key) {
+                    setState(() {
+                      if (_selectedSeats.contains(key)) {
+                        _selectedSeats.remove(key);
+                      } else {
+                        if (_selectedSeats.length >= remainingCapacity) return;
+                        _selectedSeats.add(key);
+                      }
+                      _updatePassengerFormsCount();
+                    });
+                  },
                 ),
                 const SizedBox(height: 16),
-                // Cart summary
                 if (_selectedSeats.isNotEmpty) ...[
                   Container(
                     padding: const EdgeInsets.all(12),
@@ -566,10 +493,7 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
                             const SizedBox(width: 8),
                             Text(
                               'Selected: ${_selectedSeats.length} seat(s)',
-                              style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                                color: Colors.green.shade700,
-                              ),
+                              style: TextStyle(fontWeight: FontWeight.bold, color: Colors.green.shade700),
                             ),
                           ],
                         ),
@@ -578,7 +502,7 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
                           spacing: 8,
                           runSpacing: 8,
                           children: _selectedSeats.map((seatKey) {
-                            final cell = layout.cells[seatKey];
+                            final cell = layout!.cells[seatKey];
                             return Chip(
                               label: Text(cell?.seatName ?? seatKey),
                               deleteIcon: const Icon(Icons.close, size: 16),
@@ -1065,24 +989,44 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
                                   final countryCode = PaymentService.countryCodeFromLocation(slotLocation) ?? 'IN';
                                   final currency = (countryCode == 'IN') ? 'inr' : 'usd';
 
-                                  // Route to Razorpay (India) or Stripe (international)
+                                  // ── TEST MODE BYPASS ──────────────────────────────────────
+                                  final isTestKey = RazorpayService.keyId.startsWith('rzp_test_');
                                   final profile = ProfileRepository.instance.profile.value;
-                                  final bookingResult = await PaymentService.instance.processPayment(
-                                    amountInPaise: amountInPaise,
-                                    currency: currency,
-                                    countryCode: countryCode,
-                                    providerId: widget.providerId,
-                                    slotId: widget.slot.id,
-                                    userName: names.isNotEmpty ? names.first : 'User',
-                                    userEmail: emails.isNotEmpty && emails.first != null
-                                        ? emails.first!
-                                        : '',
-                                    userPhone: phones.isNotEmpty && phones.first != null
-                                        ? phones.first!
-                                        : (profile.phone ?? ''),
-                                    description: 'Booking: ${(widget.slot.fromLocation?.isNotEmpty ?? false) ? widget.slot.fromLocation! : (widget.slot.baseLocation ?? '')}',
-                                    commissionAmount: commissionAmount,
-                                  );
+                                  Map<String, dynamic>? bookingResult;
+                                  
+                                  if (isTestKey) {
+                                    debugPrint('[Payment] Test key detected — bypassing payment gateway');
+                                    final otp = PaymentService.instance.generateTestOtp(amountInPaise);
+                                    bookingResult = {
+                                      'payment_id': 'test_${DateTime.now().millisecondsSinceEpoch}',
+                                      'gateway': 'razorpay',
+                                      'otp': otp,
+                                      'payment_intent_id': null,
+                                      'client_secret': null,
+                                      'countdown_end_time': DateTime.now()
+                                          .add(const Duration(hours: 1))
+                                          .toIso8601String(),
+                                    };
+                                  } else {
+                                    // Live key — use real payment gateway
+                                    bookingResult = await PaymentService.instance.processPayment(
+                                      amountInPaise: amountInPaise,
+                                      currency: currency,
+                                      countryCode: countryCode,
+                                      providerId: widget.providerId,
+                                      slotId: widget.slot.id,
+                                      userName: names.isNotEmpty ? names.first : 'User',
+                                      userEmail: emails.isNotEmpty && emails.first != null
+                                          ? emails.first!
+                                          : '',
+                                      userPhone: phones.isNotEmpty && phones.first != null
+                                          ? phones.first!
+                                          : (profile.phone ?? ''),
+                                      description: 'Booking: ${(widget.slot.fromLocation?.isNotEmpty ?? false) ? widget.slot.fromLocation! : (widget.slot.baseLocation ?? '')}',
+                                      commissionAmount: commissionAmount,
+                                    );
+                                  }
+                                  // ── END TEST MODE BYPASS ──────────────────────────────────
 
                                   if (!context.mounted) return;
                                   _closeOrderLoadingDialogIfAny();
@@ -1229,10 +1173,18 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
                                     }
                                   } else {
                                     final reason = bookingResult?['error'] as String?;
+                                    final isTestMode = RazorpayService.keyId.startsWith('rzp_test_');
+                                    final message = (reason != null && reason.isNotEmpty)
+                                        ? reason
+                                        : 'Payment cancelled.';
+                                    final fullMessage = isTestMode
+                                        ? '$message\nTest card: 4111 1111 1111 1111, any future expiry, any CVV'
+                                        : message;
                                     ScaffoldMessenger.of(context).showSnackBar(
                                       SnackBar(
-                                        content: Text(reason ?? 'Payment cancelled.'),
-                                        backgroundColor: Colors.black54,
+                                        content: Text(fullMessage),
+                                        backgroundColor: Colors.black87,
+                                        duration: const Duration(seconds: 6),
                                       ),
                                     );
                                   }
@@ -1269,6 +1221,48 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
     );
   }
   
+  /// Convert SimpleSeatLayout (from Supabase) to SeatLayout (for UI display).
+  /// Used when the layout is not in the local SeatLayoutRepository.
+  SeatLayout _simpleSeatLayoutToSeatLayout(SimpleSeatLayout simple) {
+    final cells = <String, LayoutCell>{};
+    int maxRow = 0;
+    int maxCol = 0;
+
+    for (final item in simple.layout) {
+      final row = item.row;
+      final col = item.col;
+      if (row > maxRow) maxRow = row;
+      if (col > maxCol) maxCol = col;
+
+      final key = '$row:$col';
+      SeatGender gender = SeatGender.any;
+      if (item is PassengerSeat) {
+        final g = item.allowedGender.toLowerCase();
+        if (g == 'male') {
+          gender = SeatGender.male;
+        } else if (g == 'female') gender = SeatGender.female;
+      }
+
+      cells[key] = LayoutCell(
+        row: row,
+        col: col,
+        type: item.isGap ? CellType.space : CellType.seat,
+        seatName: item.key,
+        price: item.price,
+        gender: gender,
+        isLocked: item.isLocked || item.isBooked,
+      );
+    }
+
+    return SeatLayout(
+      id: widget.slot.id,
+      name: 'Seat Layout',
+      rows: maxRow + 1,
+      cols: maxCol + 1,
+      cells: cells,
+    );
+  }
+
   double _calculateTotalPrice() {
     final isFullPostMode = widget.slot.postMode == PostMode.fullPost;
     final remainingCapacity = BookingRepository.instance.getRemainingCapacity(
@@ -1549,6 +1543,107 @@ class _Row extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// Stateless seat grid widget — avoids closure null-safety issues with layout
+class _SeatGrid extends StatelessWidget {
+  final SeatLayout layout;
+  final double cellSize;
+  final Set<String> bookedSeatKeys;
+  final Set<String> selectedSeats;
+  final int remainingCapacity;
+  final List<PassengerFormData> passengerForms;
+  final void Function(String key) onSeatToggled;
+
+  const _SeatGrid({
+    required this.layout,
+    required this.cellSize,
+    required this.bookedSeatKeys,
+    required this.selectedSeats,
+    required this.remainingCapacity,
+    required this.passengerForms,
+    required this.onSeatToggled,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: SizedBox(
+        height: layout.rows * cellSize,
+        width: layout.cols * cellSize,
+        child: GridView.builder(
+          physics: const NeverScrollableScrollPhysics(),
+          shrinkWrap: true,
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: layout.cols,
+            childAspectRatio: 1,
+          ),
+          itemCount: layout.rows * layout.cols,
+          itemBuilder: (context, index) {
+            final row = index ~/ layout.cols;
+            final col = index % layout.cols;
+            final key = '$row:$col';
+            final cell = layout.cells[key];
+            final type = cell?.type ?? CellType.empty;
+
+            if (type == CellType.space || type == CellType.empty) {
+              return const SizedBox.expand();
+            }
+
+            final isBooked = bookedSeatKeys.contains(key);
+            final isSelected = selectedSeats.contains(key);
+            final isLocked = cell?.isLocked ?? false;
+            final seatGender = cell?.gender ?? SeatGender.any;
+
+            final genderMatch = seatGender == SeatGender.any ||
+                passengerForms.any((f) =>
+                    f.gender == SeatGender.any || f.gender == seatGender);
+
+            Color bgColor;
+            if (isBooked) {
+              bgColor = Colors.red.shade300;
+            } else if (isLocked) {
+              bgColor = Colors.grey.shade400;
+            } else if (isSelected) {
+              bgColor = Colors.green;
+            } else if (!genderMatch) {
+              bgColor = Colors.orange.shade200;
+            } else {
+              bgColor = Colors.blue.shade100;
+            }
+
+            return GestureDetector(
+              onTap: () {
+                if (isBooked || isLocked || !genderMatch) return;
+                onSeatToggled(key);
+              },
+              child: Container(
+                margin: const EdgeInsets.all(2),
+                decoration: BoxDecoration(
+                  color: bgColor,
+                  borderRadius: BorderRadius.circular(4),
+                  border: Border.all(
+                    color: isSelected ? Colors.green.shade700 : Colors.grey.shade300,
+                    width: isSelected ? 2 : 1,
+                  ),
+                ),
+                child: Center(
+                  child: Text(
+                    cell?.seatName ?? '',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                      color: isBooked || isLocked ? Colors.white : Colors.black87,
+                    ),
+                  ),
+                ),
+              ),
+            );
+          },
+        ),
+      ),
     );
   }
 }

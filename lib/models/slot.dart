@@ -213,7 +213,7 @@ class Slot {
       'profile_id': profileId,
       'vehicle_id': vehicleId,
       'service_type': serviceType.name,
-      'slot_type': slotType.name,
+      'slot_type': slotType.name,  // local JSON cache key (not Supabase)
       'seat_layout_owner_id': seatLayoutOwnerId,
       'slot_layout_structure': seatLayoutStructure?.toJson(),
       'requires_approval': requiresApproval,
