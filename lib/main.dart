@@ -1,4 +1,4 @@
- 
+ï»¿ 
 import 'dart:async';
 import 'dart:math' as math;
 import 'dart:convert';
@@ -66,7 +66,7 @@ import 'utils/timezone_utils.dart';
 // Don't use 'final' here because it evaluates immediately before Supabase.initialize()
 SupabaseClient get supabase => Supabase.instance.client;
 
-/// Strip |lat,lon|keywords from stored location string — returns display name only
+/// Strip |lat,lon|keywords from stored location string ï¿½ returns display name only
 String _cleanLoc(String? raw) {
   if (raw == null || raw.isEmpty) return '';
   final t = raw.trim();
@@ -162,7 +162,7 @@ void _initializeServicesInBackground() async {
         if (kDebugMode) print('? $name initialized');
       } catch (e) {
         if (kDebugMode) print('?? $name init failed/timed out: $e');
-        // Don't rethrow — let app continue
+        // Don't rethrow ï¿½ let app continue
       }
     }
     
@@ -1650,7 +1650,7 @@ class _CreateUserPostPageState extends State<CreateUserPostPage> {
               border: OutlineInputBorder(),
             ),
           ),
-          // Parcel dimensions — only shown for parcel service type
+          // Parcel dimensions ï¿½ only shown for parcel service type
           if (_serviceType == ServiceType.parcel) ...[
             const SizedBox(height: 16),
             const Text(
@@ -1952,15 +1952,15 @@ class UserMyPostsPage extends StatelessWidget {
                                                     fontSize: 13)),
                                             SizedBox(height: 4),
                                             Text(
-                                                '• Mark post inactive — stops new bookings',
+                                                'ï¿½ Mark post inactive ï¿½ stops new bookings',
                                                 style:
                                                     TextStyle(fontSize: 13)),
                                             Text(
-                                                '• Wait for active bookings to complete',
+                                                'ï¿½ Wait for active bookings to complete',
                                                 style:
                                                     TextStyle(fontSize: 13)),
                                             Text(
-                                                '• Cancel/refund active bookings first',
+                                                'ï¿½ Cancel/refund active bookings first',
                                                 style:
                                                     TextStyle(fontSize: 13)),
                                           ],
@@ -2832,11 +2832,11 @@ class SettingsPage extends StatelessWidget {
                           ),
                           DropdownMenuItem(
                             value: 'EUR',
-                            child: Text('EUR (€)'),
+                            child: Text('EUR (ï¿½)'),
                           ),
                           DropdownMenuItem(
                             value: 'GBP',
-                            child: Text('GBP (£)'),
+                            child: Text('GBP (ï¿½)'),
                           ),
                         ],
                         onChanged: (code) {
@@ -5231,7 +5231,7 @@ class _PostsPageState extends State<PostsPage> {
   }
 
   /// Extracts unique human-readable location names from all slots in the app.
-  /// Locations are stored as "Name|lat,lon" — we return just the Name part.
+  /// Locations are stored as "Name|lat,lon" ï¿½ we return just the Name part.
   Set<String> _allLocationNames({required String field}) {
     final allSlots = [
       ...SlotRepository.instance.allSlots.map((e) => e.slot),
@@ -5322,7 +5322,7 @@ class _PostsPageState extends State<PostsPage> {
 
     if (result == null) {
       // null means either: user cancelled, OR booking was already created inside the sheet (test mode / payment flow)
-      // Both cases are fine — if booking was created, the sheet already navigated to Requests tab
+      // Both cases are fine ï¿½ if booking was created, the sheet already navigated to Requests tab
       debugPrint('?? Sheet closed without result (booking created internally or user cancelled)');
       return;
     }
@@ -5972,7 +5972,7 @@ class _RequestsBodyState extends State<_RequestsBody> {
             if (post != null) ...[
               const SizedBox(height: 8),
               Text(
-                '${_getServiceTypeName(post.serviceType)} · ${_fmtDateTime(post.startTime)}',
+                '${_getServiceTypeName(post.serviceType)} ï¿½ ${_fmtDateTime(post.startTime)}',
                 style: TextStyle(fontSize: 13, color: Colors.grey[700]),
               ),
               if (post.fromLocation != null && post.toLocation != null)
@@ -6101,7 +6101,7 @@ class _RequestsBodyState extends State<_RequestsBody> {
                   children: [
                     Icon(Icons.verified, size: 16, color: Colors.blue),
                     SizedBox(width: 8),
-                    Text('OTP verified — awaiting payment', style: TextStyle(fontSize: 13)),
+                    Text('OTP verified ï¿½ awaiting payment', style: TextStyle(fontSize: 13)),
                   ],
                 ),
               ),
@@ -6223,7 +6223,7 @@ class _RequestsBodyState extends State<_RequestsBody> {
                         ),
                       ),
                       Text(
-                        '${b.userAge ?? '?'} yrs · ${b.userGender?.name ?? 'Any'}${b.seatKey != null ? ' · Seat: ${b.seatKey}' : ''}',
+                        '${b.userAge ?? '?'} yrs ï¿½ ${b.userGender?.name ?? 'Any'}${b.seatKey != null ? ' ï¿½ Seat: ${b.seatKey}' : ''}',
                         style: TextStyle(fontSize: 12, color: Colors.grey[600]),
                       ),
                     ],
@@ -6650,10 +6650,10 @@ class _RequestsBodyState extends State<_RequestsBody> {
                     isRiderView: isRiderView,
                   ),
                   const SizedBox(height: 6),
-                  // Timing section — from booking snapshot
+                  // Timing section ï¿½ from booking snapshot
                   _BookingTimeBanner(booking: b),
                 ],
-                // Refund section — shown regardless of bookingSlot
+                // Refund section ï¿½ shown regardless of bookingSlot
                 if (bookingSlot == null && b.tripEndTime != null && DateTime.now().isAfter(b.tripEndTime!)) ...[
                   const SizedBox(height: 6),
                   Row(
@@ -6693,7 +6693,7 @@ class _RequestsBodyState extends State<_RequestsBody> {
                     ],
                   ),
                 ],
-                // Trip Media — upload photos/video for start & end of trip
+                // Trip Media ï¿½ upload photos/video for start & end of trip
                 if (b.status == BookingStatus.accepted ||
                     b.status == BookingStatus.completed ||
                     b.status == BookingStatus.pending ||
@@ -7198,7 +7198,7 @@ class _RequestsBodyState extends State<_RequestsBody> {
                       Text(
                         isRiderView
                             ? 'The service was not completed within the deadline. Your payment has been refunded.'
-                            : 'This booking expired — trip not completed within deadline. Payment refunded to customer.',
+                            : 'This booking expired ï¿½ trip not completed within deadline. Payment refunded to customer.',
                         style: TextStyle(fontSize: 12, color: Colors.grey[600]),
                       ),
                     ],
@@ -7240,7 +7240,7 @@ class _RequestsBodyState extends State<_RequestsBody> {
                 ),
               ],
 
-              // -- Raise dispute (only when expired — trip ended without OTP) --
+              // -- Raise dispute (only when expired ï¿½ trip ended without OTP) --
               if (b.status == BookingStatus.expired && isRiderView) ...[
                 const SizedBox(height: 10),
                 OutlinedButton.icon(
@@ -7771,7 +7771,7 @@ class _BookingTimeBannerState extends State<_BookingTimeBanner> {
       } else if (now.isBefore(b.tripEndTime!)) {
         final diff = b.tripEndTime!.difference(now);
         icon = Icons.play_circle_outline;
-        label = 'In progress · ends in ${_fmt(diff)}';
+        label = 'In progress ï¿½ ends in ${_fmt(diff)}';
         color = Colors.green;
       } else {
         icon = Icons.timer_off_outlined;
@@ -7786,7 +7786,7 @@ class _BookingTimeBannerState extends State<_BookingTimeBanner> {
       if (b.isOverdue) {
         rows.add(_timeRow(
           Icons.warning_amber_rounded,
-          'OVERDUE — deadline was ${_fmtDate(b.deadlineTime!)}',
+          'OVERDUE ï¿½ deadline was ${_fmtDate(b.deadlineTime!)}',
           Colors.red,
           bold: true,
         ));
@@ -7940,7 +7940,7 @@ class _CountdownTextState extends State<CountdownText> {
       );
     }
 
-    // In progress — counting to end time (no text, just return empty)
+    // In progress ï¿½ counting to end time (no text, just return empty)
     return const SizedBox.shrink();
   }
 }

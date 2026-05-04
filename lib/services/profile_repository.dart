@@ -379,10 +379,20 @@ class ProfileRepository {
 
   Future<void> saveProfile(ProfileInfo profileInfo) async {
     try {
+      final publicJson = profileInfo.toPublicJson();
+      final contactJson = profileInfo.toContactJson();
+      final privateJson = profileInfo.toPrivateJson();
+
+      if (kDebugMode) {
+        print('📤 profiles_public: $publicJson');
+        print('📤 profiles_contact: $contactJson');
+        print('📤 profiles_private: $privateJson');
+      }
+
       await Future.wait([
-        _supabase.from('profiles_public').upsert(profileInfo.toPublicJson(), onConflict: 'id'),
-        _supabase.from('profiles_contact').upsert(profileInfo.toContactJson(), onConflict: 'profile_id'),
-        _supabase.from('profiles_private').upsert(profileInfo.toPrivateJson(), onConflict: 'profile_id'),
+        _supabase.from('profiles_public').upsert(publicJson, onConflict: 'id'),
+        _supabase.from('profiles_contact').upsert(contactJson, onConflict: 'profile_id'),
+        _supabase.from('profiles_private').upsert(privateJson, onConflict: 'profile_id'),
       ]);
 
       profile.value = profileInfo;
