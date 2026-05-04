@@ -126,28 +126,12 @@ class CustomerVehicleRepository {
         'is_active': true,
         'vehicle_owner': 'customer', // Enum: provider or customer
         
-        // Legal documents
-        'rc_front_url': vehicle.rcFrontUrl,
-        'rc_back_url': vehicle.rcBackUrl,
-        'insurance_number': vehicle.insuranceNumber,
-        'insurance_expiry': vehicle.insuranceExpiry?.toIso8601String(),
-        'insurance_document_url': vehicle.insuranceDocumentUrl,
-        'pollution_certificate_url': vehicle.pollutionCertificateUrl,
-        'pollution_expiry': vehicle.pollutionExpiry?.toIso8601String(),
-        'fitness_certificate_url': vehicle.fitnessCertificateUrl,
-        'fitness_expiry': vehicle.fitnessExpiry?.toIso8601String(),
-        
         // Statistics
         'total_trips': vehicle.totalBookings,
         'total_reviews': vehicle.totalRatings,
         'active_posts_count': vehicle.activePostsCount,
         'is_verified': vehicle.rcVerified,
         'verified_at': vehicle.rcVerifiedAt?.toIso8601String(),
-        
-        // Operator info
-        'operator_name': vehicle.operatorName,
-        'operator_phone': vehicle.operatorPhone,
-        'operator_profile_photo_url': vehicle.operatorPhoto,
       };
 
       debugPrint(
@@ -155,6 +139,25 @@ class CustomerVehicleRepository {
       );
 
       await _supabase.from('vehicles').insert(payload);
+
+      // Insert sensitive info into vehicle_sensitive_info table
+      final sensitivePayload = <String, dynamic>{
+        'vehicle_id': vehicle.id,
+        'profile_id': vehicle.userId,
+        if (vehicle.rcFrontUrl != null) 'rc_front_url': vehicle.rcFrontUrl,
+        if (vehicle.rcBackUrl != null) 'rc_back_url': vehicle.rcBackUrl,
+        if (vehicle.insuranceNumber != null) 'insurance_number': vehicle.insuranceNumber,
+        if (vehicle.insuranceExpiry != null) 'insurance_expiry': vehicle.insuranceExpiry!.toIso8601String().split('T').first,
+        if (vehicle.insuranceDocumentUrl != null) 'insurance_document_url': vehicle.insuranceDocumentUrl,
+        if (vehicle.pollutionCertificateUrl != null) 'pollution_certificate_url': vehicle.pollutionCertificateUrl,
+        if (vehicle.pollutionExpiry != null) 'pollution_expiry': vehicle.pollutionExpiry!.toIso8601String().split('T').first,
+        if (vehicle.fitnessCertificateUrl != null) 'fitness_certificate_url': vehicle.fitnessCertificateUrl,
+        if (vehicle.fitnessExpiry != null) 'fitness_expiry': vehicle.fitnessExpiry!.toIso8601String().split('T').first,
+        if (vehicle.operatorName != null) 'operator_name': vehicle.operatorName,
+        if (vehicle.operatorPhone != null) 'operator_phone': vehicle.operatorPhone,
+        if (vehicle.operatorPhoto != null) 'operator_profile_photo_url': vehicle.operatorPhoto,
+      };
+      await _supabase.from('vehicle_sensitive_info').upsert(sensitivePayload, onConflict: 'vehicle_id');
 
       // Update local state
       vehiclesListenable.value = [...vehiclesListenable.value, vehicle];
