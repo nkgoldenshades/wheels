@@ -6663,23 +6663,12 @@ class _RequestsBodyState extends State<_RequestsBody> {
                       Expanded(child: Text('Trip time over', style: TextStyle(fontSize: 11, color: Colors.grey[600]))),
                       GestureDetector(
                         onTap: () async {
-                          final confirm = await showDialog<bool>(
-                            context: context,
-                            builder: (ctx) => AlertDialog(
-                              title: const Text('Issue Refund'),
-                              content: const Text('Mark this booking as refunded?'),
-                              actions: [
-                                TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-                                ElevatedButton(
-                                  onPressed: () => Navigator.pop(ctx, true),
-                                  style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-                                  child: const Text('Refund'),
-                                ),
-                              ],
-                            ),
-                          );
-                          if (confirm != true || !context.mounted) return;
                           await BookingRepository.instance.markRefunded(b.id);
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('✅ Refunded'), backgroundColor: Colors.orange),
+                            );
+                          }
                         },
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
@@ -7609,26 +7598,10 @@ class _AutoRefundSectionState extends State<_AutoRefundSection> {
           const SizedBox(width: 8),
           GestureDetector(
             onTap: () async {
-              final confirm = await showDialog<bool>(
-                context: context,
-                builder: (ctx) => AlertDialog(
-                  title: const Text('Issue Refund'),
-                  content: const Text('Mark this booking as refunded?'),
-                  actions: [
-                    TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-                    ElevatedButton(
-                      onPressed: () => Navigator.pop(ctx, true),
-                      style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-                      child: const Text('Refund'),
-                    ),
-                  ],
-                ),
-              );
-              if (confirm != true || !context.mounted) return;
               await BookingRepository.instance.markRefunded(booking.id);
               if (context.mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Refund issued'), backgroundColor: Colors.orange),
+                  const SnackBar(content: Text('✅ Refunded'), backgroundColor: Colors.orange),
                 );
               }
             },
@@ -7657,34 +7630,11 @@ class _AutoRefundSectionState extends State<_AutoRefundSection> {
         const Spacer(),
         InkWell(
           onTap: () async {
-            final confirm = await showDialog<bool>(
-              context: context,
-              builder: (ctx) => AlertDialog(
-                title: const Text('Request Refund'),
-                content: const Text(
-                  'The service time has ended. Do you want to request a refund?',
-                ),
-                actions: [
-                  TextButton(
-                    onPressed: () => Navigator.pop(ctx, false),
-                    child: const Text('Cancel'),
-                  ),
-                  FilledButton(
-                    onPressed: () => Navigator.pop(ctx, true),
-                    style: FilledButton.styleFrom(
-                      backgroundColor: Colors.red,
-                    ),
-                    child: const Text('Refund'),
-                  ),
-                ],
-              ),
-            );
-            if (confirm != true || !context.mounted) return;
             await BookingRepository.instance.markRefunded(booking.id);
             if (context.mounted) {
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(
-                  content: Text('Refund requested'),
+                  content: Text('✅ Refunded'),
                   backgroundColor: Colors.orange,
                 ),
               );
