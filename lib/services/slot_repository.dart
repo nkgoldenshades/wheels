@@ -10,6 +10,7 @@ import '../models/vehicle.dart';
 import '../models/exceptions.dart';
 import 'auth_repository.dart';
 import 'vehicle_repository.dart';
+import 'profile_name_registry.dart';
 
 class SlotRepository {
   SlotRepository._();
@@ -73,19 +74,22 @@ class SlotRepository {
         entries.add(SlotEntry(slot: slot, vehicle: vehicle));
       } else {
         // Vehicle not found - create placeholder
+        // Try to get the provider name from ProfileNameRegistry
         notFoundCount++;
         if (kDebugMode && notFoundCount == 1) {
-          // Only log first missing vehicle to avoid spam
           debugPrint('⚠️ Vehicle not found: ${slot.vehicleId}');
           if (vehicleCount > 0) {
             debugPrint('⚠️ Available IDs: ${VehicleRepository.instance.allVehicles.take(3).map((v) => v.id).join(", ")}...');
           }
         }
-        
+
+        // Try to get name from ProfileNameRegistry
+        final providerName = ProfileNameRegistry.instance.getNameForUser(slot.profileId) ?? 'User ${slot.profileId.substring(0, 6)}';
+
         final placeholderVehicle = Vehicle(
           id: slot.vehicleId,
           userId: slot.profileId,
-          userName: 'Unknown User',
+          userName: providerName,
           name: 'Unknown Vehicle',
           type: 'Unknown',
           capabilities: [slot.serviceType],

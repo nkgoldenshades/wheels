@@ -10,6 +10,7 @@ import '../models/vehicle.dart';
 import '../models/exceptions.dart';
 import 'auth_repository.dart';
 import 'customer_vehicle_repository.dart';
+import 'profile_name_registry.dart';
 
 /// Separate slot repository for "My Posts" section
 /// This keeps user's personal posts separate from provider posts
@@ -44,13 +45,15 @@ class CustomerSlotRepository {
         // Vehicle found - use it
         entries.add(SlotEntry(slot: slot, vehicle: vehicle));
       } else {
-        // Vehicle not found - create placeholder "Unknown Vehicle"
+        // Vehicle not found - create placeholder
         debugPrint('⚠️ Vehicle not found for user slot ${slot.id}, using placeholder');
-        
+
+        final providerName = ProfileNameRegistry.instance.getNameForUser(slot.profileId) ?? 'User ${slot.profileId.substring(0, 6)}';
+
         final placeholderVehicle = Vehicle(
           id: slot.vehicleId,
           userId: slot.profileId,
-          userName: 'Unknown User',
+          userName: providerName,
           name: 'Unknown Vehicle',
           type: 'Unknown',
           capabilities: [slot.serviceType],
