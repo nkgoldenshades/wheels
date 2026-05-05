@@ -93,7 +93,7 @@ class CustomerSlotRepository {
       
       // Load ALL active user posts (requests) - not just current user's
       final response = await supabase
-          .from('user_posts')
+          .from('posts')
           .select('*')
           .eq('is_active', true)
           .order('created_at', ascending: false);
@@ -217,7 +217,7 @@ class CustomerSlotRepository {
     if (raw == null) {
       debugPrint('⚠️ safe_delete_post returned null — using direct delete');
       await supabase
-          .from('user_posts')
+          .from('posts')
           .delete()
           .eq('id', id)
           .eq('profile_id', user.uid);
@@ -305,7 +305,7 @@ class CustomerSlotRepository {
         data['created_at'] = DateTime.now().toIso8601String();
       }
 
-      await supabase.from('user_posts').upsert(data);
+      await supabase.from('posts').upsert(data);
 
       debugPrint('✅ User slot synced to Supabase: ${slot.id} (ref: $refCode)');
     } catch (e) {
@@ -314,4 +314,5 @@ class CustomerSlotRepository {
   }
 
 }
+
 

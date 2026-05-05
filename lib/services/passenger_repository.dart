@@ -52,3 +52,4 @@ class PassengerRepository {
     await prefs.setString(_storageKey, data);
   }
 }
+

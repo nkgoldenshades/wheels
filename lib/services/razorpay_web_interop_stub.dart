@@ -10,3 +10,4 @@ Future<Map<String, dynamic>> openRazorpayWeb({
 }) async {
   return {'error': 'Not running on web'};
 }
+

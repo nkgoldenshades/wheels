@@ -496,3 +496,4 @@ class Vehicle {
     );
   }
 }
+

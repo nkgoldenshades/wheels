@@ -37,11 +37,11 @@ class CustomerVehicleRepository {
           .from('vehicles')  // ✅ Query vehicles table directly
           .select('''
             *,
-            profiles (
+            profiles_public (
               full_name,
               profile_photo_url
             )
-          ''')  // Join with profiles - PostgREST auto-detects FK
+          ''')  // Join with profiles_public - PostgREST auto-detects FK
           .eq('profile_id', currentUser.id)
           .order('created_at', ascending: false);
 
@@ -49,10 +49,8 @@ class CustomerVehicleRepository {
 
       vehiclesListenable.value = (response as List)
           .map((json) {
-            // 🔍 DEBUG: Print raw JSON (truncate large fields)
             if (kDebugMode) {
               final debugJson = Map<String, dynamic>.from(json);
-              // Truncate base64 images to avoid huge logs
               if (debugJson['vehicle_photo_url'] != null && debugJson['vehicle_photo_url'].toString().length > 100) {
                 debugJson['vehicle_photo_url'] = '${debugJson['vehicle_photo_url'].toString().substring(0, 50)}... [TRUNCATED]';
               }
@@ -60,20 +58,19 @@ class CustomerVehicleRepository {
                 debugJson['gallery_images'] = '[${(debugJson['gallery_images'] as List).length} images]';
               }
               debugPrint('🔍 RAW CUSTOMER VEHICLE JSON: $debugJson');
-              debugPrint('🔍 profiles value: ${json['profiles']}');
+              debugPrint('🔍 profiles_public value: ${json['profiles_public']}');
             }
             
-            // Flatten the profiles data into the vehicle object
             final vehicleData = Map<String, dynamic>.from(json);
-            if (json['profiles'] != null) {
-              vehicleData['profile_name'] = json['profiles']['full_name'];
-              vehicleData['profile_avatar'] = json['profiles']['profile_photo_url'];
+            if (json['profiles_public'] != null) {
+              vehicleData['profile_name'] = json['profiles_public']['full_name'];
+              vehicleData['profile_avatar'] = json['profiles_public']['profile_photo_url'];
               if (kDebugMode) {
-                debugPrint('✅ Profile found: ${json['profiles']['full_name']}');
+                debugPrint('✅ Profile found: ${json['profiles_public']['full_name']}');
               }
             } else {
               if (kDebugMode) {
-                debugPrint('❌ profiles is NULL for customer vehicle: ${json['id']}');
+                debugPrint('❌ profiles_public is NULL for customer vehicle: ${json['id']}');
               }
             }
             return Vehicle.fromJson(vehicleData);
@@ -220,7 +217,7 @@ class CustomerVehicleRepository {
     try {
       // Check if vehicle has ANY user posts
       final posts = await _supabase
-          .from('user_posts')
+          .from('posts')
           .select('id')
           .eq('vehicle_id', id);
       
@@ -251,7 +248,7 @@ class CustomerVehicleRepository {
     try {
       // Check if vehicle has ANY user posts
       final posts = await _supabase
-          .from('user_posts')
+          .from('posts')
           .select('id')
           .eq('vehicle_id', id);
       
@@ -328,3 +325,4 @@ class CustomerVehicleRepository {
     }
   }
 }
+

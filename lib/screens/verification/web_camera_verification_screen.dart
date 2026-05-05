@@ -46,3 +46,4 @@ class WebCameraVerificationScreen extends StatelessWidget {
     );
   }
 }
+

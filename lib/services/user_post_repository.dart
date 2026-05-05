@@ -214,7 +214,7 @@ class UserPostRepository {
 
       // Load ALL user posts (not just current user's) so providers can see requests
       final response = await _supabase
-          .from('user_posts')
+          .from('posts')
           .select()
           .order('created_at', ascending: false);
 
@@ -237,7 +237,7 @@ class UserPostRepository {
       }
 
       // Insert to Supabase
-      await _supabase.from('user_posts').insert(post.toJson());
+      await _supabase.from('posts').insert(post.toJson());
 
       // Update local state
       posts.value = [post, ...posts.value];
@@ -253,7 +253,7 @@ class UserPostRepository {
     try {
       // Update in Supabase
       await _supabase
-          .from('user_posts')
+          .from('posts')
           .update(post.toJson())
           .eq('id', post.id);
 
@@ -273,7 +273,7 @@ class UserPostRepository {
     try {
       // Update in Supabase
       await _supabase
-          .from('user_posts')
+          .from('posts')
           .update({'status': 'archived'})
           .eq('id', postId);
 
@@ -297,7 +297,7 @@ class UserPostRepository {
     try {
       // Update in Supabase
       await _supabase
-          .from('user_posts')
+          .from('posts')
           .update({'status': 'active'})
           .eq('id', postId);
 
@@ -323,7 +323,7 @@ class UserPostRepository {
 
       // Update in Supabase
       await _supabase
-          .from('user_posts')
+          .from('posts')
           .update({'is_online': newOnlineStatus})
           .eq('id', postId);
 
@@ -350,7 +350,7 @@ class UserPostRepository {
 
       // Delete from Supabase — CASCADE handles related records automatically
       await _supabase
-          .from('user_posts')
+          .from('posts')
           .delete()
           .eq('id', postId)
           .eq('user_id', user.uid);
@@ -365,3 +365,4 @@ class UserPostRepository {
     }
   }
 }
+

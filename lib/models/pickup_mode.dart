@@ -31,3 +31,4 @@ extension PickupModeExtension on PickupMode {
     }
   }
 }
+

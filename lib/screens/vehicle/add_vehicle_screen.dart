@@ -737,3 +737,4 @@ class _AddVehicleScreenState extends State<AddVehicleScreen> {
     Navigator.pop(context, vehicle);
   }
 }
+

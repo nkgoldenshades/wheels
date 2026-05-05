@@ -174,3 +174,4 @@ class _ReviewDialogState extends State<ReviewDialog> {
     return 'What was the issue? Your feedback helps others.';
   }
 }
+

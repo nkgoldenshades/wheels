@@ -236,3 +236,4 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
 }
+

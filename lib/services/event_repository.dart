@@ -141,3 +141,4 @@ class EventRepository {
     return _onlineStatus.value[eventId] ?? false;
   }
 }
+

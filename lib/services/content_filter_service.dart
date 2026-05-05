@@ -280,3 +280,4 @@ class ContentFilterService {
     return false;
   }
 }
+

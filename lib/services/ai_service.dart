@@ -233,3 +233,4 @@ class SuggestionResult {
     return null;
   }
 }
+

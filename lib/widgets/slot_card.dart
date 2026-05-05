@@ -920,3 +920,4 @@ class SlotCard extends StatelessWidget {
     return TimezoneUtils.formatDateTimeWithTimezone(time, show24Hour: true);
   }
 }
+

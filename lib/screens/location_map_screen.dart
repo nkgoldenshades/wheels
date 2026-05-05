@@ -88,3 +88,4 @@ class LocationMapScreen extends StatelessWidget {
     }
   }
 }
+

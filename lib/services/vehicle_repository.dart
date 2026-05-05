@@ -53,11 +53,11 @@ class VehicleRepository {
           .from('vehicles')  // ✅ Query vehicles table directly
           .select('''
             *,
-            profiles (
+            profiles_public (
               full_name,
               profile_photo_url
             )
-          ''')  // Join with profiles - PostgREST auto-detects FK
+          ''')  // Join with profiles_public - PostgREST auto-detects FK
           // .eq('is_active', true)  // Temporarily removed to test
           .order('created_at', ascending: false);
 
@@ -81,15 +81,15 @@ class VehicleRepository {
             
             // Flatten the profiles data into the vehicle object
             final vehicleData = Map<String, dynamic>.from(json);
-            if (json['profiles'] != null) {
-              vehicleData['profile_name'] = json['profiles']['full_name'];
-              vehicleData['profile_avatar'] = json['profiles']['profile_photo_url'];
+            if (json['profiles_public'] != null) {
+              vehicleData['profile_name'] = json['profiles_public']['full_name'];
+              vehicleData['profile_avatar'] = json['profiles_public']['profile_photo_url'];
               if (kDebugMode) {
-                debugPrint('✅ Profile found: ${json['profiles']['full_name']}');
+                debugPrint('✅ Profile found: ${json['profiles_public']['full_name']}');
               }
             } else {
               if (kDebugMode) {
-                debugPrint('❌ profiles is NULL for vehicle: ${json['id']}');
+                debugPrint('❌ profiles_public is NULL for vehicle: ${json['id']}');
               }
             }
             return Vehicle.fromJson(vehicleData);
@@ -396,3 +396,4 @@ class VehicleRepository {
         .toList();
   }
 }
+

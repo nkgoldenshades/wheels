@@ -819,3 +819,4 @@ class _CreateEventSlotScreenState extends State<CreateEventSlotScreen> {
     }
   }
 }
+

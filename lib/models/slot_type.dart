@@ -13,3 +13,4 @@ extension SlotTypeExtension on SlotType {
     }
   }
 }
+

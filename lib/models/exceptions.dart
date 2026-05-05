@@ -8,3 +8,4 @@ class ActiveBookingsException implements Exception {
   String toString() =>
       'ActiveBookingsException: $activeCount active booking(s) prevent deletion.';
 }
+

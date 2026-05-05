@@ -535,3 +535,4 @@ class SlotRepository {
     return _slotEntries.value.where((e) => e.slot.vehicleId == vehicleId).toList();
   }
 }
+

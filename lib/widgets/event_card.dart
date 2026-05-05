@@ -110,3 +110,4 @@ class EventCard extends StatelessWidget {
     return '$h:$m';
   }
 }
+

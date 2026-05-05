@@ -338,3 +338,4 @@ class _VehicleThumb extends StatelessWidget {
     );
   }
 }
+

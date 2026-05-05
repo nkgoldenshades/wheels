@@ -222,3 +222,4 @@ class LocationAutocompleteService {
     _debounceTimer?.cancel();
   }
 }
+

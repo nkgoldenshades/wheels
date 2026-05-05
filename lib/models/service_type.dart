@@ -19,3 +19,4 @@ extension ServiceTypeExtension on ServiceType {
     }
   }
 }
+

@@ -82,3 +82,4 @@ class AppPreferences {
     return fmt.format(amount);
   }
 }
+

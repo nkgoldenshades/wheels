@@ -855,3 +855,4 @@ class FaceDetectionPainter extends CustomPainter {
         oldDelegate.isDetecting != isDetecting;
   }
 }
+

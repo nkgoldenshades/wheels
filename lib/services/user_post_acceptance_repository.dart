@@ -235,3 +235,4 @@ class UserPostAcceptanceRepository {
     return (100000 + random.nextInt(900000)).toString();
   }
 }
+

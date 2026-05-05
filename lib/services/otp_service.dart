@@ -97,3 +97,4 @@ enum OtpVerificationResult {
   bool get isWrongOtp => this == OtpVerificationResult.wrongOtp;
   bool get isLocked => this == OtpVerificationResult.locked;
 }
+

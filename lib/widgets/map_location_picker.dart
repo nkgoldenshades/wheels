@@ -342,3 +342,4 @@ class _MapLocationPickerState extends State<MapLocationPicker> {
     );
   }
 }
+

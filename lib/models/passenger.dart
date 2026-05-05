@@ -41,3 +41,4 @@ class Passenger {
   @override
   int get hashCode => id.hashCode;
 }
+

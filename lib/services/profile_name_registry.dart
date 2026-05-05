@@ -123,3 +123,4 @@ class ProfileNameRegistry {
     return isNameAvailable(profileName);
   }
 }
+

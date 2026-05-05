@@ -211,3 +211,4 @@ class CurrencyService {
     return !['JPY', 'KRW', 'VND'].contains(currencyCode);
   }
 }
+

@@ -322,3 +322,4 @@ class SeatLayoutController extends ChangeNotifier {
     }
   }
 }
+
