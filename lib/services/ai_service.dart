@@ -96,9 +96,9 @@ class AIService {
 // Enums
 enum ContentType {
   general,
-  vehicle_description,
-  user_review,
-  chat_message,
+  vehicleDescription,
+  userReview,
+  chatMessage,
 }
 
 enum ImageType {
@@ -108,9 +108,9 @@ enum ImageType {
 }
 
 enum SuggestionType {
-  vehicle_title,
-  route_optimization,
-  pricing_suggestion,
+  vehicleTitle,
+  routeOptimization,
+  pricingSuggestion,
 }
 
 // Data Models
