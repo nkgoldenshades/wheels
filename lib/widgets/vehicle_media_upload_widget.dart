@@ -217,7 +217,7 @@ class _VehicleMediaUploadWidgetState extends State<VehicleMediaUploadWidget> {
                           width: 100,
                           height: 100,
                           fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) => Container(
+                          errorBuilder: (_, _a, _b) => Container(
                             color: Colors.grey[300],
                             child: const Icon(Icons.broken_image),
                           ),

@@ -492,7 +492,7 @@ class _Thumb extends StatelessWidget {
           ClipRRect(
             borderRadius: BorderRadius.circular(8),
             child: Image.network(url, width: 80, height: 80, fit: BoxFit.cover,
-              errorBuilder: (_, __, ___) => Container(width: 80, height: 80, color: Colors.grey[200],
+              errorBuilder: (_, _a, _b) => Container(width: 80, height: 80, color: Colors.grey[200],
                 child: const Icon(Icons.broken_image, color: Colors.grey)),
             ),
           ),
