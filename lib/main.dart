@@ -4404,6 +4404,36 @@ class _PostsPageState extends State<PostsPage> {
   double _toRad(double deg) => deg * (3.14159265359 / 180.0);
 
   Future<bool> _requestUserLocation() async {
+    // On web, skip permission_handler (not supported) and use Geolocator directly
+    if (kIsWeb) {
+      try {
+        final pos = await Geolocator.getCurrentPosition(
+          desiredAccuracy: LocationAccuracy.medium,
+        ).timeout(const Duration(seconds: 12));
+        if (mounted) {
+          setState(() {
+            _currentUserPosition = (pos.latitude, pos.longitude);
+          });
+        }
+        return true;
+      } on TimeoutException {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Location request timed out')),
+          );
+        }
+        return false;
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Location error: $e')),
+          );
+        }
+        return false;
+      }
+    }
+
+    // Mobile: use permission_handler
     final status = await Permission.locationWhenInUse.request();
     if (status != PermissionStatus.granted) {
       if (!mounted) return false;
