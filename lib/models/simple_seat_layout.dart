@@ -341,3 +341,4 @@ class SimpleSeatLayout {
   int get maxCol => layout.isEmpty ? 0 : layout.map((s) => s.col).reduce((a, b) => a > b ? a : b);
 }
 
+

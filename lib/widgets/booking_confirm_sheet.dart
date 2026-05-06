@@ -1240,7 +1240,7 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
         final g = item.allowedGender.toLowerCase();
         if (g == 'male') {
           gender = SeatGender.male;
-        } else if (g == 'female') gender = SeatGender.female;
+        } else if (g == 'female') { gender = SeatGender.female; }
       }
 
       cells[key] = LayoutCell(
@@ -1647,4 +1647,5 @@ class _SeatGrid extends StatelessWidget {
     );
   }
 }
+
 

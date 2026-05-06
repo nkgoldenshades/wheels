@@ -98,3 +98,4 @@ enum OtpVerificationResult {
   bool get isLocked => this == OtpVerificationResult.locked;
 }
 
+

@@ -294,3 +294,4 @@ class SlotConfiguration {
   bool get isParcelConfig => grid.isNotEmpty && grid.first.data is ParcelSlotData;
 }
 
+

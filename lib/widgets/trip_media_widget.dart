@@ -374,7 +374,7 @@ class _PhaseCard extends StatelessWidget {
                     child: ListView.separated(
                       scrollDirection: Axis.horizontal,
                       itemCount: myParty.images.length + (isSubmitted ? 0 : 1),
-                      separatorBuilder: (_, __) => const SizedBox(width: 8),
+                      separatorBuilder: (_, _) => const SizedBox(width: 8),
                       itemBuilder: (context, i) {
                         if (!isSubmitted && i == myParty.images.length) {
                           return _AddBtn(onTap: uploading ? null : onPickImages);
@@ -445,7 +445,7 @@ class _PhaseCard extends StatelessWidget {
                       child: ListView.separated(
                         scrollDirection: Axis.horizontal,
                         itemCount: otherParty.images.length,
-                        separatorBuilder: (_, __) => const SizedBox(width: 8),
+                        separatorBuilder: (_, _) => const SizedBox(width: 8),
                         itemBuilder: (_, i) => _Thumb(url: otherParty.images[i], canRemove: false, onRemove: () {}),
                       ),
                     ),
@@ -542,4 +542,5 @@ class _AddBtn extends StatelessWidget {
     );
   }
 }
+
 

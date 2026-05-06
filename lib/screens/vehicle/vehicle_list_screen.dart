@@ -111,7 +111,7 @@ class VehicleListScreen extends StatelessWidget {
           return ListView.separated(
             padding: const EdgeInsets.all(16),
             itemCount: vehicles.length,
-            separatorBuilder: (_, __) => const SizedBox(height: 12),
+            separatorBuilder: (_, _) => const SizedBox(height: 12),
             itemBuilder: (context, index) {
               final v = vehicles[index];
               final yearText = v.year != null ? ' ${v.year}' : '';
@@ -338,4 +338,5 @@ class _VehicleThumb extends StatelessWidget {
     );
   }
 }
+
 

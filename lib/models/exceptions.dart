@@ -9,3 +9,4 @@ class ActiveBookingsException implements Exception {
       'ActiveBookingsException: $activeCount active booking(s) prevent deletion.';
 }
 
+

@@ -196,7 +196,7 @@ class _MapLocationPickerState extends State<MapLocationPicker> {
                       point: _centerPosition,
                       radius: widget.radiusInKm! * 1000, // Convert km to meters
                       useRadiusInMeter: true,
-                      color: Colors.blue.withOpacity(0.2),
+                      color: Colors.blue.withValues(alpha: 0.2),
                       borderColor: Colors.blue,
                       borderStrokeWidth: 2,
                     ),
@@ -342,4 +342,5 @@ class _MapLocationPickerState extends State<MapLocationPicker> {
     );
   }
 }
+
 

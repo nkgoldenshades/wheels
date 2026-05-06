@@ -229,3 +229,4 @@ class EventDetailScreen extends StatelessWidget {
   }
 }
 
+

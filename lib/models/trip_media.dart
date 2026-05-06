@@ -135,3 +135,4 @@ class TripMedia {
   bool get isEmpty => !start.hasAnyMedia && !end.hasAnyMedia;
 }
 
+
