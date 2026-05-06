@@ -61,11 +61,11 @@ class VehicleMediaService {
       // Read image bytes (no compression for now - can add later)
       final imageBytes = await imageFile.readAsBytes();
 
-      // Generate storage path
+      // Path: {userId}/{vehicleId}/{filename} — [1]=userId matches RLS
       final timestamp = DateTime.now().millisecondsSinceEpoch;
       final extension = imageFile.name.split('.').last;
       final fileName = 'image_$timestamp.$extension';
-      final storagePath = 'vehicles/$vehicleId/$userId/$fileName';
+      final storagePath = '$userId/$vehicleId/$fileName';
 
       // Upload to Supabase Storage
       await _supabase.storage
@@ -102,11 +102,11 @@ class VehicleMediaService {
       // Read video bytes
       final videoBytes = await videoFile.readAsBytes();
 
-      // Generate storage path
+      // Path: {userId}/{vehicleId}/{filename} — [1]=userId matches RLS
       final timestamp = DateTime.now().millisecondsSinceEpoch;
       final extension = videoFile.name.split('.').last;
       final fileName = 'video_$timestamp.$extension';
-      final storagePath = 'vehicles/$vehicleId/$userId/$fileName';
+      final storagePath = '$userId/$vehicleId/$fileName';
 
       // Upload to Supabase Storage
       await _supabase.storage

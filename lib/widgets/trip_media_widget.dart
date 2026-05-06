@@ -86,7 +86,9 @@ class _TripMediaWidgetState extends State<TripMediaWidget> {
   String _storagePath(String phase, String filename) {
     final bookingId = widget.booking.id;
     final userId = AuthRepository.instance.currentUser?.id ?? 'unknown';
-    return 'bookings/$bookingId/$phase/$_myParty/$userId/$filename';
+    // Path: {bookingId}/{userId}/{phase}/{filename}
+    // [1]=bookingId, [2]=userId — matches RLS policy
+    return '$bookingId/$userId/$phase/$filename';
   }
 
   Future<void> _pickImages(String phase) async {
