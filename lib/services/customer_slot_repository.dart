@@ -7,6 +7,7 @@ import '../models/slot.dart';
 import '../models/slot_entry.dart';
 import '../models/post_mode.dart';
 import '../models/vehicle.dart';
+import '../models/service_type.dart';
 import '../models/exceptions.dart';
 import 'auth_repository.dart';
 import 'customer_vehicle_repository.dart';
@@ -54,8 +55,8 @@ class CustomerSlotRepository {
           id: slot.vehicleId,
           userId: slot.profileId,
           userName: providerName,
-          name: 'Unknown Vehicle',
-          type: 'Unknown',
+          name: '${slot.serviceType.displayName} Service',
+          type: slot.serviceType.name,
           capabilities: [slot.serviceType],
           seatingCapacity: slot.capacity,
           galleryImages: [],
