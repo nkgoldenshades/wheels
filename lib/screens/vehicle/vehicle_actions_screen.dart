@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../models/booking.dart';
 import '../../models/exceptions.dart';
@@ -12,6 +13,7 @@ import '../../models/review.dart';
 import '../../models/service_type.dart';
 import '../../models/slot_entry.dart';
 import '../../models/vehicle.dart';
+import '../../services/auth_repository.dart';
 import '../../services/booking_repository.dart';
 import '../../services/review_repository.dart';
 import '../../services/slot_repository.dart';
@@ -27,6 +29,28 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../services/location_autocomplete_service.dart';
 import '../../services/app_preferences.dart';
 import '../../services/payment_service.dart';
+
+/// Upload a vehicle sensitive document to vehicle_sensitive_media bucket
+/// Returns the public URL or null on failure
+Future<String?> _uploadVehicleSensitiveDoc({
+  required String vehicleId,
+  required String docType,
+  required Uint8List bytes,
+  required String extension,
+}) async {
+  try {
+    final userId = AuthRepository.instance.currentUser?.id;
+    if (userId == null) return null;
+    final supabase = Supabase.instance.client;
+    final timestamp = DateTime.now().millisecondsSinceEpoch;
+    final path = '$vehicleId/$docType/${docType}_$timestamp.$extension';
+    await supabase.storage.from('vehicle_sensitive_media').uploadBinary(path, bytes);
+    return supabase.storage.from('vehicle_sensitive_media').getPublicUrl(path);
+  } catch (e) {
+    debugPrint('❌ Vehicle sensitive doc upload failed: $e');
+    return null;
+  }
+}
 
 Color _bookingStatusColor(BookingStatus s) {
   switch (s) {
@@ -1437,37 +1461,51 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
     if (action == null || !mounted) return;
 
     if (action == 'save') {
-      // Save document image to vehicle without verification badge
-      final base64Doc = base64Encode(documentBytes);
-      Vehicle updatedVehicle;
+      // Upload document to vehicle_sensitive_media bucket
+      final ext = 'jpg';
+      String? docUrl;
       switch (documentType) {
         case DocumentType.rc:
-          updatedVehicle = vehicle.copyWith(rcImageBase64: base64Doc);
+          docUrl = await _uploadVehicleSensitiveDoc(
+            vehicleId: vehicle.id, docType: 'rc', bytes: documentBytes, extension: ext);
+          if (docUrl != null) {
+            final updatedVehicle = vehicle.copyWith(rcFrontUrl: docUrl);
+            widget.isUserMode
+                ? CustomerVehicleRepository.instance.updateVehicle(updatedVehicle)
+                : await widget.vehicleRepository!.updateVehicle(updatedVehicle);
+          }
           break;
         case DocumentType.insurance:
-          updatedVehicle = vehicle.copyWith(
-            insuranceImageBase64: base64Doc,
-            insuranceExpiryDate: expiryDate,
-          );
+          docUrl = await _uploadVehicleSensitiveDoc(
+            vehicleId: vehicle.id, docType: 'insurance', bytes: documentBytes, extension: ext);
+          if (docUrl != null) {
+            final updatedVehicle = vehicle.copyWith(
+              insuranceDocumentUrl: docUrl,
+              insuranceExpiryDate: expiryDate,
+            );
+            widget.isUserMode
+                ? CustomerVehicleRepository.instance.updateVehicle(updatedVehicle)
+                : await widget.vehicleRepository!.updateVehicle(updatedVehicle);
+          }
           break;
         case DocumentType.dl:
-          updatedVehicle = vehicle.copyWith(dlImageBase64: base64Doc);
+          docUrl = await _uploadVehicleSensitiveDoc(
+            vehicleId: vehicle.id, docType: 'dl', bytes: documentBytes, extension: ext);
           break;
         case DocumentType.aadhaar:
-          updatedVehicle = vehicle.copyWith(aadhaarImageBase64: base64Doc);
+          docUrl = await _uploadVehicleSensitiveDoc(
+            vehicleId: vehicle.id, docType: 'aadhaar', bytes: documentBytes, extension: ext);
           break;
         case DocumentType.pan:
-          updatedVehicle = vehicle.copyWith(panImageBase64: base64Doc);
+          docUrl = await _uploadVehicleSensitiveDoc(
+            vehicleId: vehicle.id, docType: 'pan', bytes: documentBytes, extension: ext);
           break;
-      }
-      if (widget.isUserMode) {
-        CustomerVehicleRepository.instance.updateVehicle(updatedVehicle);
-      } else {
-        await widget.vehicleRepository!.updateVehicle(updatedVehicle);
       }
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('${_getDocumentName(documentType)} saved (unverified)')),
+        SnackBar(content: Text(docUrl != null
+            ? '${_getDocumentName(documentType)} saved (unverified)'
+            : '${_getDocumentName(documentType)} upload failed')),
       );
       return;
     }

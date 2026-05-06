@@ -1,4 +1,4 @@
- 
+
 import 'dart:async';
 import 'dart:math' as math;
 import 'dart:convert';
@@ -7,6 +7,7 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
@@ -914,17 +915,63 @@ Future<void> _uploadDocument(
   String documentType,
   String side,
 ) async {
-  // Document upload functionality not available on Windows
-  // Use web version for full document upload functionality
   if (!context.mounted) return;
-  
-  ScaffoldMessenger.of(context).showSnackBar(
-    const SnackBar(
-      content: Text('Document upload not available on this platform. Use web version for full functionality.'),
-      backgroundColor: Colors.orange,
-      duration: Duration(seconds: 3),
-    ),
-  );
+
+  try {
+    final picker = ImagePicker();
+    final picked = await picker.pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 80,
+    );
+    if (picked == null) return;
+
+    final bytes = await picked.readAsBytes();
+    final userId = AuthRepository.instance.currentUser?.id;
+    if (userId == null) throw Exception('Not authenticated');
+
+    final supabase = Supabase.instance.client;
+    final timestamp = DateTime.now().millisecondsSinceEpoch;
+    final ext = picked.name.split('.').last;
+    final fileName = '${documentType}_${side}_$timestamp.$ext';
+    // Path: {userId}/{documentType}/{filename}
+    final storagePath = '$userId/$documentType/$fileName';
+
+    // Upload to profile_private_media bucket
+    await supabase.storage
+        .from('profile_private_media')
+        .uploadBinary(storagePath, bytes);
+
+    // Get URL
+    final url = supabase.storage
+        .from('profile_private_media')
+        .getPublicUrl(storagePath);
+
+    // Save URL to profile
+    await ProfileRepository.instance.saveDocument(
+      documentType,
+      side,
+      url,
+    );
+
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('✅ ${documentType.toUpperCase()} $side uploaded'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    }
+  } catch (e) {
+    debugPrint('❌ Document upload failed: $e');
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Upload failed: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
 }
 
 class MyApp extends StatelessWidget {
