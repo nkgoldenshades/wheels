@@ -68,7 +68,7 @@ class _TripMediaWidgetState extends State<TripMediaWidget> {
     try {
       final bytes = await file.readAsBytes();
       final supabase = Supabase.instance.client;
-      await supabase.storage.from('trip-media').uploadBinary(
+      await supabase.storage.from('trip_media').uploadBinary(
             path,
             bytes,
             fileOptions: FileOptions(
@@ -76,7 +76,7 @@ class _TripMediaWidgetState extends State<TripMediaWidget> {
               upsert: true,
             ),
           );
-      return supabase.storage.from('trip-media').getPublicUrl(path);
+      return supabase.storage.from('trip_media').getPublicUrl(path);
     } catch (e) {
       debugPrint('❌ Upload failed: $e');
       return null;
