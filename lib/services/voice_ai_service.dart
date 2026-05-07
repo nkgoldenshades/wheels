@@ -35,28 +35,28 @@ class VoiceAIService extends ChangeNotifier {
   // Initialize speech services and Firebase AI
   Future<void> initialize() async {
     if (_isInitialized) return;
-    
-    // Voice AI is not supported on web - skip initialization
-    if (kIsWeb) {
-      if (kDebugMode) print('🌐 Voice AI not supported on web - skipping');
-      _isInitialized = false; // Mark as not initialized on web
-      return;
-    }
-    
+
     try {
-      // Request microphone permission (mobile only)
-      try {
-        final micPermission = await Permission.microphone.request();
-        if (micPermission != PermissionStatus.granted) {
-          if (kDebugMode) print('🎤 Microphone permission denied');
-          return;
+      // Initialize text to speech (works on web too)
+      await _flutterTts.setLanguage('en-US');
+      await _flutterTts.setSpeechRate(0.5);
+      await _flutterTts.setVolume(0.8);
+      await _flutterTts.setPitch(1.0);
+
+      if (!kIsWeb) {
+        // Request microphone permission on mobile only
+        try {
+          final micPermission = await Permission.microphone.request();
+          if (micPermission != PermissionStatus.granted) {
+            if (kDebugMode) print('🎤 Microphone permission denied');
+            return;
+          }
+        } catch (e) {
+          if (kDebugMode) print('⚠️ Permission handler not available: $e');
         }
-      } catch (e) {
-        if (kDebugMode) print('⚠️ Permission handler not available: $e');
-        // Continue anyway - might work without explicit permission request
       }
 
-      // Initialize speech to text
+      // Initialize speech to text (works on web via Web Speech API)
       final speechAvailable = await _speechToText.initialize(
         onError: (error) {
           if (kDebugMode) print('🎤 Speech error: $error');
@@ -71,21 +71,15 @@ class VoiceAIService extends ChangeNotifier {
       );
 
       if (!speechAvailable) {
-        if (kDebugMode) print('🎤 Speech recognition not available');
-        return;
+        if (kDebugMode) print('🎤 Speech recognition not available on this browser/device');
+        // Still mark as initialized for Firebase AI (text chat still works)
       }
-
-      // Initialize text to speech
-      await _flutterTts.setLanguage('en-US');
-      await _flutterTts.setSpeechRate(0.5);
-      await _flutterTts.setVolume(0.8);
-      await _flutterTts.setPitch(1.0);
 
       // Initialize Firebase AI Logic
       await _initializeFirebaseAI();
 
       _isInitialized = true;
-      if (kDebugMode) print('🤖 Voice AI initialized successfully');
+      if (kDebugMode) print('🤖 Voice AI initialized (web: $kIsWeb)');
     } catch (e) {
       if (kDebugMode) print('❌ Voice AI initialization failed: $e');
       _isInitialized = false;
@@ -94,17 +88,9 @@ class VoiceAIService extends ChangeNotifier {
 
   // Initialize Firebase Gemini API
   Future<void> _initializeFirebaseAI() async {
-    // Voice AI is not supported on web - skip initialization
-    if (kIsWeb) {
-      if (kDebugMode) print('🌐 Voice AI not supported on web - skipping');
-      _aiInitialized = false;
-      return;
-    }
-    
     try {
       debugPrint('🚀 Voice AI: Starting Firebase Gemini API initialization...');
       
-      // Use Firebase Gemini API (free tier available, no API key needed)
       _model = FirebaseAI.googleAI().generativeModel(
         model: 'gemini-2.5-flash',  // Latest, faster, lighter model
         systemInstruction: Content.system('''
@@ -145,11 +131,6 @@ Examples:
 
   // Toggle voice AI on/off
   Future<void> toggleVoiceAI() async {
-    if (kIsWeb) {
-      // Voice AI not supported on web (no speech_to_text/flutter_tts)
-      debugPrint('🌐 Voice AI not supported on web');
-      return;
-    }
     if (!_isInitialized) {
       await initialize();
       if (!_isInitialized) return;
@@ -168,11 +149,6 @@ Examples:
 
   // Start voice listening
   Future<void> _startListening() async {
-    if (kIsWeb) {
-      if (kDebugMode) print('🌐 Voice AI not supported on web');
-      return;
-    }
-    
     if (!_isInitialized || _isListening) return;
 
     try {
