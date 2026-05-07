@@ -63,9 +63,10 @@ class StripeService {
   /// Present payment sheet to user
   Future<bool> presentPaymentSheet({required String clientSecret}) async {
     if (kIsWeb) {
-      throw UnsupportedError(
-        'Web checkout is not configured for Stripe PaymentSheet.',
-      );
+      // On web, payment is handled via Stripe Checkout redirect
+      // This method should not be called directly on web
+      debugPrint('⚠️ presentPaymentSheet called on web - use processPayment instead');
+      return false;
     }
     try {
       await Stripe.instance.initPaymentSheet(

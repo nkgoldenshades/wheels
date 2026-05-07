@@ -730,16 +730,39 @@ Future<void> _pickAndSaveAvatar(BuildContext context) async {
 
   if (uploadType == null || !context.mounted) return;
 
-  // Step 2: Pick image from gallery
-  // Note: ImagePicker not available on Windows - using placeholder
-  if (!context.mounted) return;
-  
-  ScaffoldMessenger.of(context).showSnackBar(
-    const SnackBar(
-      content: Text('Image picker not available on this platform. Use web version for full functionality.'),
-      backgroundColor: Colors.orange,
-    ),
-  );
+  // Step 2: Pick image from gallery using ImagePicker (works on web too)
+  try {
+    final picker = ImagePicker();
+    final picked = await picker.pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 80,
+    );
+    if (picked == null || !context.mounted) return;
+
+    final bytes = await picked.readAsBytes();
+    final base64Image = base64Encode(bytes);
+
+    // Save to profile
+    await ProfileRepository.instance.setLocalAvatarBase64(base64Image);
+
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('✅ Profile photo updated'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    }
+  } catch (e) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to pick image: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
 }
 
 Widget _buildDocumentUploadCard(

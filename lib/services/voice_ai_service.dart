@@ -145,6 +145,11 @@ Examples:
 
   // Toggle voice AI on/off
   Future<void> toggleVoiceAI() async {
+    if (kIsWeb) {
+      // Voice AI not supported on web (no speech_to_text/flutter_tts)
+      debugPrint('🌐 Voice AI not supported on web');
+      return;
+    }
     if (!_isInitialized) {
       await initialize();
       if (!_isInitialized) return;
