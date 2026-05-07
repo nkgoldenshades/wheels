@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:camera/camera.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import 'package:flutter/services.dart';
+import 'package:image_picker/image_picker.dart';
 import 'dart:convert';
 import '../../services/face_matching_service.dart';
 import '../../services/profile_repository.dart';
@@ -58,8 +60,38 @@ class _DocumentVerificationScreenState
   @override
   void initState() {
     super.initState();
+    if (kIsWeb) {
+      // On web: use image picker instead of camera
+      WidgetsBinding.instance.addPostFrameCallback((_) => _pickImageOnWeb());
+      return;
+    }
     _initializeFaceDetector();
     _initializeCamera();
+  }
+
+  /// Web fallback: pick image from gallery or camera
+  Future<void> _pickImageOnWeb() async {
+    try {
+      final picker = ImagePicker();
+      final picked = await picker.pickImage(
+        source: ImageSource.gallery,
+        imageQuality: 90,
+      );
+      if (picked == null || !mounted) {
+        Navigator.pop(context);
+        return;
+      }
+      final bytes = await picked.readAsBytes();
+      // Return the image bytes as verification result
+      Navigator.pop(context, bytes);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to pick image: $e')),
+        );
+        Navigator.pop(context);
+      }
+    }
   }
 
   void _initializeFaceDetector() {

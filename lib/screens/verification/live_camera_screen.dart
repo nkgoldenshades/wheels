@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:camera/camera.dart';
+import 'package:image_picker/image_picker.dart';
 
 enum CaptureMode {
   photo, // Single photo capture
@@ -34,7 +36,36 @@ class _LiveCameraScreenState extends State<LiveCameraScreen> {
   @override
   void initState() {
     super.initState();
+    if (kIsWeb) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _pickOnWeb());
+      return;
+    }
     _initializeCamera();
+  }
+
+  Future<void> _pickOnWeb() async {
+    try {
+      final picker = ImagePicker();
+      final picked = widget.mode == CaptureMode.video
+          ? await picker.pickVideo(source: ImageSource.camera)
+          : await picker.pickImage(
+              source: ImageSource.camera,
+              imageQuality: 90,
+            );
+      if (picked == null || !mounted) {
+        Navigator.pop(context);
+        return;
+      }
+      final bytes = await picked.readAsBytes();
+      Navigator.pop(context, bytes);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Camera error: $e')),
+        );
+        Navigator.pop(context);
+      }
+    }
   }
 
   Future<void> _initializeCamera() async {

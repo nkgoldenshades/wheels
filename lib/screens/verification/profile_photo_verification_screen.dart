@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:camera/camera.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
+import 'package:image_picker/image_picker.dart';
 import '../../services/face_matching_service.dart';
 
 enum ProfileVerificationStep {
@@ -47,8 +48,50 @@ class _ProfilePhotoVerificationScreenState
   @override
   void initState() {
     super.initState();
+    if (kIsWeb) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _pickImageOnWeb());
+      return;
+    }
     _initializeFaceDetector();
     _initializeCamera();
+  }
+
+  /// Web fallback: pick selfie from camera or gallery
+  Future<void> _pickImageOnWeb() async {
+    try {
+      final picker = ImagePicker();
+      // On web, ImageSource.camera opens the device camera
+      final picked = await picker.pickImage(
+        source: ImageSource.camera,
+        imageQuality: 90,
+        preferredCameraDevice: CameraDevice.front,
+      );
+      if (picked == null || !mounted) {
+        Navigator.pop(context);
+        return;
+      }
+      final bytes = await picked.readAsBytes();
+      Navigator.pop(context, bytes);
+    } catch (e) {
+      // Fallback to gallery if camera not available
+      try {
+        final picker = ImagePicker();
+        final picked = await picker.pickImage(source: ImageSource.gallery);
+        if (picked == null || !mounted) {
+          Navigator.pop(context);
+          return;
+        }
+        final bytes = await picked.readAsBytes();
+        Navigator.pop(context, bytes);
+      } catch (e2) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Failed to capture photo: $e2')),
+          );
+          Navigator.pop(context);
+        }
+      }
+    }
   }
 
   void _initializeFaceDetector() {
