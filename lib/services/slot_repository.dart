@@ -145,11 +145,12 @@ class SlotRepository {
       debugPrint('🔍 Firebase user: ${firebase_auth.FirebaseAuth.instance.currentUser?.uid ?? "GUEST"}');
       
       // Guest-first: Load posts for everyone (not just logged-in users)
-      // Load ALL active posts - NO JOIN needed, uses denormalized provider_name/provider_avatar
+      // Load ALL active posts - filter expired ones at DB level
       final response = await supabase
           .from('posts')
           .select('*')
           .eq('is_active', true)
+          .gt('end_time', DateTime.now().toUtc().toIso8601String())
           .order('created_at', ascending: false);
 
       debugPrint('🔍 Supabase response: ${response.length} posts found');

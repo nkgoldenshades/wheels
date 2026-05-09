@@ -92,11 +92,12 @@ class CustomerSlotRepository {
       debugPrint('🔍 Loading user posts from Supabase...');
       debugPrint('🔍 Firebase user: ${firebase_auth.FirebaseAuth.instance.currentUser?.uid ?? "GUEST"}');
       
-      // Load ALL active user posts (requests) - not just current user's
+      // Load ALL active user posts - filter expired ones at DB level
       final response = await supabase
           .from('posts')
           .select('*')
           .eq('is_active', true)
+          .gt('end_time', DateTime.now().toUtc().toIso8601String())
           .order('created_at', ascending: false);
 
       debugPrint('🔍 Supabase user_posts response: ${response.length} posts found');
