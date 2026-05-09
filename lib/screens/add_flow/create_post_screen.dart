@@ -175,12 +175,40 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   Future<void> _selectTime({required bool isStart}) async {
     final current = isStart ? _startTime! : _endTime!;
 
+    // Get timezone for the relevant location
+    String tzLabel = TimezoneUtils.getTimezoneAbbreviation();
+    final suggestion = isStart ? _fromSuggestion : (_toSuggestion ?? _fromSuggestion ?? _baseSuggestion);
+    if (suggestion != null && (suggestion.lat != 0 || suggestion.lon != 0)) {
+      tzLabel = await TimezoneUtils.getTimezoneFromCoords(suggestion.lat, suggestion.lon);
+    }
+
+    // Show timezone hint to user before picking
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              const Icon(Icons.schedule, color: Colors.white, size: 16),
+              const SizedBox(width: 8),
+              Text(
+                'Setting ${isStart ? 'start' : 'end'} time in $tzLabel timezone',
+                style: const TextStyle(color: Colors.white),
+              ),
+            ],
+          ),
+          backgroundColor: Colors.blue,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    }
+
     // Step 1: Pick date
     final DateTime? pickedDate = await showDatePicker(
       context: context,
       initialDate: current,
       firstDate: DateTime.now().subtract(const Duration(days: 1)),
       lastDate: DateTime.now().add(const Duration(days: 365)),
+      helpText: 'Select date ($tzLabel)',
     );
     if (pickedDate == null || !mounted) return;
 
@@ -188,6 +216,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     final TimeOfDay? pickedTime = await showTimePicker(
       context: context,
       initialTime: TimeOfDay.fromDateTime(current),
+      helpText: 'Select time ($tzLabel)',
       builder: (ctx, child) => MediaQuery(
         data: MediaQuery.of(ctx).copyWith(alwaysUse24HourFormat: true),
         child: child!,
@@ -1156,9 +1185,17 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
-                    'Start Time',
-                    style: TextStyle(fontWeight: FontWeight.w500),
+                  FutureBuilder<String>(
+                    future: _fromSuggestion != null
+                        ? TimezoneUtils.getTimezoneFromCoords(_fromSuggestion!.lat, _fromSuggestion!.lon)
+                        : Future.value(TimezoneUtils.getTimezoneAbbreviation()),
+                    builder: (context, snap) {
+                      final tz = snap.data ?? TimezoneUtils.getTimezoneAbbreviation();
+                      return Text(
+                        'Start Time ($tz)',
+                        style: const TextStyle(fontWeight: FontWeight.w500),
+                      );
+                    },
                   ),
                   const SizedBox(height: 4),
                   InkWell(
@@ -1190,9 +1227,19 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
-                    'End Time',
-                    style: TextStyle(fontWeight: FontWeight.w500),
+                  FutureBuilder<String>(
+                    future: (_toSuggestion ?? _baseSuggestion) != null
+                        ? TimezoneUtils.getTimezoneFromCoords(
+                            (_toSuggestion ?? _baseSuggestion)!.lat,
+                            (_toSuggestion ?? _baseSuggestion)!.lon)
+                        : Future.value(TimezoneUtils.getTimezoneAbbreviation()),
+                    builder: (context, snap) {
+                      final tz = snap.data ?? TimezoneUtils.getTimezoneAbbreviation();
+                      return Text(
+                        'End Time ($tz)',
+                        style: const TextStyle(fontWeight: FontWeight.w500),
+                      );
+                    },
                   ),
                   const SizedBox(height: 4),
                   InkWell(
