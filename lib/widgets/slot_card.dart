@@ -692,7 +692,6 @@ class SlotCard extends StatelessWidget {
     final hours = duration.inHours % 24;
     final minutes = duration.inMinutes % 60;
     
-    // Compact duration format: "8h", "2d", "2d 5h"
     String durationText;
     if (days > 0 && hours > 0) {
       durationText = '${days}d ${hours}h';
@@ -706,23 +705,58 @@ class SlotCard extends StatelessWidget {
     
     final isValid = slot.endTime.isAfter(slot.startTime);
 
-    return Row(
-      children: [
-        const Icon(Icons.access_time, size: 16, color: Colors.grey),
-        const SizedBox(width: 8),
-        Text(
-          '${_formatTime(slot.startTime)} – ${_formatTime(slot.endTime)}',
-          style: const TextStyle(fontSize: 14, color: Colors.black87),
-        ),
-        const SizedBox(width: 8),
-        Text(
-          isValid ? '($durationText)' : '(invalid)',
-          style: TextStyle(
-            fontSize: 12,
-            color: isValid ? Colors.grey[500] : Colors.red,
-          ),
-        ),
-      ],
+    // Extract coordinates from location strings for timezone lookup
+    double? fromLat, fromLng, toLat, toLng;
+    if (slot.fromLocation != null) {
+      final coords = _extractCoords(slot.fromLocation!);
+      fromLat = coords?.$1;
+      fromLng = coords?.$2;
+    }
+    if (slot.toLocation != null) {
+      final coords = _extractCoords(slot.toLocation!);
+      toLat = coords?.$1;
+      toLng = coords?.$2;
+    }
+    if (fromLat == null && slot.baseLocation != null) {
+      final coords = _extractCoords(slot.baseLocation!);
+      fromLat = coords?.$1;
+      fromLng = coords?.$2;
+    }
+
+    // Use FutureBuilder to show location-based timezone
+    return FutureBuilder<String>(
+      future: TimezoneUtils.formatInternationalTimeRange(
+        startTime: slot.startTime,
+        endTime: slot.endTime,
+        fromLat: fromLat,
+        fromLng: fromLng,
+        toLat: toLat,
+        toLng: toLng,
+      ),
+      builder: (context, snapshot) {
+        final timeText = snapshot.data ??
+            '${_formatTime(slot.startTime)} – ${_formatTime(slot.endTime)}';
+        return Row(
+          children: [
+            const Icon(Icons.access_time, size: 16, color: Colors.grey),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                timeText,
+                style: const TextStyle(fontSize: 14, color: Colors.black87),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              isValid ? '($durationText)' : '(invalid)',
+              style: TextStyle(
+                fontSize: 12,
+                color: isValid ? Colors.grey[500] : Colors.red,
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 
@@ -918,6 +952,22 @@ class SlotCard extends StatelessWidget {
   String _formatTime(DateTime time) {
     // Format: Jan 26, 2025 10:00 IST
     return TimezoneUtils.formatDateTimeWithTimezone(time, show24Hour: true);
+  }
+
+  /// Extract lat/lng from location string format: "Label|lat,lng|..."
+  (double, double)? _extractCoords(String location) {
+    try {
+      final parts = location.split('|');
+      if (parts.length >= 2) {
+        final coords = parts[1].split(',');
+        if (coords.length == 2) {
+          final lat = double.tryParse(coords[0].trim());
+          final lng = double.tryParse(coords[1].trim());
+          if (lat != null && lng != null) return (lat, lng);
+        }
+      }
+    } catch (_) {}
+    return null;
   }
 }
 
