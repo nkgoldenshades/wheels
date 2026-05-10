@@ -10,6 +10,7 @@ import '../../models/seat_layout.dart';
 import '../../services/event_slot_repository.dart';
 import '../../services/seat_layout_repository.dart';
 import '../../services/content_filter_service.dart';
+import '../../services/app_preferences.dart';
 import '../../controllers/seat_layout_controller.dart';
 import '../add_flow/seat_layout_builder_screen.dart';
 
@@ -450,10 +451,10 @@ class _CreateEventSlotScreenState extends State<CreateEventSlotScreen> {
               const SizedBox(height: 16),
               TextFormField(
                 controller: _priceController,
-                decoration: const InputDecoration(
-                  labelText: 'Price (₹)',
-                  border: OutlineInputBorder(),
-                  prefixIcon: Icon(Icons.currency_rupee),
+                decoration: InputDecoration(
+                  labelText: 'Price (${AppPreferences.instance.currencySymbol})',
+                  border: const OutlineInputBorder(),
+                  prefixIcon: const Icon(Icons.currency_rupee),
                 ),
                 keyboardType: TextInputType.number,
                 validator: (value) {
@@ -819,5 +820,6 @@ class _CreateEventSlotScreenState extends State<CreateEventSlotScreen> {
     }
   }
 }
+
 
 

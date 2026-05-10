@@ -10,6 +10,7 @@ import '../../models/post_mode.dart';
 import '../../services/slot_repository.dart';
 import '../../services/auth_repository.dart';
 import '../../services/content_filter_service.dart';
+import '../../services/app_preferences.dart';
 import '../../widgets/location_field.dart';
 
 class CreateSlotScreen extends StatefulWidget {
@@ -460,11 +461,11 @@ class _CreateSlotScreenState extends State<CreateSlotScreen> {
                 child: TextField(
                   controller: _priceController,
                   keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(
+                  decoration: InputDecoration(
                     labelText: 'Price *',
                     hintText: '500',
-                    border: OutlineInputBorder(),
-                    prefixText: '₹ ',
+                    border: const OutlineInputBorder(),
+                    prefixText: '${AppPreferences.instance.currencySymbol} ',
                   ),
                 ),
               ),
@@ -704,5 +705,6 @@ class _CreateSlotScreenState extends State<CreateSlotScreen> {
     return '$day/$month $hour:$minute';
   }
 }
+
 
 

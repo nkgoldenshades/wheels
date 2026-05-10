@@ -1662,8 +1662,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         if (!_withOperator)
           TextFormField(
             controller: _securityDepositController,
-            decoration: const InputDecoration(
-              labelText: 'Security Deposit (₹)',
+            decoration: InputDecoration(
+                  labelText: 'Security Deposit (${AppPreferences.instance.currencySymbol})',
               border: OutlineInputBorder(),
               prefixIcon: Icon(Icons.security),
               helperText: 'Refundable deposit for self-drive',
@@ -2235,5 +2235,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     );
   }
 }
+
 
 
