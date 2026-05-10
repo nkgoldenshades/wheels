@@ -3189,58 +3189,123 @@ class SettingsPage extends StatelessWidget {
                           if (!isRazorpay) ...[
                             const Text('Stripe Connect', style: TextStyle(fontWeight: FontWeight.w600)),
                             const SizedBox(height: 8),
-                            // Stripe Account ID
-                            TextFormField(
-                              initialValue: profile.stripeAccountId,
-                              decoration: const InputDecoration(
-                                labelText: 'Stripe Account ID',
-                                border: OutlineInputBorder(),
-                                prefixIcon: Icon(Icons.credit_card),
-                                hintText: 'acct_xxxxxxxxxxxxxxxx',
-                              ),
-                              onChanged: (v) async {
-                                await ProfileRepository.instance.updateStripeAccount(v.trim());
-                              },
-                            ),
-                            const SizedBox(height: 8),
-                            // Status
-                            if (profile.stripeAccountId != null && profile.stripeAccountId!.isNotEmpty)
+                            if (profile.stripeAccountId != null && profile.stripeAccountId!.isNotEmpty) ...[
+                              // Already linked
                               Container(
-                                padding: const EdgeInsets.all(10),
+                                padding: const EdgeInsets.all(12),
                                 decoration: BoxDecoration(
                                   color: Colors.green.withValues(alpha: 0.1),
                                   borderRadius: BorderRadius.circular(8),
                                   border: Border.all(color: Colors.green.withValues(alpha: 0.3)),
                                 ),
-                                child: const Row(
+                                child: Row(
                                   children: [
-                                    Icon(Icons.check_circle, color: Colors.green, size: 18),
-                                    SizedBox(width: 8),
-                                    Text('Stripe account linked ✅', style: TextStyle(color: Colors.green, fontSize: 13)),
+                                    const Icon(Icons.check_circle, color: Colors.green, size: 18),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          const Text('Stripe account linked ✅', style: TextStyle(color: Colors.green, fontSize: 13, fontWeight: FontWeight.bold)),
+                                          Text('ID: ${profile.stripeAccountId}', style: const TextStyle(fontSize: 11, color: Colors.grey)),
+                                        ],
+                                      ),
+                                    ),
+                                    TextButton(
+                                      onPressed: () async {
+                                        await ProfileRepository.instance.saveProfile(
+                                          profile.copyWith(setStripeNull: true),
+                                        );
+                                      },
+                                      child: const Text('Unlink', style: TextStyle(color: Colors.red, fontSize: 12)),
+                                    ),
                                   ],
                                 ),
-                              )
-                            else
+                              ),
+                            ] else ...[
+                              // Not linked - show setup button
                               Container(
-                                padding: const EdgeInsets.all(10),
+                                padding: const EdgeInsets.all(12),
                                 decoration: BoxDecoration(
                                   color: Colors.orange.withValues(alpha: 0.1),
                                   borderRadius: BorderRadius.circular(8),
                                   border: Border.all(color: Colors.orange.withValues(alpha: 0.3)),
                                 ),
-                                child: const Row(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Icon(Icons.warning_amber, color: Colors.orange, size: 18),
-                                    SizedBox(width: 8),
-                                    Expanded(
-                                      child: Text(
-                                        'Enter your Stripe Connect account ID to receive payouts',
-                                        style: TextStyle(color: Colors.orange, fontSize: 12),
+                                    const Row(
+                                      children: [
+                                        Icon(Icons.warning_amber, color: Colors.orange, size: 18),
+                                        SizedBox(width: 8),
+                                        Text('Stripe not set up', style: TextStyle(color: Colors.orange, fontWeight: FontWeight.bold)),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 8),
+                                    const Text(
+                                      'Set up Stripe to receive international payouts directly to your bank account.',
+                                      style: TextStyle(fontSize: 12, color: Colors.grey),
+                                    ),
+                                    const SizedBox(height: 12),
+                                    SizedBox(
+                                      width: double.infinity,
+                                      child: ElevatedButton.icon(
+                                        onPressed: () async {
+                                          final currentProfile = ProfileRepository.instance.profile.value;
+                                          if (currentProfile.email == null) {
+                                            ScaffoldMessenger.of(context).showSnackBar(
+                                              const SnackBar(content: Text('Please add your email first')),
+                                            );
+                                            return;
+                                          }
+                                          // Show loading
+                                          ScaffoldMessenger.of(context).showSnackBar(
+                                            const SnackBar(content: Text('Setting up Stripe account...')),
+                                          );
+                                          final result = await StripeService.instance.createConnectedAccount(
+                                            email: currentProfile.email!,
+                                            country: AppPreferences.instance.preferredCountry.value,
+                                            userId: currentProfile.id,
+                                          );
+                                          if (result == null || !context.mounted) return;
+                                          final onboardingUrl = result['url'] as String?;
+                                          final accountId = result['account_id'] as String?;
+                                          if (accountId != null) {
+                                            await ProfileRepository.instance.updateStripeAccount(accountId);
+                                          }
+                                          if (onboardingUrl != null) {
+                                            await launchUrl(Uri.parse(onboardingUrl), mode: LaunchMode.externalApplication);
+                                          }
+                                        },
+                                        icon: const Icon(Icons.open_in_new, size: 16),
+                                        label: const Text('Setup Stripe Account'),
+                                        style: ElevatedButton.styleFrom(
+                                          backgroundColor: Colors.purple,
+                                          foregroundColor: Colors.white,
+                                        ),
                                       ),
+                                    ),
+                                    const SizedBox(height: 8),
+                                    // Manual entry option
+                                    TextFormField(
+                                      initialValue: profile.stripeAccountId,
+                                      decoration: const InputDecoration(
+                                        labelText: 'Or enter Stripe Account ID manually',
+                                        border: OutlineInputBorder(),
+                                        prefixIcon: Icon(Icons.credit_card),
+                                        hintText: 'acct_xxxxxxxxxxxxxxxx',
+                                        isDense: true,
+                                      ),
+                                      onChanged: (v) async {
+                                        if (v.startsWith('acct_')) {
+                                          await ProfileRepository.instance.updateStripeAccount(v.trim());
+                                        }
+                                      },
                                     ),
                                   ],
                                 ),
                               ),
+                            ],
                           ],
 
                           const SizedBox(height: 8),

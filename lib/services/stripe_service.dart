@@ -203,11 +203,38 @@ class StripeService {
   }
 
   /// Create Stripe Connect account for provider (onboarding)
-  Future<String?> createConnectedAccount({
+  /// Returns the onboarding URL to open in browser
+  Future<Map<String, dynamic>?> createConnectedAccount({
     required String email,
     required String country,
+    required String userId,
+    String? returnUrl,
+    String? refreshUrl,
   }) async {
-    return null;
+    try {
+      final headers = await _authorizedJsonHeaders();
+      final response = await http.post(
+        Uri.parse('$backendUrl/createConnectedAccount'),
+        headers: headers,
+        body: json.encode({
+          'email': email,
+          'country': country,
+          'user_id': userId,
+          'return_url': returnUrl ?? 'https://vervestrideal.com/stripe-return',
+          'refresh_url': refreshUrl ?? 'https://vervestrideal.com/stripe-refresh',
+        }),
+      );
+
+      if (response.statusCode != 200) {
+        debugPrint('createConnectedAccount failed: ${response.statusCode} ${response.body}');
+        return null;
+      }
+
+      return json.decode(response.body) as Map<String, dynamic>;
+    } catch (e) {
+      debugPrint('createConnectedAccount error: $e');
+      return null;
+    }
   }
 
   /// Release escrowed funds to provider after OTP verification
