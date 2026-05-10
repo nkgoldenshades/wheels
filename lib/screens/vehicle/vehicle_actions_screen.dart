@@ -187,6 +187,8 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                   if (!widget.isUserMode) ...[
                     const SizedBox(height: 12),
                     _buildDocumentVerificationCard(vehicle),
+                    const SizedBox(height: 12),
+                    _buildOperatorSection(vehicle),
                   ],
                   const SizedBox(height: 12),
                   _buildHistorySection(entries),
@@ -871,6 +873,89 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
           ),
         );
       },
+    );
+  }
+
+  Widget _buildOperatorSection(Vehicle vehicle) {
+    final hasOperator = vehicle.operatorName != null && vehicle.operatorName!.isNotEmpty;
+    if (!hasOperator) return const SizedBox.shrink();
+
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 4),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Row(
+              children: [
+                Icon(Icons.person_outline, size: 18, color: Colors.blue),
+                SizedBox(width: 8),
+                Text('Vehicle Operator', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                // Operator photo
+                if (vehicle.operatorPhoto != null && vehicle.operatorPhoto!.isNotEmpty)
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(30),
+                    child: vehicle.operatorPhoto!.startsWith('http')
+                        ? Image.network(vehicle.operatorPhoto!, width: 56, height: 56, fit: BoxFit.cover,
+                            errorBuilder: (_, _, _) => _operatorAvatar(vehicle.operatorName))
+                        : Image.memory(base64Decode(vehicle.operatorPhoto!), width: 56, height: 56, fit: BoxFit.cover),
+                  )
+                else
+                  _operatorAvatar(vehicle.operatorName),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        vehicle.operatorName ?? '',
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                      ),
+                      if (vehicle.operatorPhone != null && vehicle.operatorPhone!.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Row(
+                          children: [
+                            const Icon(Icons.phone, size: 14, color: Colors.grey),
+                            const SizedBox(width: 4),
+                            Text(vehicle.operatorPhone!, style: const TextStyle(fontSize: 13, color: Colors.grey)),
+                          ],
+                        ),
+                      ],
+                      if (vehicle.operatorLicense != null && vehicle.operatorLicense!.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Row(
+                          children: [
+                            const Icon(Icons.badge, size: 14, color: Colors.grey),
+                            const SizedBox(width: 4),
+                            Text('License: ${vehicle.operatorLicense}', style: const TextStyle(fontSize: 13, color: Colors.grey)),
+                          ],
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _operatorAvatar(String? name) {
+    return CircleAvatar(
+      radius: 28,
+      backgroundColor: Colors.blue.shade100,
+      child: Text(
+        name != null && name.isNotEmpty ? name[0].toUpperCase() : 'O',
+        style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.blue.shade700),
+      ),
     );
   }
 
