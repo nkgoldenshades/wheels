@@ -406,3 +406,87 @@ exports.generateSuggestions = functions.https.onCall(async (data, context) => {
     throw new functions.https.HttpsError('internal', 'Suggestions generation failed');
   }
 });
+
+// ─── Stripe Connect: Create Connected Account ────────────────────────────────
+const stripe = require('stripe')(functions.config().stripe.secret_key);
+
+exports.createConnectedAccount = functions.https.onRequest(async (req, res) => {
+  // CORS headers
+  res.set('Access-Control-Allow-Origin', '*');
+  res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+
+  if (req.method === 'OPTIONS') {
+    res.status(204).send('');
+    return;
+  }
+
+  if (req.method !== 'POST') {
+    res.status(405).json({ error: 'Method not allowed' });
+    return;
+  }
+
+  try {
+    // Verify Firebase JWT
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+    const token = authHeader.split('Bearer ')[1];
+    const decodedToken = await admin.auth().verifyIdToken(token);
+    const userId = decodedToken.uid;
+
+    const { email, country, return_url, refresh_url } = req.body;
+
+    if (!email || !country) {
+      res.status(400).json({ error: 'email and country are required' });
+      return;
+    }
+
+    // Map country name to ISO code
+    const countryMap = {
+      'United States': 'US', 'United Kingdom': 'GB', 'Australia': 'AU',
+      'Canada': 'CA', 'Singapore': 'SG', 'UAE': 'AE', 'Germany': 'DE',
+      'France': 'FR', 'Japan': 'JP', 'New Zealand': 'NZ', 'Ireland': 'IE',
+      'Netherlands': 'NL', 'Switzerland': 'CH', 'Sweden': 'SE', 'Norway': 'NO',
+      'Denmark': 'DK', 'Finland': 'FI', 'Belgium': 'BE', 'Austria': 'AT',
+      'Portugal': 'PT', 'Italy': 'IT', 'Spain': 'ES', 'Poland': 'PL',
+      'Czech Republic': 'CZ', 'Hungary': 'HU', 'Romania': 'RO',
+      'South Africa': 'ZA', 'Brazil': 'BR', 'Mexico': 'MX',
+      'Malaysia': 'MY', 'Thailand': 'TH', 'Philippines': 'PH',
+      'Indonesia': 'ID', 'South Korea': 'KR', 'Hong Kong': 'HK',
+    };
+
+    const countryCode = countryMap[country] || 'US';
+
+    // Create Stripe Express account
+    const account = await stripe.accounts.create({
+      type: 'express',
+      country: countryCode,
+      email: email,
+      capabilities: {
+        card_payments: { requested: true },
+        transfers: { requested: true },
+      },
+      metadata: { firebase_uid: userId },
+    });
+
+    // Create onboarding link
+    const accountLink = await stripe.accountLinks.create({
+      account: account.id,
+      refresh_url: refresh_url || 'https://vervestrideal.com/stripe-refresh',
+      return_url: return_url || 'https://vervestrideal.com/stripe-return',
+      type: 'account_onboarding',
+    });
+
+    res.status(200).json({
+      account_id: account.id,
+      url: accountLink.url,
+    });
+
+  } catch (error) {
+    console.error('createConnectedAccount error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
