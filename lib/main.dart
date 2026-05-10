@@ -3002,99 +3002,271 @@ class SettingsPage extends StatelessWidget {
                   ),
                   const SizedBox(height: 24),
 
-                  // Bank Details Section (for providers to receive payments)
+                  // Payment Provider Section
                   Text(
-                    'Bank Details (For Receiving Payments)',
+                    '💳 Payment Setup (For Receiving Payments)',
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'Add your bank details to receive earnings from completed trips',
+                    'Choose how you want to receive earnings from completed trips',
                     style: TextStyle(fontSize: 12, color: Colors.grey[600]),
                   ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    decoration: const InputDecoration(
-                      labelText: 'Account Holder Name',
-                      border: OutlineInputBorder(),
-                      prefixIcon: Icon(Icons.person_outline),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(
-                      labelText: 'Account Number',
-                      border: OutlineInputBorder(),
-                      prefixIcon: Icon(Icons.account_balance),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    decoration: const InputDecoration(
-                      labelText: 'Bank Name',
-                      border: OutlineInputBorder(),
-                      prefixIcon: Icon(Icons.business),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    textCapitalization: TextCapitalization.characters,
-                    decoration: const InputDecoration(
-                      labelText: 'IFSC Code / SWIFT Code',
-                      border: OutlineInputBorder(),
-                      prefixIcon: Icon(Icons.code),
-                      hintText: 'e.g., SBIN0001234',
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  DropdownButtonFormField<String>(
-                    decoration: const InputDecoration(
-                      labelText: 'Account Type',
-                      border: OutlineInputBorder(),
-                      prefixIcon: Icon(Icons.account_balance_wallet),
-                    ),
-                    items: const [
-                      DropdownMenuItem(
-                        value: 'savings',
-                        child: Text('Savings'),
-                      ),
-                      DropdownMenuItem(
-                        value: 'current',
-                        child: Text('Current'),
-                      ),
-                    ],
-                    onChanged: (value) {},
-                  ),
-                  const SizedBox(height: 12),
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: Colors.blue.withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(
-                        color: Colors.blue.withValues(alpha: 0.3),
-                      ),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(
-                          Icons.info_outline,
-                          color: Colors.blue[700],
-                          size: 20,
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            'Your bank details are encrypted and secure. They will only be used to transfer your earnings.',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.blue[900],
+                  const SizedBox(height: 16),
+
+                  // Payment Provider Toggle
+                  ValueListenableBuilder<ProfileInfo>(
+                    valueListenable: ProfileRepository.instance.profile,
+                    builder: (context, profile, _) {
+                      final isRazorpay = (profile.paymentProvider ?? 'razorpay') == 'razorpay';
+
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // Provider selection
+                          Row(
+                            children: [
+                              Expanded(
+                                child: GestureDetector(
+                                  onTap: () => ProfileRepository.instance.updatePaymentProvider('razorpay'),
+                                  child: Container(
+                                    padding: const EdgeInsets.all(12),
+                                    decoration: BoxDecoration(
+                                      color: isRazorpay ? Colors.blue.withValues(alpha: 0.1) : Colors.grey[100],
+                                      borderRadius: BorderRadius.circular(8),
+                                      border: Border.all(
+                                        color: isRazorpay ? Colors.blue : Colors.grey.shade300,
+                                        width: isRazorpay ? 2 : 1,
+                                      ),
+                                    ),
+                                    child: Column(
+                                      children: [
+                                        Icon(Icons.account_balance, color: isRazorpay ? Colors.blue : Colors.grey, size: 28),
+                                        const SizedBox(height: 4),
+                                        Text('Razorpay', style: TextStyle(fontWeight: FontWeight.bold, color: isRazorpay ? Colors.blue : Colors.grey[700])),
+                                        Text('India & International', style: TextStyle(fontSize: 10, color: Colors.grey[600])),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: GestureDetector(
+                                  onTap: () => ProfileRepository.instance.updatePaymentProvider('stripe'),
+                                  child: Container(
+                                    padding: const EdgeInsets.all(12),
+                                    decoration: BoxDecoration(
+                                      color: !isRazorpay ? Colors.purple.withValues(alpha: 0.1) : Colors.grey[100],
+                                      borderRadius: BorderRadius.circular(8),
+                                      border: Border.all(
+                                        color: !isRazorpay ? Colors.purple : Colors.grey.shade300,
+                                        width: !isRazorpay ? 2 : 1,
+                                      ),
+                                    ),
+                                    child: Column(
+                                      children: [
+                                        Icon(Icons.credit_card, color: !isRazorpay ? Colors.purple : Colors.grey, size: 28),
+                                        const SizedBox(height: 4),
+                                        Text('Stripe', style: TextStyle(fontWeight: FontWeight.bold, color: !isRazorpay ? Colors.purple : Colors.grey[700])),
+                                        Text('International', style: TextStyle(fontSize: 10, color: Colors.grey[600])),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 16),
+
+                          // Razorpay Details
+                          if (isRazorpay) ...[
+                            const Text('Razorpay Bank Details', style: TextStyle(fontWeight: FontWeight.w600)),
+                            const SizedBox(height: 8),
+                            // Account Holder
+                            TextFormField(
+                              initialValue: profile.bankAccountHolder,
+                              decoration: const InputDecoration(
+                                labelText: 'Account Holder Name',
+                                border: OutlineInputBorder(),
+                                prefixIcon: Icon(Icons.person_outline),
+                              ),
+                              onChanged: (v) async {
+                                await ProfileRepository.instance.saveProfile(
+                                  profile.copyWith(bankAccountHolder: v.trim()),
+                                );
+                              },
+                            ),
+                            const SizedBox(height: 12),
+                            // Account Number
+                            TextFormField(
+                              initialValue: profile.bankAccountNumber,
+                              keyboardType: TextInputType.number,
+                              decoration: const InputDecoration(
+                                labelText: 'Account Number',
+                                border: OutlineInputBorder(),
+                                prefixIcon: Icon(Icons.account_balance),
+                              ),
+                              onChanged: (v) async {
+                                await ProfileRepository.instance.saveProfile(
+                                  profile.copyWith(bankAccountNumber: v.trim()),
+                                );
+                              },
+                            ),
+                            const SizedBox(height: 12),
+                            // Bank Name
+                            TextFormField(
+                              initialValue: profile.bankName,
+                              decoration: const InputDecoration(
+                                labelText: 'Bank Name',
+                                border: OutlineInputBorder(),
+                                prefixIcon: Icon(Icons.business),
+                              ),
+                              onChanged: (v) async {
+                                await ProfileRepository.instance.saveProfile(
+                                  profile.copyWith(bankName: v.trim()),
+                                );
+                              },
+                            ),
+                            const SizedBox(height: 12),
+                            // IFSC
+                            TextFormField(
+                              initialValue: profile.bankIFSC,
+                              textCapitalization: TextCapitalization.characters,
+                              decoration: const InputDecoration(
+                                labelText: 'IFSC Code',
+                                border: OutlineInputBorder(),
+                                prefixIcon: Icon(Icons.code),
+                                hintText: 'e.g., SBIN0001234',
+                              ),
+                              onChanged: (v) async {
+                                await ProfileRepository.instance.saveProfile(
+                                  profile.copyWith(bankIFSC: v.trim().toUpperCase()),
+                                );
+                              },
+                            ),
+                            const SizedBox(height: 12),
+                            // Account Type
+                            DropdownButtonFormField<String>(
+                              value: profile.bankAccountType ?? 'savings',
+                              decoration: const InputDecoration(
+                                labelText: 'Account Type',
+                                border: OutlineInputBorder(),
+                                prefixIcon: Icon(Icons.account_balance_wallet),
+                              ),
+                              items: const [
+                                DropdownMenuItem(value: 'savings', child: Text('Savings')),
+                                DropdownMenuItem(value: 'current', child: Text('Current')),
+                              ],
+                              onChanged: (v) async {
+                                if (v == null) return;
+                                await ProfileRepository.instance.saveProfile(
+                                  profile.copyWith(bankAccountType: v),
+                                );
+                              },
+                            ),
+                            const SizedBox(height: 8),
+                            // Status
+                            if (profile.bankAccountNumber != null && profile.bankAccountNumber!.isNotEmpty)
+                              Container(
+                                padding: const EdgeInsets.all(10),
+                                decoration: BoxDecoration(
+                                  color: Colors.green.withValues(alpha: 0.1),
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(color: Colors.green.withValues(alpha: 0.3)),
+                                ),
+                                child: const Row(
+                                  children: [
+                                    Icon(Icons.check_circle, color: Colors.green, size: 18),
+                                    SizedBox(width: 8),
+                                    Text('Bank details saved ✅', style: TextStyle(color: Colors.green, fontSize: 13)),
+                                  ],
+                                ),
+                              ),
+                          ],
+
+                          // Stripe Details
+                          if (!isRazorpay) ...[
+                            const Text('Stripe Connect', style: TextStyle(fontWeight: FontWeight.w600)),
+                            const SizedBox(height: 8),
+                            // Stripe Account ID
+                            TextFormField(
+                              initialValue: profile.stripeAccountId,
+                              decoration: const InputDecoration(
+                                labelText: 'Stripe Account ID',
+                                border: OutlineInputBorder(),
+                                prefixIcon: Icon(Icons.credit_card),
+                                hintText: 'acct_xxxxxxxxxxxxxxxx',
+                              ),
+                              onChanged: (v) async {
+                                await ProfileRepository.instance.updateStripeAccount(v.trim());
+                              },
+                            ),
+                            const SizedBox(height: 8),
+                            // Status
+                            if (profile.stripeAccountId != null && profile.stripeAccountId!.isNotEmpty)
+                              Container(
+                                padding: const EdgeInsets.all(10),
+                                decoration: BoxDecoration(
+                                  color: Colors.green.withValues(alpha: 0.1),
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(color: Colors.green.withValues(alpha: 0.3)),
+                                ),
+                                child: const Row(
+                                  children: [
+                                    Icon(Icons.check_circle, color: Colors.green, size: 18),
+                                    SizedBox(width: 8),
+                                    Text('Stripe account linked ✅', style: TextStyle(color: Colors.green, fontSize: 13)),
+                                  ],
+                                ),
+                              )
+                            else
+                              Container(
+                                padding: const EdgeInsets.all(10),
+                                decoration: BoxDecoration(
+                                  color: Colors.orange.withValues(alpha: 0.1),
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(color: Colors.orange.withValues(alpha: 0.3)),
+                                ),
+                                child: const Row(
+                                  children: [
+                                    Icon(Icons.warning_amber, color: Colors.orange, size: 18),
+                                    SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text(
+                                        'Enter your Stripe Connect account ID to receive payouts',
+                                        style: TextStyle(color: Colors.orange, fontSize: 12),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                          ],
+
+                          const SizedBox(height: 8),
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Colors.blue.withValues(alpha: 0.1),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: Colors.blue.withValues(alpha: 0.3)),
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(Icons.info_outline, color: Colors.blue[700], size: 20),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    'Your payment details are encrypted and secure. Only used to transfer your earnings.',
+                                    style: TextStyle(fontSize: 12, color: Colors.blue[900]),
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
-                        ),
-                      ],
-                    ),
+                        ],
+                      );
+                    },
                   ),
                   const SizedBox(height: 20),
                   SizedBox(
