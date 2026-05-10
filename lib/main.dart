@@ -2894,19 +2894,35 @@ class SettingsPage extends StatelessWidget {
                         items: const [
                           DropdownMenuItem(
                             value: 'INR',
-                            child: Text('INR (?)'),
+                            child: Text('INR (₹) - India'),
                           ),
                           DropdownMenuItem(
                             value: 'USD',
-                            child: Text('USD (\$)'),
+                            child: Text('USD (\$) - USA'),
                           ),
                           DropdownMenuItem(
                             value: 'EUR',
-                            child: Text('EUR (?)'),
+                            child: Text('EUR (€) - Europe'),
                           ),
                           DropdownMenuItem(
                             value: 'GBP',
-                            child: Text('GBP (?)'),
+                            child: Text('GBP (£) - UK'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'AED',
+                            child: Text('AED (د.إ) - UAE'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'SGD',
+                            child: Text('SGD (S\$) - Singapore'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'AUD',
+                            child: Text('AUD (A\$) - Australia'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'CAD',
+                            child: Text('CAD (C\$) - Canada'),
                           ),
                         ],
                         onChanged: (code) {

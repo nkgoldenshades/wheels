@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'app_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/booking.dart';
@@ -531,7 +532,7 @@ class BookingRepository {
         'price_snapshot': booking.price,
         'deposit_snapshot': booking.securityDeposit ?? 0,
         'total_price': totalPrice ?? booking.price,
-        'currency_snapshot': 'INR',
+        'currency_snapshot': AppPreferences.instance.currencyCode.value,
 
         // Passenger details jsonb
         'passenger_details': {
