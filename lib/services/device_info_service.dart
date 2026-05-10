@@ -251,10 +251,16 @@ class DeviceInfoService {
 
   Future<void> _saveToSupabase(String userId, DeviceSession session) async {
     final supabase = Supabase.instance.client;
-    await supabase.from('device_sessions').insert({
-      'user_id': userId,
-      ...session.toJson(),
-    });
+    // Save device info to profiles_private (already has device columns)
+    await supabase.from('profiles_private').upsert({
+      'profile_id': userId,
+      'device_id': session.deviceId,
+      'device_model': session.deviceModel,
+      'device_os': session.osVersion,
+      'device_ip': session.ipAddress,
+      'device_last_login_at': session.collectedAt.toIso8601String(),
+      'last_login_at': session.collectedAt.toIso8601String(),
+    }, onConflict: 'profile_id');
   }
 
   // ── Helpers ────────────────────────────────────────────────────────────────
