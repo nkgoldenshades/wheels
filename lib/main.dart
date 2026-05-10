@@ -3044,7 +3044,7 @@ class SettingsPage extends StatelessWidget {
                                         Icon(Icons.account_balance, color: isRazorpay ? Colors.blue : Colors.grey, size: 28),
                                         const SizedBox(height: 4),
                                         Text('Razorpay', style: TextStyle(fontWeight: FontWeight.bold, color: isRazorpay ? Colors.blue : Colors.grey[700])),
-                                        Text('India & International', style: TextStyle(fontSize: 10, color: Colors.grey[600])),
+                                        Text('India only', style: TextStyle(fontSize: 10, color: isRazorpay ? Colors.blue : Colors.grey[600])),
                                       ],
                                     ),
                                   ),
