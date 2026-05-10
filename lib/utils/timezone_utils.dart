@@ -7,9 +7,38 @@ class TimezoneUtils {
   // Cache: coordinates string → timezone offset in hours
   static final Map<String, String> _tzCache = {};
 
-  /// Get the current device timezone abbreviation (e.g., "IST", "EST", "GMT")
+  /// Get the current device timezone abbreviation (e.g., "IST (India)")
   static String getTimezoneAbbreviation() {
-    return DateTime.now().timeZoneName;
+    final name = DateTime.now().timeZoneName;
+    // Convert full names like "India Standard Time" to short form
+    final shortMap = {
+      'India Standard Time': 'IST (India)',
+      'Eastern Standard Time': 'EST (USA)',
+      'Pacific Standard Time': 'PST (USA)',
+      'Central Standard Time': 'CST (USA)',
+      'Mountain Standard Time': 'MST (USA)',
+      'GMT Standard Time': 'GMT (UK)',
+      'UTC': 'UTC',
+      'Arabian Standard Time': 'GST (Dubai)',
+      'Singapore Standard Time': 'SGT (Singapore)',
+      'Tokyo Standard Time': 'JST (Japan)',
+      'China Standard Time': 'CST (China)',
+      'AUS Eastern Standard Time': 'AEST (Australia)',
+      'New Zealand Standard Time': 'NZST (New Zealand)',
+      'E. South America Standard Time': 'BRT (Brazil)',
+      'South Africa Standard Time': 'SAST (South Africa)',
+      'Pakistan Standard Time': 'PKT (Pakistan)',
+      'Bangladesh Standard Time': 'BST (Bangladesh)',
+      'Nepal Standard Time': 'NPT (Nepal)',
+      'SE Asia Standard Time': 'ICT (Thailand)',
+      'Korea Standard Time': 'KST (South Korea)',
+      'Arab Standard Time': 'AST (Saudi Arabia)',
+      'Egypt Standard Time': 'EET (Egypt)',
+      'W. Central Africa Standard Time': 'WAT (Nigeria)',
+      'Turkey Standard Time': 'TRT (Turkey)',
+      'Russia Time Zone 2': 'MSK (Russia)',
+    };
+    return shortMap[name] ?? name;
   }
 
   /// Get timezone abbreviation from lat/lng using TimeZoneDB API
