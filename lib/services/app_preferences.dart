@@ -49,7 +49,48 @@ class AppPreferences {
     preferredCountry.value = country;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_preferredCountryKey, country);
+
+    // Auto-set currency based on country
+    final autoCurrency = _countryCurrencyMap[country] ?? 'USD';
+    await setCurrencyCode(autoCurrency);
   }
+
+  // Country → Currency mapping
+  static const Map<String, String> _countryCurrencyMap = {
+    'India': 'INR',
+    'United States': 'USD',
+    'United Kingdom': 'GBP',
+    'European Union': 'EUR',
+    'UAE': 'AED',
+    'Singapore': 'SGD',
+    'Australia': 'AUD',
+    'Canada': 'CAD',
+    'Japan': 'JPY',
+    'China': 'CNY',
+    'South Korea': 'KRW',
+    'Saudi Arabia': 'SAR',
+    'Qatar': 'QAR',
+    'Kuwait': 'KWD',
+    'Bahrain': 'BHD',
+    'Oman': 'OMR',
+    'Pakistan': 'PKR',
+    'Bangladesh': 'BDT',
+    'Sri Lanka': 'LKR',
+    'Nepal': 'NPR',
+    'Thailand': 'THB',
+    'Malaysia': 'MYR',
+    'Indonesia': 'IDR',
+    'Philippines': 'PHP',
+    'South Africa': 'ZAR',
+    'Nigeria': 'NGN',
+    'Kenya': 'KES',
+    'Brazil': 'BRL',
+    'Mexico': 'MXN',
+    'New Zealand': 'NZD',
+    'Switzerland': 'CHF',
+    'Turkey': 'TRY',
+    'Russia': 'RUB',
+  };
 
   Future<void> setPreferredLanguage(String language) async {
     preferredLanguage.value = language;
