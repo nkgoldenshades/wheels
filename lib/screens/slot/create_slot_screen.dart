@@ -464,7 +464,6 @@ class _CreateSlotScreenState extends State<CreateSlotScreen> {
                     labelText: 'Price *',
                     hintText: '500',
                     border: OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.currency_rupee),
                     prefixText: '₹ ',
                   ),
                 ),

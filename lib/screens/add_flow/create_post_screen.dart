@@ -1454,7 +1454,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                       ? 'parcel'
                       : 'seat'}',
               hintText: 'Enter amount',
-              prefixIcon: const Icon(Icons.currency_rupee),
               prefixText: AppPreferences.instance.currencySymbol,
               border: const OutlineInputBorder(),
             ),
