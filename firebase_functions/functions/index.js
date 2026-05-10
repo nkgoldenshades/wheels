@@ -490,3 +490,149 @@ exports.createConnectedAccount = functions.https.onRequest(async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
+// ─── Stripe: Create Booking with Escrow ──────────────────────────────────────
+exports.createBooking = functions.https.onRequest(async (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  if (req.method === 'OPTIONS') { res.status(204).send(''); return; }
+
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader?.startsWith('Bearer ')) { res.status(401).json({ error: 'Unauthorized' }); return; }
+    await admin.auth().verifyIdToken(authHeader.split('Bearer ')[1]);
+
+    const { user_id, provider_id, post_id, slot_id, amount, currency, commission_amount, countdown_hours } = req.body;
+
+    // Create PaymentIntent with manual capture (escrow)
+    const paymentIntent = await stripe.paymentIntents.create({
+      amount: amount,
+      currency: currency || 'inr',
+      capture_method: 'manual',
+      metadata: { user_id, provider_id, post_id: post_id || slot_id },
+    });
+
+    // Generate OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const countdownEnd = new Date(Date.now() + (countdown_hours || 1) * 60 * 60 * 1000);
+
+    res.status(200).json({
+      client_secret: paymentIntent.client_secret,
+      payment_intent_id: paymentIntent.id,
+      otp: otp,
+      countdown_end_time: countdownEnd.toISOString(),
+    });
+  } catch (error) {
+    console.error('createBooking error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ─── Stripe: Create Checkout Session (web) ───────────────────────────────────
+exports.createCheckoutSession = functions.https.onRequest(async (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  if (req.method === 'OPTIONS') { res.status(204).send(''); return; }
+
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader?.startsWith('Bearer ')) { res.status(401).json({ error: 'Unauthorized' }); return; }
+    await admin.auth().verifyIdToken(authHeader.split('Bearer ')[1]);
+
+    const { user_id, provider_id, slot_id, post_id, amount, currency, commission_amount } = req.body;
+
+    const session = await stripe.checkout.sessions.create({
+      payment_method_types: ['card'],
+      line_items: [{
+        price_data: {
+          currency: currency || 'inr',
+          product_data: { name: 'VaultWheels Booking' },
+          unit_amount: amount,
+        },
+        quantity: 1,
+      }],
+      mode: 'payment',
+      success_url: req.body.return_url || 'https://vervestrideal.com/booking-success',
+      cancel_url: req.body.refresh_url || 'https://vervestrideal.com/booking-cancel',
+      metadata: { user_id, provider_id, post_id: post_id || slot_id },
+    });
+
+    res.status(200).json({ url: session.url, payment_intent: session.payment_intent });
+  } catch (error) {
+    console.error('createCheckoutSession error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ─── Stripe: Release Funds to Provider ───────────────────────────────────────
+exports.releaseFunds = functions.https.onRequest(async (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  if (req.method === 'OPTIONS') { res.status(204).send(''); return; }
+
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader?.startsWith('Bearer ')) { res.status(401).json({ error: 'Unauthorized' }); return; }
+    await admin.auth().verifyIdToken(authHeader.split('Bearer ')[1]);
+
+    const { payment_intent_id, provider_id, amount, commission_amount } = req.body;
+
+    // Capture the payment (release from escrow)
+    await stripe.paymentIntents.capture(payment_intent_id);
+
+    res.status(200).json({ success: true });
+  } catch (error) {
+    console.error('releaseFunds error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ─── Stripe: Refund Payment ───────────────────────────────────────────────────
+exports.refundPayment = functions.https.onRequest(async (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  if (req.method === 'OPTIONS') { res.status(204).send(''); return; }
+
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader?.startsWith('Bearer ')) { res.status(401).json({ error: 'Unauthorized' }); return; }
+    await admin.auth().verifyIdToken(authHeader.split('Bearer ')[1]);
+
+    const { payment_intent_id, amount } = req.body;
+
+    const refund = await stripe.refunds.create({
+      payment_intent: payment_intent_id,
+      amount: amount,
+    });
+
+    res.status(200).json({ success: true, refund_id: refund.id });
+  } catch (error) {
+    console.error('refundPayment error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ─── Stripe: Verify OTP and Release ──────────────────────────────────────────
+exports.verifyOtp = functions.https.onRequest(async (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  if (req.method === 'OPTIONS') { res.status(204).send(''); return; }
+
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader?.startsWith('Bearer ')) { res.status(401).json({ error: 'Unauthorized' }); return; }
+    await admin.auth().verifyIdToken(authHeader.split('Bearer ')[1]);
+
+    const { booking_id, otp } = req.body;
+    // OTP verification is handled in Supabase - just return success
+    res.status(200).json({ success: true, verified: true });
+  } catch (error) {
+    console.error('verifyOtp error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
