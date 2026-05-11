@@ -12,7 +12,7 @@ class StripeService {
 
   // Stripe test keys
   static const String publishableKey =
-      'pk_test_51SvDRRPLeVZgzHHXPxLctk57aECXjdtVKTn5047FXXeXQQv6npQYjgThQAvcGdKyHmATqfr7ZWExj0MrEi0ZzJujMNaOCdYvqD';
+      'pk_test_51SvbBRPL6V2gHHHXPuLctk57x8CXjOHVkInRO4ZIxXezQQv6pnQYlgTbg4vcGd5yNh0tqfrZ2ntxq06EzGi2zJqP00w9c4rvqo';
 
   // Firebase Cloud Functions base URL
   static const String backendUrl =
