@@ -5,8 +5,12 @@ const { GoogleGenerativeAI } = require('@google/generative-ai');
 // Initialize Firebase Admin
 admin.initializeApp();
 
+// Use environment variables (new approach - replaces deprecated functions.config())
+const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+
 // Initialize Gemini AI
-const genAI = new GoogleGenerativeAI(functions.config().gemini.api_key);
+const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
 
 // Rate limiting store (in production, use Redis or Firestore)
 const rateLimitStore = new Map();
@@ -408,7 +412,7 @@ exports.generateSuggestions = functions.https.onCall(async (data, context) => {
 });
 
 // ─── Stripe Connect: Create Connected Account ────────────────────────────────
-const stripe = require('stripe')(functions.config().stripe.secret_key);
+const stripe = require('stripe')(STRIPE_SECRET_KEY);
 
 exports.createConnectedAccount = functions.https.onRequest(async (req, res) => {
   // CORS headers
