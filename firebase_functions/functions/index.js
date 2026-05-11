@@ -640,3 +640,98 @@ exports.verifyOtp = functions.https.onRequest(async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
+// ─── Razorpay: Create Order ───────────────────────────────────────────────────
+const Razorpay = require('razorpay');
+
+const razorpay = new Razorpay({
+  key_id: process.env.RAZORPAY_KEY_ID || 'rzp_test_placeholder',
+  key_secret: process.env.RAZORPAY_KEY_SECRET || 'placeholder',
+});
+
+exports.createRazorpayOrder = functions.https.onRequest(async (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  if (req.method === 'OPTIONS') { res.status(204).send(''); return; }
+
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader?.startsWith('Bearer ')) { res.status(401).json({ error: 'Unauthorized' }); return; }
+    await admin.auth().verifyIdToken(authHeader.split('Bearer ')[1]);
+
+    const { amount, currency, receipt, notes } = req.body;
+
+    const order = await razorpay.orders.create({
+      amount: amount,
+      currency: currency || 'INR',
+      receipt: receipt || `receipt_${Date.now()}`,
+      notes: notes || {},
+    });
+
+    res.status(200).json(order);
+  } catch (error) {
+    console.error('createRazorpayOrder error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+exports.verifyRazorpayPayment = functions.https.onRequest(async (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  if (req.method === 'OPTIONS') { res.status(204).send(''); return; }
+
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader?.startsWith('Bearer ')) { res.status(401).json({ error: 'Unauthorized' }); return; }
+    await admin.auth().verifyIdToken(authHeader.split('Bearer ')[1]);
+
+    const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
+    const crypto = require('crypto');
+    const body = razorpay_order_id + '|' + razorpay_payment_id;
+    const expectedSignature = crypto
+      .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET || 'placeholder')
+      .update(body.toString())
+      .digest('hex');
+
+    const isValid = expectedSignature === razorpay_signature;
+    res.status(200).json({ success: isValid, verified: isValid });
+  } catch (error) {
+    console.error('verifyRazorpayPayment error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+exports.razorpayWebhook = functions.https.onRequest(async (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  try {
+    const event = req.body;
+    console.log('Razorpay webhook event:', event.event);
+    res.status(200).json({ received: true });
+  } catch (error) {
+    console.error('razorpayWebhook error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+exports.autoRefundExpired = functions.pubsub.schedule('every 1 hours').onRun(async (context) => {
+  try {
+    console.log('Running autoRefundExpired...');
+    // Auto-expire bookings is handled by Supabase function expire_overdue_bookings
+    // This is a placeholder to keep the function alive
+    return null;
+  } catch (error) {
+    console.error('autoRefundExpired error:', error);
+    return null;
+  }
+});
+
+exports.aiChat = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError('unauthenticated', 'User must be authenticated');
+  }
+  // AI chat is handled directly in the Flutter app via Firebase AI SDK
+  // This is a placeholder to keep the function alive
+  return { success: true, message: 'Use Firebase AI SDK directly in the app' };
+});
