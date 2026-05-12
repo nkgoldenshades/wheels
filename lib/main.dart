@@ -2404,7 +2404,7 @@ class _EarningsPageState extends State<EarningsPage> {
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        '?${totalEarnings.toStringAsFixed(2)}',
+                        '${AppPreferences.instance.currencySymbol}${totalEarnings.toStringAsFixed(2)}',
                         style: const TextStyle(
                           fontSize: 36,
                           fontWeight: FontWeight.bold,
@@ -2519,7 +2519,7 @@ class _EarningsPageState extends State<EarningsPage> {
         ),
         title: Text(title),
         trailing: Text(
-          '?${amount.toStringAsFixed(2)}',
+          '${AppPreferences.instance.currencySymbol}${amount.toStringAsFixed(2)}',
           style: TextStyle(
             fontSize: 16,
             fontWeight: FontWeight.bold,
@@ -2561,7 +2561,7 @@ class _EarningsPageState extends State<EarningsPage> {
                   ),
                 ),
                 Text(
-                  '?${booking.price.toStringAsFixed(2)}',
+                  '${AppPreferences.instance.currencySymbol}${booking.price.toStringAsFixed(2)}',
                   style: const TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.bold,
