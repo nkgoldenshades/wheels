@@ -3148,7 +3148,7 @@ class SettingsPage extends StatelessWidget {
                             const SizedBox(height: 12),
                             // Account Type
                             DropdownButtonFormField<String>(
-                              value: profile.bankAccountType ?? 'savings',
+                              initialValue: profile.bankAccountType ?? 'savings',
                               decoration: const InputDecoration(
                                 labelText: 'Account Type',
                                 border: OutlineInputBorder(),
