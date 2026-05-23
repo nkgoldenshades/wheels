@@ -100,15 +100,18 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
       if (!mounted) return;
       setState(() {
         _aiInitialized = true;
-        final welcomeMessage = _isGuest
-            ? "Hi there! Welcome to QuickOHunt. I'm your AI assistant here to help you with rides, vehicle rentals, bookings, and any questions about the app.\n\n⚠️ Guest Mode: You have $_guestConversationLimit free conversations. Login for unlimited access!\n\nWhat can I help you with today?"
-            : "Hi there! Welcome to QuickOHunt. I'm your AI assistant here to help you with rides, vehicle rentals, bookings, and any questions about the app. What can I help you with today?";
-        
-        _messages.add(ChatMessage(
-          text: welcomeMessage,
-          isUser: false,
-          timestamp: DateTime.now(),
-        ));
+        // Only add welcome message if no messages exist yet
+        if (_messages.isEmpty) {
+          final welcomeMessage = _isGuest
+              ? "Hi there! Welcome to QuickOHunt. I'm your AI assistant here to help you with rides, vehicle rentals, bookings, and any questions about the app.\n\n⚠️ Guest Mode: You have $_guestConversationLimit free conversations. Login for unlimited access!\n\nWhat can I help you with today?"
+              : "Hi there! Welcome to QuickOHunt. I'm your AI assistant here to help you with rides, vehicle rentals, bookings, and any questions about the app. What can I help you with today?";
+          
+          _messages.add(ChatMessage(
+            text: welcomeMessage,
+            isUser: false,
+            timestamp: DateTime.now(),
+          ));
+        }
       });
     } catch (e, stack) {
       debugPrint('❌ Firebase Gemini API initialization failed: $e');
