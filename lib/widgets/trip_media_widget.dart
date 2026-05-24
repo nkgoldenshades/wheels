@@ -93,18 +93,23 @@ class _TripMediaWidgetState extends State<TripMediaWidget> {
 
   Future<void> _pickImages(String phase) async {
     final picker = ImagePicker();
-    final picked = await picker.pickMultiImage(imageQuality: 80);
-    if (picked.isEmpty) return;
+    final picked = await picker.pickImage(
+      source: ImageSource.camera,
+      imageQuality: 80,
+      preferredCameraDevice: CameraDevice.rear,
+    );
+    if (picked == null) return;
 
     setState(() { _uploading = true; _uploadError = null; });
 
     try {
       final urls = <String>[];
-      for (final file in picked) {
-        final ext = file.name.split('.').last;
-        final url = await _uploadFile(file, _storagePath(phase, '${DateTime.now().millisecondsSinceEpoch}.$ext'));
-        if (url != null) urls.add(url);
-      }
+      final ext = picked.name.split('.').last;
+      final url = await _uploadFile(
+        picked,
+        _storagePath(phase, '${DateTime.now().millisecondsSinceEpoch}.$ext'),
+      );
+      if (url != null) urls.add(url);
       if (urls.isEmpty) { setState(() => _uploadError = 'Upload failed.'); return; }
 
       final updated = _addImages(_media, phase, urls);
@@ -117,7 +122,11 @@ class _TripMediaWidgetState extends State<TripMediaWidget> {
 
   Future<void> _pickVideo(String phase) async {
     final picker = ImagePicker();
-    final file = await picker.pickVideo(source: ImageSource.gallery, maxDuration: const Duration(seconds: 30));
+    final file = await picker.pickVideo(
+      source: ImageSource.camera,
+      maxDuration: const Duration(seconds: 30),
+      preferredCameraDevice: CameraDevice.rear,
+    );
     if (file == null) return;
 
     setState(() { _uploading = true; _uploadError = null; });

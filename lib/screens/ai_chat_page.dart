@@ -35,13 +35,46 @@ class _AIChatPageState extends State<AIChatPage> {
   final ImagePicker _imagePicker = ImagePicker();
   // final SpeechToText _speechToText = SpeechToText();
   bool _isListening = false;
+  
+  // AI Toggle state
+  bool _aiEnabled = true; // Toggle to enable/disable AI
 
   @override
   void initState() {
     super.initState();
+    _loadAIToggleState();
     _checkGuestStatus();
     _loadOrCreateConversation(); // Load or create conversation
     _initializeFirebaseAI();
+  }
+  
+  Future<void> _loadAIToggleState() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _aiEnabled = prefs.getBool('ai_enabled') ?? true;
+    });
+  }
+  
+  Future<void> _toggleAI(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('ai_enabled', value);
+    setState(() {
+      _aiEnabled = value;
+    });
+    
+    if (value && !_aiInitialized) {
+      // Re-initialize AI if it was disabled
+      _initializeFirebaseAI();
+    }
+    
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(_aiEnabled ? '✅ AI Assistant Enabled' : '⚠️ AI Assistant Disabled'),
+        backgroundColor: _aiEnabled ? Colors.green : Colors.orange,
+        duration: const Duration(seconds: 2),
+      ),
+    );
   }
   
   Future<void> _checkGuestStatus() async {
@@ -226,6 +259,8 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
       backgroundColor: Colors.transparent,
       builder: (context) => AISettingsBottomSheet(
         aiInitialized: _aiInitialized,
+        aiEnabled: _aiEnabled,
+        onToggleAI: _toggleAI,
         onClearChat: _clearChat,
         onReconnectAI: _reconnectAI,
       ),
@@ -270,6 +305,17 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
   Future<void> _sendMessage() async {
     final text = _messageController.text.trim();
     if (text.isEmpty || _isLoading) return;
+
+    // Check if AI is enabled
+    if (!_aiEnabled) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('⚠️ AI Assistant is disabled. Enable it in settings.'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
 
     // Check guest conversation limit
     if (_isGuest && _guestConversationCount >= _guestConversationLimit) {
@@ -413,6 +459,134 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
           TextButton(
             onPressed: () => Navigator.pop(context),
             child: const Text('Cancel'),
+          ),
+        ],
+      ),
+    );
+  }
+  
+  void _showCreditUsageDetails(BuildContext context, ProfileInfo profile) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.analytics, color: Colors.blue),
+            SizedBox(width: 8),
+            Text('Credit Usage'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Current balance
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [Colors.blue.shade400, Colors.blue.shade600],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.account_balance_wallet, color: Colors.white, size: 32),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Current Balance',
+                          style: TextStyle(color: Colors.white70, fontSize: 12),
+                        ),
+                        Text(
+                          '${profile.aiCredits} Credits',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 24,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            
+            // Usage breakdown
+            const Text(
+              'Usage Information:',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+            ),
+            const SizedBox(height: 8),
+            _buildUsageRow(Icons.chat, 'Cost per message', '1 credit'),
+            _buildUsageRow(Icons.history, 'Messages sent today', '${_messages.where((m) => m.isUser).length}'),
+            _buildUsageRow(
+              Icons.warning_amber,
+              'Status',
+              profile.aiCredits < 10 ? 'Low balance' : 'Good balance',
+              color: profile.aiCredits < 10 ? Colors.red : Colors.green,
+            ),
+            const SizedBox(height: 16),
+            
+            // Quick actions
+            Row(
+              children: [
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: () {
+                      Navigator.pop(context);
+                      _showBuyCreditsDialog(context);
+                    },
+                    icon: const Icon(Icons.add_shopping_cart, size: 16),
+                    label: const Text('Buy More', style: TextStyle(fontSize: 12)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.blue,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+  
+  Widget _buildUsageRow(IconData icon, String label, String value, {Color? color}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          Icon(icon, size: 16, color: color ?? Colors.grey.shade600),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              label,
+              style: TextStyle(fontSize: 13, color: Colors.grey.shade700),
+            ),
+          ),
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.bold,
+              color: color ?? Colors.black87,
+            ),
           ),
         ],
       ),
@@ -695,7 +869,7 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
         ),
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
         actions: [
-          // Credits widget for logged-in users (compact)
+          // Credits widget for logged-in users (compact) - tap to see details
           if (!_isGuest)
             ValueListenableBuilder<ProfileInfo>(
               valueListenable: ProfileRepository.instance.profile,
@@ -703,27 +877,52 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
                 return Padding(
                   padding: const EdgeInsets.only(right: 8),
                   child: Center(
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: Colors.blue.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: Colors.blue, width: 1),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.stars, size: 16, color: Colors.blue.shade700),
-                          const SizedBox(width: 4),
-                          Text(
-                            '${profile.aiCredits}',
-                            style: TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.blue.shade700,
-                            ),
+                    child: InkWell(
+                      onTap: () => _showCreditUsageDetails(context, profile),
+                      borderRadius: BorderRadius.circular(12),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: profile.aiCredits < 10
+                              ? Colors.red.withValues(alpha: 0.1)
+                              : Colors.blue.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: profile.aiCredits < 10 ? Colors.red : Colors.blue,
+                            width: 1,
                           ),
-                        ],
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.stars,
+                              size: 16,
+                              color: profile.aiCredits < 10
+                                  ? Colors.red.shade700
+                                  : Colors.blue.shade700,
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              '${profile.aiCredits}',
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.bold,
+                                color: profile.aiCredits < 10
+                                    ? Colors.red.shade700
+                                    : Colors.blue.shade700,
+                              ),
+                            ),
+                            const SizedBox(width: 2),
+                            Icon(
+                              Icons.info_outline,
+                              size: 12,
+                              color: profile.aiCredits < 10
+                                  ? Colors.red.shade700
+                                  : Colors.blue.shade700,
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
@@ -927,6 +1126,39 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
               ),
             ),
           ),
+          
+          // Powered by VerveStrideAI branding
+          Container(
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            decoration: BoxDecoration(
+              color: Colors.grey[50],
+              border: Border(top: BorderSide(color: Colors.grey[200]!)),
+            ),
+            child: Center(
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.auto_awesome, size: 12, color: Colors.grey[600]),
+                  const SizedBox(width: 4),
+                  Text(
+                    'Powered by ',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: Colors.grey[600],
+                    ),
+                  ),
+                  Text(
+                    'VerveStrideAI',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.blue[700],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -1108,12 +1340,16 @@ class _TypingIndicatorState extends State<_TypingIndicator>
 // AI Settings Bottom Sheet Widget
 class AISettingsBottomSheet extends StatelessWidget {
   final bool aiInitialized;
+  final bool aiEnabled;
+  final Function(bool) onToggleAI;
   final VoidCallback onClearChat;
   final VoidCallback onReconnectAI;
 
   const AISettingsBottomSheet({
     super.key,
     required this.aiInitialized,
+    required this.aiEnabled,
+    required this.onToggleAI,
     required this.onClearChat,
     required this.onReconnectAI,
   });
@@ -1203,6 +1439,58 @@ class AISettingsBottomSheet extends StatelessWidget {
           const SizedBox(height: 20),
 
           // Settings Options
+          // AI Toggle
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(
+              color: aiEnabled ? Colors.blue.shade50 : Colors.grey.shade100,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: aiEnabled ? Colors.blue.shade200 : Colors.grey.shade300,
+              ),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.power_settings_new,
+                  color: aiEnabled ? Colors.blue.shade700 : Colors.grey.shade600,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'AI Assistant',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: aiEnabled ? Colors.blue.shade900 : Colors.grey.shade800,
+                        ),
+                      ),
+                      Text(
+                        aiEnabled ? 'Currently enabled' : 'Currently disabled',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: aiEnabled ? Colors.blue.shade700 : Colors.grey.shade600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Switch(
+                  value: aiEnabled,
+                  onChanged: (value) {
+                    onToggleAI(value);
+                    Navigator.pop(context); // Close settings after toggle
+                  },
+                  activeTrackColor: Colors.blue.shade200,
+                  activeThumbColor: Colors.blue,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+          
           _buildSettingsTile(
             icon: Icons.refresh,
             title: 'Reconnect AI',
@@ -1250,6 +1538,34 @@ class AISettingsBottomSheet extends StatelessWidget {
                 ),
               ),
               child: const Text('Close'),
+            ),
+          ),
+          
+          const SizedBox(height: 16),
+          
+          // Powered by VerveStrideAI branding
+          Center(
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.auto_awesome, size: 14, color: Colors.grey[600]),
+                const SizedBox(width: 6),
+                Text(
+                  'Powered by ',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.grey[600],
+                  ),
+                ),
+                Text(
+                  'VerveStrideAI',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.blue[700],
+                  ),
+                ),
+              ],
             ),
           ),
           

@@ -77,12 +77,14 @@ class _DocumentVerificationScreenState
         source: ImageSource.gallery,
         imageQuality: 90,
       );
-      if (picked == null || !mounted) {
-        Navigator.pop(context);
+      if (picked == null) {
+        if (mounted) Navigator.pop(context);
         return;
       }
+      if (!mounted) return;
       final bytes = await picked.readAsBytes();
       // Return the image bytes as verification result
+      if (!mounted) return;
       Navigator.pop(context, bytes);
     } catch (e) {
       if (mounted) {

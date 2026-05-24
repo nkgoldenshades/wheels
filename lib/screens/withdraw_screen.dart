@@ -1,5 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
+import 'dart:convert';
 import '../services/profile_repository.dart';
+import '../services/stripe_service.dart';
 
 class WithdrawScreen extends StatefulWidget {
   const WithdrawScreen({super.key});
@@ -10,6 +14,17 @@ class WithdrawScreen extends StatefulWidget {
 
 class _WithdrawScreenState extends State<WithdrawScreen> {
   String _status = 'idle';
+
+  Future<Map<String, String>> _authorizedJsonHeaders() async {
+    final headers = <String, String>{'Content-Type': 'application/json'};
+    final user = firebase_auth.FirebaseAuth.instance.currentUser;
+    if (user == null) return headers;
+    final token = await user.getIdToken(true);
+    if (token != null && token.isNotEmpty) {
+      headers['Authorization'] = 'Bearer $token';
+    }
+    return headers;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -211,8 +226,22 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
   Future<void> _processRazorpayPayout(ProfileInfo profile) async {
     setState(() => _status = 'processing');
     try {
-      await Future.delayed(const Duration(seconds: 2));
-      _showMessage('Payout initiated! You\'ll receive your earnings within 2-4 hours.');
+      final headers = await _authorizedJsonHeaders();
+      final response = await http.post(
+        Uri.parse('${StripeService.backendUrl}/initiateRazorpayPayout'),
+        headers: headers,
+        body: json.encode({
+          'user_id': profile.id,
+          'razorpay_account_id': profile.razorpayAccountId,
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        _showMessage('Payout initiated! You\'ll receive your earnings within 2-4 hours.');
+      } else {
+        final data = json.decode(response.body);
+        _showMessage('Payout failed: ${data['error'] ?? 'Unknown error'}');
+      }
     } catch (e) {
       _showMessage('Payout failed: $e');
     } finally {
@@ -223,8 +252,22 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
   Future<void> _processStripePayout(ProfileInfo profile) async {
     setState(() => _status = 'processing');
     try {
-      await Future.delayed(const Duration(seconds: 2));
-      _showMessage('Payout initiated! You\'ll receive your earnings within 2-7 business days.');
+      final headers = await _authorizedJsonHeaders();
+      final response = await http.post(
+        Uri.parse('${StripeService.backendUrl}/initiateStripePayout'),
+        headers: headers,
+        body: json.encode({
+          'user_id': profile.id,
+          'stripe_account_id': profile.stripeAccountId,
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        _showMessage('Payout initiated! You\'ll receive your earnings within 2-7 business days.');
+      } else {
+        final data = json.decode(response.body);
+        _showMessage('Payout failed: ${data['error'] ?? 'Unknown error'}');
+      }
     } catch (e) {
       _showMessage('Payout failed: $e');
     } finally {

@@ -66,22 +66,26 @@ class _ProfilePhotoVerificationScreenState
         imageQuality: 90,
         preferredCameraDevice: CameraDevice.front,
       );
-      if (picked == null || !mounted) {
-        Navigator.pop(context);
+      if (picked == null) {
+        if (mounted) Navigator.pop(context);
         return;
       }
+      if (!mounted) return;
       final bytes = await picked.readAsBytes();
+      if (!mounted) return;
       Navigator.pop(context, bytes);
     } catch (e) {
       // Fallback to gallery if camera not available
       try {
         final picker = ImagePicker();
         final picked = await picker.pickImage(source: ImageSource.gallery);
-        if (picked == null || !mounted) {
-          Navigator.pop(context);
+        if (picked == null) {
+          if (mounted) Navigator.pop(context);
           return;
         }
+        if (!mounted) return;
         final bytes = await picked.readAsBytes();
+        if (!mounted) return;
         Navigator.pop(context, bytes);
       } catch (e2) {
         if (mounted) {

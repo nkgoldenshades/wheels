@@ -592,7 +592,7 @@ class BookingRepository {
         'payment_method': ?paymentMethod,
         'payment_status': booking.stripePaymentIntentId != null ? 'authorized' : 'unpaid',
         'payment_amount': totalPrice ?? booking.price,
-        'payment_currency': 'INR',
+        'payment_currency': AppPreferences.instance.currencyCode.value,
         if (booking.stripePaymentIntentId != null) 'payment_gateway_id': booking.stripePaymentIntentId,
         if (booking.stripePaymentIntentId != null) 'paid_at': DateTime.now().toUtc().toIso8601String(),
 
@@ -719,8 +719,9 @@ class BookingRepository {
   }
 
   bool isOtpValid({required String bookingId, required String otp}) {
-    final booking = bookings.value.firstWhere((b) => b.id == bookingId);
-    return booking.otp == otp;
+    // OTP verification is intentionally backend-only so failed attempts,
+    // locking, and audit timestamps cannot be bypassed by local state.
+    return false;
   }
 
   Future<bool> verifyOtp({required String bookingId, required String otp}) async {
@@ -729,46 +730,13 @@ class BookingRepository {
       orElse: () => throw Exception('Booking $bookingId not found locally'),
     );
 
-    debugPrint('🔐 verifyOtp: bookingId=$bookingId, otp=$otp');
-    debugPrint('   booking.otp (local)=${booking.otp}, booking.userId=${booking.userId}');
+    debugPrint('🔐 verifyOtp: bookingId=$bookingId, userId=${booking.userId}');
 
-    // ── Local fallback: compare against OTP stored in the booking ──────────
-    // This works when Supabase sync succeeded and otp_code was returned.
-    if (booking.otp != null && booking.otp!.isNotEmpty) {
-      if (booking.otp!.trim() == otp.trim()) {
-        debugPrint('✅ OTP matched locally — marking complete');
-        bookings.value = bookings.value
-            .map((b) => b.id == bookingId
-                ? b.copyWith(status: BookingStatus.completed, otpVerified: true)
-                : b)
-            .toList(growable: false);
-        await _persist();
-        // Also update Supabase
-        try {
-          await Supabase.instance.client
-              .from('bookings')
-              .update({'otp_verified': true, 'status': 'completed'})
-              .eq('id', int.parse(bookingId));
-        } catch (e) {
-          debugPrint('⚠️ Could not update Supabase after local OTP match: $e');
-        }
-        return true;
-      } else {
-        debugPrint('❌ OTP mismatch: entered=$otp, stored=${booking.otp}');
-        return false;
-      }
-    }
-
-    // ── Remote fallback: call Supabase RPC ─────────────────────────────────
+    // Always call Supabase RPC. The backend owns attempt counting, locking,
+    // authorization, and otp_verified_at.
     try {
-      final parsedId = int.tryParse(bookingId);
-      if (parsedId == null) {
-        debugPrint('❌ bookingId "$bookingId" is not a valid integer — Supabase sync may have failed');
-        return false;
-      }
-
       final result = await OtpService().verifyOtp(
-        bookingId: parsedId,
+        bookingId: bookingId,
         userId: booking.userId,
         enteredOtp: otp,
       );

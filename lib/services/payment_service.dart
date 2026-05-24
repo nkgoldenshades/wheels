@@ -1,4 +1,7 @@
 import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+import '../config/supabase_config.dart';
 import 'stripe_service.dart';
 import 'razorpay_service.dart';
 import 'auth_repository.dart';
@@ -9,6 +12,9 @@ import 'auth_repository.dart';
 class PaymentService {
   PaymentService._();
   static final PaymentService instance = PaymentService._();
+
+  static const String _supabaseUrl = SupabaseConfig.url;
+  static const String _supabaseAnonKey = SupabaseConfig.anonKey;
 
   /// Extract the ISO country code from a stored location string.
   /// Format: `Name|lat,lon|district,state,postcode,country,CC`
@@ -26,34 +32,81 @@ class PaymentService {
   bool _isIndia(String? countryCode) =>
       (countryCode ?? '').toUpperCase() == 'IN';
 
-  /// Create a Razorpay order via backend (or mock locally for test key usage).
+  /// Create a Razorpay order via the Supabase Edge Function.
   /// Returns a map with `id`, `amount`, `currency` matching Razorpay order shape.
   Future<Map<String, dynamic>> createOrder({
     required int amount,
     required String currency,
     Map<String, String>? notes,
   }) async {
-    // For now, create a mock order locally (replace with backend call when ready).
-    // In production, call your server: POST /createRazorpayOrder { amount, currency, notes }
-    final mockOrderId = 'order_${DateTime.now().millisecondsSinceEpoch}';
-    return {
-      'id': mockOrderId,
-      'amount': amount * 100, // Razorpay expects paise
-      'currency': currency,
-    };
+    try {
+      final response = await http.post(
+        Uri.parse('$_supabaseUrl/functions/v1/create-razorpay-order'),
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': _supabaseAnonKey,
+          'Authorization': 'Bearer $_supabaseAnonKey',
+        },
+        body: jsonEncode({
+          'amount': amount, // already in paise
+          'currency': currency.toUpperCase(),
+          'receipt': 'rcpt_${DateTime.now().millisecondsSinceEpoch}',
+          'notes': notes ?? {},
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        // Edge function returns { orderId, amount, currency, receipt }
+        return {
+          'id': data['orderId'] as String,
+          'amount': data['amount'],
+          'currency': data['currency'],
+        };
+      } else {
+        final err = jsonDecode(response.body);
+        debugPrint('[PaymentService] createOrder error: ${err['error']}');
+        return {'error': err['error'] ?? 'Failed to create order'};
+      }
+    } catch (e) {
+      debugPrint('[PaymentService] createOrder exception: $e');
+      return {'error': e.toString()};
+    }
   }
 
-  /// Verify Razorpay payment signature via backend.
-  /// Returns `{ 'success': true }` on valid signature.
+  /// Verify Razorpay payment signature via the Supabase Edge Function (HMAC-SHA256).
+  /// Returns `{ 'verified': true }` on valid signature, or `{ 'error': '...' }`.
   Future<Map<String, dynamic>> verifyPayment({
     required String razorpayOrderId,
     required String razorpayPaymentId,
     required String razorpaySignature,
   }) async {
-    // For now, accept all payments locally (replace with backend HMAC verification).
-    // In production, call your server: POST /verifyRazorpayPayment { orderId, paymentId, signature }
-    debugPrint('[PaymentService] verifyPayment: $razorpayPaymentId');
-    return {'success': true};
+    try {
+      final response = await http.post(
+        Uri.parse('$_supabaseUrl/functions/v1/verify-razorpay-payment'),
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': _supabaseAnonKey,
+          'Authorization': 'Bearer $_supabaseAnonKey',
+        },
+        body: jsonEncode({
+          'razorpay_order_id': razorpayOrderId,
+          'razorpay_payment_id': razorpayPaymentId,
+          'razorpay_signature': razorpaySignature,
+        }),
+      );
+
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      if (response.statusCode == 200 && data['verified'] == true) {
+        return {'verified': true, 'payment_id': razorpayPaymentId};
+      } else {
+        debugPrint('[PaymentService] verifyPayment failed: ${data['error']}');
+        return {'verified': false, 'error': data['error'] ?? 'Signature verification failed'};
+      }
+    } catch (e) {
+      debugPrint('[PaymentService] verifyPayment exception: $e');
+      return {'verified': false, 'error': e.toString()};
+    }
   }
 
   /// Process payment, routing to Razorpay (India) or Stripe (international).
@@ -86,24 +139,51 @@ class PaymentService {
     if (_isIndia(countryCode)) {
       // ── Razorpay path ──────────────────────────────────────────────────────
       debugPrint('[PaymentService] Routing to Razorpay (India)');
+
+      // Step 1: Create a real Razorpay order on the server
+      final orderResult = await createOrder(
+        amount: amountInPaise,
+        currency: 'INR',
+        notes: {'slot_id': slotId, 'user_id': currentUser.id},
+      );
+
+      if (orderResult['error'] != null) {
+        return {'error': orderResult['error']};
+      }
+
+      final orderId = orderResult['id'] as String;
+
+      // Step 2: Open Razorpay checkout with the real order ID
       final result = await RazorpayService.instance.processPayment(
         amountInPaise: amountInPaise,
         description: description,
         userEmail: userEmail,
         userPhone: userPhone,
         userName: userName,
+        orderId: orderId,
       );
 
       if (result['error'] != null) return result;
 
-      // For Razorpay, generate a local OTP (no server-side escrow)
-      final otp = _generateOtp(amountInPaise);
+      // Step 3: Verify the payment signature on the server
+      final signature = result['signature'] as String?;
+      if (signature != null && signature.isNotEmpty) {
+        final verification = await verifyPayment(
+          razorpayOrderId: orderId,
+          razorpayPaymentId: result['payment_id'] as String,
+          razorpaySignature: signature,
+        );
+        if (verification['verified'] != true) {
+          return {'error': verification['error'] ?? 'Payment verification failed'};
+        }
+      }
+
       return {
         'payment_id': result['payment_id'],
-        'order_id': result['order_id'],
+        'order_id': orderId,
         'gateway': 'razorpay',
-        'otp': otp,
-        'payment_intent_id': null, // no Stripe intent
+        'otp': null, // OTP is generated server-side by Supabase trigger
+        'payment_intent_id': null,
         'client_secret': null,
         'countdown_end_time': DateTime.now()
             .add(const Duration(hours: 1))
@@ -134,13 +214,34 @@ class PaymentService {
     required String currency,
   }) async {
     if (_isIndia(currency == 'INR' ? 'IN' : null) || currency == 'INR') {
-      return RazorpayService.instance.processPayment(
+      // Create order first, then open checkout
+      final orderResult = await createOrder(amount: 4900, currency: 'INR');
+      if (orderResult['error'] != null) return orderResult;
+
+      final result = await RazorpayService.instance.processPayment(
         amountInPaise: 4900, // ₹49
         description: 'KYC Document Verification',
         userEmail: userEmail,
         userPhone: userPhone,
         userName: userName,
+        orderId: orderResult['id'] as String,
       );
+
+      if (result['error'] != null) return result;
+
+      // Verify signature if present
+      final signature = result['signature'] as String?;
+      if (signature != null && signature.isNotEmpty) {
+        final verification = await verifyPayment(
+          razorpayOrderId: orderResult['id'] as String,
+          razorpayPaymentId: result['payment_id'] as String,
+          razorpaySignature: signature,
+        );
+        if (verification['verified'] != true) {
+          return {'error': verification['error'] ?? 'Payment verification failed'};
+        }
+      }
+      return result;
     } else {
       // International: Stripe — flat $0.99
       await StripeService.instance.init();
@@ -161,6 +262,92 @@ class PaymentService {
   String _generateOtp(int seed) {
     final base = (seed % 900000) + 100000;
     return base.toString().padLeft(6, '0');
+  }
+
+  /// Process subscription payment for Premium/Expert plans
+  /// Routes to Razorpay (India) or Stripe (international)
+  /// Returns result map with `payment_id` on success or `error` on failure
+  Future<Map<String, dynamic>> processSubscriptionPayment({
+    required String planName,
+    required double amount,
+    required String userName,
+    required String userEmail,
+    required String userPhone,
+    required String currency,
+  }) async {
+    final currentUser = AuthRepository.instance.currentUser;
+    if (currentUser == null) return {'error': 'Not logged in'};
+
+    final amountInSmallestUnit = (amount * 100).toInt(); // Convert to paise/cents
+
+    if (_isIndia(currency == 'INR' ? 'IN' : null) || currency == 'INR') {
+      // ── Razorpay path for India ──
+      debugPrint('[PaymentService] Processing subscription via Razorpay');
+
+      // Create order first
+      final orderResult = await createOrder(
+        amount: amountInSmallestUnit,
+        currency: 'INR',
+        notes: {
+          'plan': planName,
+          'user_id': currentUser.id,
+          'type': 'subscription',
+        },
+      );
+
+      if (orderResult['error'] != null) return orderResult;
+
+      final result = await RazorpayService.instance.processPayment(
+        amountInPaise: amountInSmallestUnit,
+        description: '$planName Plan Subscription',
+        userEmail: userEmail,
+        userPhone: userPhone,
+        userName: userName,
+        orderId: orderResult['id'] as String,
+      );
+
+      if (result['error'] != null) return result;
+
+      // Verify signature
+      final signature = result['signature'] as String?;
+      if (signature != null && signature.isNotEmpty) {
+        final verification = await verifyPayment(
+          razorpayOrderId: orderResult['id'] as String,
+          razorpayPaymentId: result['payment_id'] as String,
+          razorpaySignature: signature,
+        );
+        if (verification['verified'] != true) {
+          return {'error': verification['error'] ?? 'Payment verification failed'};
+        }
+      }
+
+      return {
+        ...result,
+        'plan': planName,
+        'gateway': 'razorpay',
+      };
+    } else {
+      // ── Stripe path for international ──
+      debugPrint('[PaymentService] Processing subscription via Stripe');
+      await StripeService.instance.init();
+      
+      final result = await StripeService.instance.processPayment(
+        amount: amountInSmallestUnit,
+        currency: currency.toLowerCase(),
+        providerId: '', // No provider for subscriptions
+        userId: currentUser.id,
+        applicationFee: 0, // No commission on subscriptions
+        slotId: 'subscription_$planName',
+      );
+
+      if (result == null) return {'error': 'Payment cancelled'};
+      
+      return {
+        ...result,
+        'plan': planName,
+        'gateway': 'stripe',
+      };
+    }
   }
 }
 

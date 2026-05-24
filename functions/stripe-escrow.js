@@ -2,15 +2,16 @@ const functions = require('firebase-functions');
 const admin = require('firebase-admin');
 const { createClient } = require('@supabase/supabase-js');
 
-// Try to get from .env first (local), then Firebase config (deployed)
-const stripeSecretKey = process.env.STRIPE_SECRET_KEY || functions.config()?.stripe?.secret_key;
+// All secrets are loaded from .env (local) or Firebase Secret Manager (deployed).
+// Do NOT use the deprecated functions.config() API.
+const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
 if (!stripeSecretKey) {
   console.warn('Missing STRIPE_SECRET_KEY - Stripe functions will not work');
 }
 const stripe = stripeSecretKey ? require('stripe')(stripeSecretKey) : null;
 
-const supabaseUrl = process.env.SUPABASE_URL || functions.config()?.supabase?.url;
-const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || functions.config()?.supabase?.service_role_key;
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 if (!supabaseUrl || !supabaseServiceRoleKey) {
   console.warn('Missing Supabase config - Database functions will not work');
@@ -171,7 +172,6 @@ exports.createBooking = functions.https.onRequest(async (req, res) => {
       booking_id: bookingId,
       payment_intent_id: paymentIntent.id,
       client_secret: paymentIntent.client_secret,
-      otp: otp, // Remove this in production! Only for testing
       countdown_end_time: countdownEndTime.toISOString(),
     });
   } catch (error) {
@@ -283,7 +283,7 @@ exports.verifyOtp = functions.https.onRequest(async (req, res) => {
     }
 
     const { data: providerRow, error: providerError } = await supabase
-      .from('users')
+      .from('profiles')
       .select('stripe_account_id')
       .eq('id', booking.provider_id)
       .maybeSingle();
@@ -546,12 +546,32 @@ exports.releaseFunds = functions.https.onRequest(async (req, res) => {
 
   const { payment_intent_id, provider_id, amount, commission_amount } = req.body;
 
+  if (!payment_intent_id || !provider_id || amount == null || commission_amount == null) {
+    return res.status(400).json({ error: 'Missing required fields' });
+  }
+
   try {
-    const transferAmount = amount - commission_amount;
+    // Look up the booking to get the correct currency
+    const { data: booking, error: bookingError } = await supabase
+      .from('bookings')
+      .select('currency')
+      .eq('stripe_payment_intent_id', payment_intent_id)
+      .maybeSingle();
+
+    if (bookingError) {
+      console.error('releaseFunds: booking lookup error:', bookingError);
+    }
+
+    const currency = booking?.currency ?? 'usd';
+    const transferAmount = _toInt(amount) - (_toInt(commission_amount) ?? 0);
+
+    if (transferAmount <= 0) {
+      return res.status(400).json({ error: 'Transfer amount must be positive' });
+    }
 
     const transfer = await stripe.transfers.create({
       amount: transferAmount,
-      currency: 'usd',
+      currency: currency,
       destination: provider_id,
     });
 
@@ -722,11 +742,319 @@ exports.createCheckoutSession = functions.https.onRequest(async (req, res) => {
       url: session.url,
       session_id: session.id,
       payment_intent: session.payment_intent,
-      otp: otp, // Remove this in production!
       countdown_end_time: countdownEndTime.toISOString(),
     });
   } catch (error) {
     console.error('Create checkout session error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * Stripe Webhook handler
+ * Handles checkout.session.completed to confirm web payments
+ * and payment_intent.canceled to mark expired/cancelled bookings.
+ *
+ * Set your webhook secret in Firebase config:
+ *   firebase functions:config:set stripe.webhook_secret="whsec_..."
+ */
+exports.stripeWebhook = functions.https.onRequest(async (req, res) => {
+  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+
+  if (!webhookSecret) {
+    console.error('Missing STRIPE_WEBHOOK_SECRET');
+    return res.status(500).json({ error: 'Webhook secret not configured' });
+  }
+
+  let event;
+  try {
+    event = stripe.webhooks.constructEvent(
+      req.rawBody,
+      req.headers['stripe-signature'],
+      webhookSecret,
+    );
+  } catch (err) {
+    console.error('Webhook signature verification failed:', err.message);
+    return res.status(400).json({ error: `Webhook error: ${err.message}` });
+  }
+
+  try {
+    switch (event.type) {
+      // Web checkout: user completed payment on Stripe-hosted page
+      case 'checkout.session.completed': {
+        const session = event.data.object;
+        const bookingId = session.metadata?.booking_id;
+        const paymentIntentId = session.payment_intent;
+
+        if (!bookingId || !paymentIntentId) {
+          console.warn('checkout.session.completed: missing booking_id or payment_intent in metadata');
+          break;
+        }
+
+        // Update booking with real payment_intent_id and mark as authorized
+        const { error } = await supabase
+          .from('bookings')
+          .update({
+            stripe_payment_intent_id: paymentIntentId,
+            payment_status: 'authorized',
+            status: 'pending',
+          })
+          .eq('id', bookingId);
+
+        if (error) {
+          console.error('stripeWebhook: failed to update booking after checkout:', error);
+        } else {
+          console.log(`Booking ${bookingId} confirmed via checkout session`);
+        }
+        break;
+      }
+
+      // Payment intent cancelled (expired or abandoned)
+      case 'payment_intent.canceled': {
+        const pi = event.data.object;
+        const bookingId = pi.metadata?.booking_id;
+
+        if (!bookingId) break;
+
+        const { error } = await supabase
+          .from('bookings')
+          .update({
+            status: 'cancelled',
+            payment_status: 'failed',
+            cancelled_at: new Date().toISOString(),
+          })
+          .eq('id', bookingId)
+          .in('status', ['pending']);
+
+        if (error) {
+          console.error('stripeWebhook: failed to cancel booking:', error);
+        } else {
+          console.log(`Booking ${bookingId} cancelled via webhook`);
+        }
+        break;
+      }
+
+      // Payment refunded
+      case 'charge.refunded': {
+        const charge = event.data.object;
+        const pi = charge.payment_intent;
+        if (!pi) break;
+
+        const { error } = await supabase
+          .from('bookings')
+          .update({
+            status: 'refunded',
+            payment_status: 'refunded',
+            refunded_at: new Date().toISOString(),
+          })
+          .eq('stripe_payment_intent_id', pi)
+          .in('status', ['pending', 'cancelled', 'expired_unhandled']);
+
+        if (error) {
+          console.error('stripeWebhook: failed to mark booking refunded:', error);
+        }
+        break;
+      }
+
+      default:
+        // Unhandled event type — ignore
+        break;
+    }
+
+    res.json({ received: true });
+  } catch (err) {
+    console.error('Webhook handler error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * Initiate Stripe payout to provider's connected account
+ * Called from WithdrawScreen for international providers
+ */
+exports.initiateStripePayout = functions.https.onRequest(async (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  if (req.method === 'OPTIONS') {
+    res.set('Access-Control-Allow-Methods', 'POST');
+    res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    return res.status(204).send('');
+  }
+
+  let callerUid = null;
+  try {
+    callerUid = await _getAuthUid(req);
+  } catch (e) {
+    return res.status(401).json({ error: 'Invalid auth token' });
+  }
+  if (!callerUid) {
+    return res.status(401).json({ error: 'Missing auth token' });
+  }
+
+  const { user_id, stripe_account_id } = req.body;
+
+  if (!user_id || !stripe_account_id) {
+    return res.status(400).json({ error: 'Missing user_id or stripe_account_id' });
+  }
+  if (callerUid !== user_id) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+
+  try {
+    // Sum all completed bookings with pending payout for this provider
+    const { data: bookings, error: bookingsError } = await supabase
+      .from('bookings')
+      .select('id, payment_amount, commission_amount, currency')
+      .eq('profile_provider_id', user_id)
+      .eq('status', 'completed')
+      .eq('payout_status', 'pending');
+
+    if (bookingsError) throw new Error(bookingsError.message);
+    if (!bookings || bookings.length === 0) {
+      return res.status(400).json({ error: 'No pending earnings to withdraw' });
+    }
+
+    // Group by currency and transfer each
+    const byCurrency = {};
+    for (const b of bookings) {
+      const cur = (b.currency || 'usd').toLowerCase();
+      const net = (b.payment_amount || 0) - (b.commission_amount || 0);
+      byCurrency[cur] = (byCurrency[cur] || 0) + net;
+    }
+
+    const transfers = [];
+    for (const [currency, amount] of Object.entries(byCurrency)) {
+      if (amount <= 0) continue;
+      const transfer = await stripe.transfers.create({
+        amount: Math.trunc(amount),
+        currency,
+        destination: stripe_account_id,
+      });
+      transfers.push(transfer.id);
+    }
+
+    // Mark bookings as payout processed
+    const bookingIds = bookings.map((b) => b.id);
+    await supabase
+      .from('bookings')
+      .update({
+        payout_status: 'processed',
+        payout_triggered_at: new Date().toISOString(),
+        payout_completed_at: new Date().toISOString(),
+      })
+      .in('id', bookingIds);
+
+    res.json({ success: true, transfers });
+  } catch (error) {
+    console.error('initiateStripePayout error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * Initiate Razorpay payout to provider's bank account
+ * Called from WithdrawScreen for Indian providers
+ */
+exports.initiateRazorpayPayout = functions.https.onRequest(async (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  if (req.method === 'OPTIONS') {
+    res.set('Access-Control-Allow-Methods', 'POST');
+    res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    return res.status(204).send('');
+  }
+
+  let callerUid = null;
+  try {
+    callerUid = await _getAuthUid(req);
+  } catch (e) {
+    return res.status(401).json({ error: 'Invalid auth token' });
+  }
+  if (!callerUid) {
+    return res.status(401).json({ error: 'Missing auth token' });
+  }
+
+  const { user_id, razorpay_account_id } = req.body;
+
+  if (!user_id || !razorpay_account_id) {
+    return res.status(400).json({ error: 'Missing user_id or razorpay_account_id' });
+  }
+  if (callerUid !== user_id) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+
+  try {
+    // Sum all completed INR bookings with pending payout
+    const { data: bookings, error: bookingsError } = await supabase
+      .from('bookings')
+      .select('id, payment_amount, commission_amount')
+      .eq('profile_provider_id', user_id)
+      .eq('status', 'completed')
+      .eq('payout_status', 'pending')
+      .ilike('currency', 'inr');
+
+    if (bookingsError) throw new Error(bookingsError.message);
+    if (!bookings || bookings.length === 0) {
+      return res.status(400).json({ error: 'No pending earnings to withdraw' });
+    }
+
+    const totalPaise = bookings.reduce((sum, b) => {
+      return sum + ((b.payment_amount || 0) - (b.commission_amount || 0));
+    }, 0);
+
+    if (totalPaise <= 0) {
+      return res.status(400).json({ error: 'No positive balance to withdraw' });
+    }
+
+    const razorpayKeyId = process.env.RAZORPAY_KEY_ID;
+    const razorpayKeySecret = process.env.RAZORPAY_KEY_SECRET;
+
+    if (!razorpayKeyId || !razorpayKeySecret) {
+      return res.status(500).json({ error: 'Razorpay credentials not configured' });
+    }
+
+    const auth = Buffer.from(`${razorpayKeyId}:${razorpayKeySecret}`).toString('base64');
+
+    // Create Razorpay payout via Payouts API
+    const payoutResponse = await fetch('https://api.razorpay.com/v1/payouts', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Basic ${auth}`,
+        'Content-Type': 'application/json',
+        'X-Payout-Idempotency': `payout_${user_id}_${Date.now()}`,
+      },
+      body: JSON.stringify({
+        account_number: razorpay_account_id, // Provider's Razorpay linked account
+        amount: Math.trunc(totalPaise),
+        currency: 'INR',
+        mode: 'IMPS',
+        purpose: 'payout',
+        queue_if_low_balance: true,
+        narration: 'VaultWheels earnings payout',
+      }),
+    });
+
+    if (!payoutResponse.ok) {
+      const errText = await payoutResponse.text();
+      console.error('Razorpay payout error:', errText);
+      return res.status(500).json({ error: 'Razorpay payout failed' });
+    }
+
+    const payout = await payoutResponse.json();
+
+    // Mark bookings as payout processed
+    const bookingIds = bookings.map((b) => b.id);
+    await supabase
+      .from('bookings')
+      .update({
+        payout_status: 'processed',
+        payout_reference_id: payout.id,
+        payout_triggered_at: new Date().toISOString(),
+        payout_completed_at: new Date().toISOString(),
+      })
+      .in('id', bookingIds);
+
+    res.json({ success: true, payout_id: payout.id });
+  } catch (error) {
+    console.error('initiateRazorpayPayout error:', error);
     res.status(500).json({ error: error.message });
   }
 });

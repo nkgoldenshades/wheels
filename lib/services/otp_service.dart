@@ -15,11 +15,17 @@ class OtpService {
   /// - 'locked': Too many failed attempts (5+)
   /// - 'wrong_otp': Incorrect OTP (attempts incremented)
   Future<OtpVerificationResult> verifyOtp({
-    required int bookingId,
+    required String bookingId,
     required String userId,
     required String enteredOtp,
   }) async {
     try {
+      final parsedBookingId = int.tryParse(bookingId);
+      if (parsedBookingId == null) {
+        debugPrint('❌ Booking ID is not synced to backend: $bookingId');
+        return OtpVerificationResult.error;
+      }
+
       debugPrint('🔐 Verifying OTP for booking $bookingId');
       debugPrint('   User ID: $userId');
       debugPrint('   Entered OTP: $enteredOtp');
@@ -27,7 +33,7 @@ class OtpService {
       final response = await _supabase.rpc(
         'verify_otp',
         params: {
-          'p_booking_id': bookingId,
+          'p_booking_id': parsedBookingId,
           'p_profile_customer_id': userId,
           'p_entered_otp': enteredOtp,
         },

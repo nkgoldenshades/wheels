@@ -50,6 +50,7 @@ import 'services/profile_name_registry.dart';
 import 'services/app_preferences.dart';
 import 'services/passenger_repository.dart';
 import 'services/stripe_service.dart';
+import 'services/payment_service.dart';
 import 'screens/booking_map_screen.dart';
 import 'services/location_autocomplete_service.dart';
 import 'screens/auth/splash_screen.dart';
@@ -59,6 +60,7 @@ import 'screens/reviews_screen.dart';
 import 'screens/ai_chat_page.dart';
 import 'widgets/voice_ai_overlay.dart';
 import 'services/voice_ai_service.dart';
+import 'services/pricing_service.dart';
 import 'app_tab_controller.dart';
 import 'utils/test_backend_connection.dart';
 import 'utils/timezone_utils.dart';
@@ -1099,87 +1101,509 @@ class StartupErrorScreen extends StatelessWidget {
 class PlansScreen extends StatelessWidget {
   const PlansScreen({super.key});
 
+  // Get pricing from database with fallback to hardcoded values
+  // This allows dynamic pricing updates without app redeployment
+  Future<Map<String, dynamic>> _getPricingFromDatabase(String currency) async {
+    try {
+      // Try to fetch from database first
+      return await PricingService.instance.getPricing(currency);
+    } catch (e) {
+      debugPrint('[PlansScreen] Database fetch failed, using hardcoded fallback: $e');
+      // Fallback to hardcoded pricing if database fails
+      return _getHardcodedPricing(currency);
+    }
+  }
+
+  // Hardcoded pricing as fallback when database is unavailable
+  // This ensures the app works even if Supabase is down
+  // 
+  // IMPORTANT: Continents are for CODE ORGANIZATION only!
+  // Actual pricing is determined by COUNTRY TIER (1, 2, or 3) based on:
+  // - GDP per capita (purchasing power)
+  // - Average income levels
+  // - Digital service affordability
+  // 
+  // TIER SYSTEM:
+  // Tier 1 (High-income): Premium $12.99/month, Expert $59.99/month + $599 deposit
+  //   - GDP per capita: $40,000+ USD
+  //   - Examples: USA, UK, Japan, UAE, Australia (23 countries)
+  //   - Affordability: 0.2%-0.5% of monthly income
+  // 
+  // Tier 2 (Middle-income): Premium ₹999/month, Expert ₹4,999/month + ₹50,000 deposit
+  //   - GDP per capita: $5,000-$20,000 USD
+  //   - Reference: India pricing (₹999 = ~$12 equivalent purchasing power)
+  //   - Examples: India, Brazil, Mexico, Poland, Thailand (29 countries)
+  //   - Affordability: 2%-5% of monthly income
+  // 
+  // Tier 3 (Lower-income): Premium ₹499/month, Expert ₹2,499/month + ₹25,000 deposit
+  //   - GDP per capita: $1,000-$5,000 USD
+  //   - 50% discount from Tier 2 for affordability
+  //   - Examples: Pakistan, Bangladesh, Nigeria, Vietnam (50+ countries)
+  //   - Affordability: 3%-8% of monthly income
+  // 
+  // NOTE: Same continent can have different tiers!
+  // Example: Europe has Tier 1 (Switzerland) and Tier 2 (Poland)
+  // Example: Asia has Tier 1 (Japan), Tier 2 (India), Tier 3 (Pakistan)
+  Map<String, dynamic> _getHardcodedPricing(String currency) {
+    final curr = currency.toUpperCase();
+    
+    // NORTH AMERICA
+    final northAmerica = {
+      'USD': ['\$', 12.99, 59.99, 599, 1],        // United States - Tier 1
+      'CAD': ['C\$', 17.99, 83.99, 839, 1],       // Canada - Tier 1
+      'MXN': ['MX\$', 219, 1069, 10690, 2],       // Mexico - Tier 2
+    };
+    
+    // SOUTH AMERICA
+    final southAmerica = {
+      'BRL': ['R\$', 65, 319, 3190, 2],           // Brazil - Tier 2
+      'ARS': ['AR\$', 12000, 58800, 588000, 2],   // Argentina - Tier 2
+      'CLP': ['CLP\$', 11690, 57290, 572900, 2],  // Chile - Tier 2
+      'COP': ['COL\$', 50400, 246900, 2469000, 2], // Colombia - Tier 2
+      'PEN': ['S/', 45, 220, 2200, 2],            // Peru - Tier 2
+      'UYU': ['UY\$', 504, 2469, 24690, 2],       // Uruguay - Tier 2
+      'BOB': ['Bs', 41, 205, 2050, 3],            // Bolivia - Tier 3
+      'PYG': ['₲', 44000, 220000, 2200000, 3],    // Paraguay - Tier 3
+    };
+    
+    // EUROPE
+    final europe = {
+      'EUR': ['€', 11.99, 54.99, 549, 1],         // Eurozone (27 countries) - Tier 1
+      'GBP': ['£', 10.99, 49.99, 499, 1],         // United Kingdom - Tier 1
+      'CHF': ['CHF ', 11.49, 52.99, 529, 1],      // Switzerland - Tier 1
+      'SEK': ['kr', 139, 644, 6440, 1],           // Sweden - Tier 1
+      'NOK': ['kr', 139, 644, 6440, 1],           // Norway - Tier 1
+      'DKK': ['kr', 89, 412, 4120, 1],            // Denmark - Tier 1
+      'ISK': ['kr', 1799, 8329, 83290, 1],        // Iceland - Tier 1
+      'PLN': ['zł', 49, 239, 2390, 2],            // Poland - Tier 2
+      'CZK': ['Kč', 279, 1369, 13690, 2],         // Czech Republic - Tier 2
+      'HUF': ['Ft', 4390, 21490, 214900, 2],      // Hungary - Tier 2
+      'RON': ['lei', 55, 269, 2690, 2],           // Romania - Tier 2
+      'BGN': ['лв', 21.99, 107.69, 1076, 2],      // Bulgaria - Tier 2
+      'HRK': ['kn', 82, 402, 4020, 2],            // Croatia - Tier 2
+      'RSD': ['дин', 1290, 6318, 63180, 2],       // Serbia - Tier 2
+      'UAH': ['₴', 494, 2419, 24190, 2],          // Ukraine - Tier 2
+      'RUB': ['₽', 1109, 5429, 54290, 2],         // Russia - Tier 2
+    };
+    
+    // ASIA
+    final asia = {
+      // East Asia - Tier 1
+      'JPY': ['¥', 1899, 8799, 87990, 1],         // Japan
+      'KRW': ['₩', 17299, 80199, 801990, 1],      // South Korea
+      'TWD': ['NT\$', 412, 1908, 19080, 1],       // Taiwan
+      'HKD': ['HK\$', 101, 468, 4680, 1],         // Hong Kong
+      'SGD': ['S\$', 17.49, 80.99, 809, 1],       // Singapore
+      
+      // South & Southeast Asia - Tier 2
+      'INR': ['₹', 999, 4999, 50000, 2],          // India
+      'CNY': ['¥', 87, 426, 4260, 2],             // China
+      'THB': ['฿', 429, 2099, 20990, 2],          // Thailand
+      'MYR': ['RM', 56, 274, 2740, 2],            // Malaysia
+      'IDR': ['Rp', 189000, 926000, 9260000, 2],  // Indonesia
+      'TRY': ['₺', 409, 2004, 20040, 2],          // Turkey
+      
+      // South & Southeast Asia - Tier 3
+      'PKR': ['Rs', 1665, 8325, 83250, 3],        // Pakistan
+      'BDT': ['৳', 660, 3300, 33000, 3],          // Bangladesh
+      'VND': ['₫', 149000, 745000, 7450000, 3],   // Vietnam
+      'PHP': ['₱', 335, 1675, 16750, 3],          // Philippines
+      'LKR': ['Rs', 1950, 9750, 97500, 3],        // Sri Lanka
+      'NPR': ['Rs', 795, 3975, 39750, 3],         // Nepal
+      'MMK': ['K', 12575, 62875, 628750, 3],      // Myanmar
+      'KHR': ['៛', 24500, 122500, 1225000, 3],    // Cambodia
+      'LAK': ['₭', 131000, 655000, 6550000, 3],   // Laos
+      
+      // Central Asia - Tier 2 & 3
+      'KZT': ['₸', 5490, 26890, 268900, 2],       // Kazakhstan - Tier 2
+      'GEL': ['₾', 33, 161, 1610, 2],             // Georgia - Tier 2
+      'AMD': ['֏', 4640, 22740, 227400, 2],       // Armenia - Tier 2
+      'AZN': ['₼', 20.39, 99.89, 998, 2],         // Azerbaijan - Tier 2
+      'UZS': ['soʻm', 76000, 380000, 3800000, 3], // Uzbekistan - Tier 3
+      'TJS': ['ЅМ', 65, 325, 3250, 3],            // Tajikistan - Tier 3
+      'KGS': ['с', 520, 2600, 26000, 3],          // Kyrgyzstan - Tier 3
+      'AFN': ['؋', 425, 2125, 21250, 3],          // Afghanistan - Tier 3
+    };
+    
+    // MIDDLE EAST
+    final middleEast = {
+      // Gulf States - Tier 1
+      'AED': ['AED ', 47.69, 220.49, 2204, 1],    // UAE
+      'SAR': ['SAR ', 48.69, 224.99, 2249, 1],    // Saudi Arabia
+      'QAR': ['QAR ', 47.29, 218.49, 2184, 1],    // Qatar
+      'KWD': ['KWD ', 3.99, 18.49, 184, 1],       // Kuwait
+      'BHD': ['BHD ', 4.89, 22.59, 225, 1],       // Bahrain
+      'OMR': ['OMR ', 4.99, 23.09, 230, 1],       // Oman
+      'ILS': ['₪', 47.99, 221.99, 2219, 1],       // Israel
+      
+      // Other Middle East - Tier 2 & 3
+      'EGP': ['E£', 370, 1814, 18140, 2],         // Egypt - Tier 2
+      'LBP': ['ل.ل', 535000, 2675000, 26750000, 3], // Lebanon - Tier 3
+      'IQD': ['ع.د', 7840, 39200, 392000, 3],     // Iraq - Tier 3
+      'JOD': ['د.ا', 4.25, 21.25, 212, 3],        // Jordan - Tier 3
+      'SYP': ['£S', 75500, 377500, 3775000, 3],   // Syria - Tier 3
+      'YER': ['﷼', 1500, 7500, 75000, 3],         // Yemen - Tier 3
+      'IRR': ['﷼', 252000, 1260000, 12600000, 3], // Iran - Tier 3
+    };
+    
+    // AFRICA
+    final africa = {
+      // North Africa
+      'ZAR': ['R', 219, 1074, 10740, 2],          // South Africa - Tier 2
+      'MAD': ['د.م.', 59, 295, 2950, 3],          // Morocco - Tier 3
+      'TND': ['د.ت', 18.50, 92.50, 925, 3],       // Tunisia - Tier 3
+      'DZD': ['د.ج', 805, 4025, 40250, 3],        // Algeria - Tier 3
+      'EGP': ['E£', 370, 1814, 18140, 2],         // Egypt - Tier 2
+      
+      // Sub-Saharan Africa
+      'NGN': ['₦', 9500, 47500, 475000, 3],       // Nigeria
+      'KES': ['KSh', 775, 3875, 38750, 3],        // Kenya
+      'GHS': ['GH₵', 95, 475, 4750, 3],           // Ghana
+      'TZS': ['TSh', 15000, 75000, 750000, 3],    // Tanzania
+      'UGX': ['USh', 22000, 110000, 1100000, 3],  // Uganda
+      'ETB': ['Br', 330, 1650, 16500, 3],         // Ethiopia
+      'RWF': ['FRw', 8200, 41000, 410000, 3],     // Rwanda
+      'MWK': ['MK', 10400, 52000, 520000, 3],     // Malawi
+      'ZMW': ['ZK', 165, 825, 8250, 3],           // Zambia
+      'AOA': ['Kz', 4950, 24750, 247500, 3],      // Angola
+      'MZN': ['MT', 382, 1910, 19100, 3],         // Mozambique
+      'SDG': ['ج.س.', 3600, 18000, 180000, 3],    // Sudan
+      'SSP': ['£', 7800, 39000, 390000, 3],       // South Sudan
+      'SOS': ['Sh', 3415, 17075, 170750, 3],      // Somalia
+      'DJF': ['Fdj', 1065, 5325, 53250, 3],       // Djibouti
+      'SLL': ['Le', 125000, 625000, 6250000, 3],  // Sierra Leone
+      'LRD': ['L\$', 1150, 5750, 57500, 3],       // Liberia
+      'GNF': ['FG', 51500, 257500, 2575000, 3],   // Guinea
+      'BIF': ['FBu', 17000, 85000, 850000, 3],    // Burundi
+      'MGA': ['Ar', 27000, 135000, 1350000, 3],   // Madagascar
+      'CDF': ['FC', 16500, 82500, 825000, 3],     // DR Congo
+      'XOF': ['CFA', 3600, 18000, 180000, 3],     // West African CFA (8 countries)
+      'XAF': ['FCFA', 3600, 18000, 180000, 3],    // Central African CFA (6 countries)
+      'MRU': ['UM', 238, 1190, 11900, 3],         // Mauritania
+      'GMD': ['D', 405, 2025, 20250, 3],          // Gambia
+      'CVE': ['Esc', 605, 3025, 30250, 3],        // Cape Verde
+      'STN': ['Db', 135, 675, 6750, 3],           // São Tomé and Príncipe
+      'MUR': ['₨', 275, 1375, 13750, 3],          // Mauritius
+      'SCR': ['₨', 81, 405, 4050, 3],             // Seychelles
+      'BWP': ['P', 82, 410, 4100, 3],             // Botswana
+      'SZL': ['L', 109, 545, 5450, 3],            // Eswatini
+      'LSL': ['L', 109, 545, 5450, 3],            // Lesotho
+      'NAD': ['N\$', 109, 545, 5450, 3],          // Namibia
+    };
+    
+    // OCEANIA
+    final oceania = {
+      'AUD': ['A\$', 19.99, 92.99, 929, 1],       // Australia - Tier 1
+      'NZD': ['NZ\$', 21.99, 101.99, 1019, 1],    // New Zealand - Tier 1
+    };
+    
+    // CENTRAL AMERICA & CARIBBEAN
+    final centralAmericaCaribbean = {
+      'CRC': ['₡', 6120, 29988, 299880, 2],       // Costa Rica - Tier 2
+      'DOP': ['RD\$', 720, 3528, 35280, 2],       // Dominican Republic - Tier 2
+      'HTG': ['G', 790, 3950, 39500, 3],          // Haiti - Tier 3
+      'NIO': ['C\$', 220, 1100, 11000, 3],        // Nicaragua - Tier 3
+      'HNL': ['L', 150, 750, 7500, 3],            // Honduras - Tier 3
+      'GTQ': ['Q', 46, 230, 2300, 3],             // Guatemala - Tier 3
+    };
+    
+    // Combine all continents
+    final allPricing = {
+      ...northAmerica,
+      ...southAmerica,
+      ...europe,
+      ...asia,
+      ...middleEast,
+      ...africa,
+      ...oceania,
+      ...centralAmericaCaribbean,
+    };
+    
+    // Look up currency
+    if (allPricing.containsKey(curr)) {
+      final pricing = allPricing[curr]!;
+      return {
+        'symbol': pricing[0],
+        'premium': pricing[1],
+        'expert': pricing[2],
+        'deposit': pricing[3],
+        'tier': pricing[4],
+      };
+    } else {
+      // Default to Tier 1 USD for unknown currencies
+      return {
+        'symbol': '\$',
+        'premium': 12.99,
+        'expert': 59.99,
+        'deposit': 599,
+        'tier': 1,
+      };
+    }
+  }
+
+  Future<void> _purchasePlan(BuildContext context, SubscriptionPlan plan, double price) async {
+    try {
+      final currentUser = AuthRepository.instance.currentUser;
+      if (currentUser == null) {
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Please login to purchase a plan'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        return;
+      }
+
+      // Show loading
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => const Center(
+          child: CircularProgressIndicator(),
+        ),
+      );
+
+      // Get user details
+      final profile = ProfileRepository.instance.profile.value;
+      final userName = profile.profileName.isEmpty ? 'User' : profile.profileName;
+      final userEmail = currentUser.email;
+      final userPhone = profile.phone ?? '0000000000';
+      final currency = AppPreferences.instance.currencyCode.value;
+
+      // Process payment via PaymentService
+      final result = await PaymentService.instance.processSubscriptionPayment(
+        planName: plan.name,
+        amount: price,
+        userName: userName,
+        userEmail: userEmail,
+        userPhone: userPhone,
+        currency: currency,
+      );
+
+      if (!context.mounted) return;
+      Navigator.pop(context); // Close loading
+
+      if (result['error'] != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Payment failed: ${result['error']}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+
+      // Payment successful - activate plan
+      await AppPreferences.instance.setSubscriptionPlan(plan);
+
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('🎉 ${plan.name.toUpperCase()} plan activated!'),
+          backgroundColor: Colors.green,
+          duration: const Duration(seconds: 3),
+        ),
+      );
+      Navigator.pop(context);
+    } catch (e) {
+      if (!context.mounted) return;
+      Navigator.pop(context); // Close loading
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Payment error: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Plans'),
+        title: const Text('Choose Your Plan'),
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
       ),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          ValueListenableBuilder<SubscriptionPlan>(
-            valueListenable: AppPreferences.instance.subscriptionPlan,
-            builder: (context, plan, _) {
-              return Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.blue.withValues(alpha: 0.06),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Text(
-                  'Current plan: ${plan.name.toUpperCase()}',
-                  style: const TextStyle(fontWeight: FontWeight.w700),
-                ),
-              );
-            },
-          ),
-          const SizedBox(height: 12),
-          _PlanCard(
-            title: 'Basic',
-            priceLabel: 'BASIC',
-            bullets: const [
-              'Add images to vehicle',
-              'Post requests & book trips',
-              'Standard support',
-            ],
-            isRecommended: false,
-            onSelect: () {
-              AppPreferences.instance.setSubscriptionPlan(
-                SubscriptionPlan.basic,
-              );
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Basic plan selected')),
-              );
-              Navigator.pop(context);
-            },
-          ),
-          const SizedBox(height: 12),
-          _PlanCard(
-            title: 'Premium',
-            priceLabel: 'PREMIUM',
-            bullets: const [
-              'Everything in Basic',
-              'Verify PAN / Aadhaar',
-              'Verify RC / Driving License',
-            ],
-            isRecommended: true,
-            onSelect: () {
-              AppPreferences.instance.setSubscriptionPlan(
-                SubscriptionPlan.premium,
-              );
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Premium plan selected')),
-              );
-              Navigator.pop(context);
-            },
-          ),
-          const SizedBox(height: 12),
-          _PlanCard(
-            title: 'Expert',
-            priceLabel: 'EXPERT',
-            bullets: const [
-              'Everything in Premium',
-              'Expert connection',
-              'Priority customer support',
-            ],
-            isRecommended: false,
-            isComingSoon: true, // Set to coming soon
-            onSelect: null, // No action for coming soon
-          ),
-        ],
+      body: ValueListenableBuilder<String>(
+        valueListenable: AppPreferences.instance.currencyCode,
+        builder: (context, currency, _) {
+          // Use FutureBuilder to fetch pricing from database
+          return FutureBuilder<Map<String, dynamic>>(
+            future: _getPricingFromDatabase(currency),
+            builder: (context, snapshot) {
+              // Show loading indicator while fetching
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Center(
+                  child: CircularProgressIndicator(),
+                );
+              }
+
+              // Use fetched pricing or fallback to default
+              final pricing = snapshot.data ?? {
+                'symbol': '\$',
+                'premium': 12.99,
+                'expert': 59.99,
+                'deposit': 599.0,
+                'tier': 1,
+              };
+
+              final symbol = pricing['symbol'] as String;
+              final premiumPrice = pricing['premium'] as double;
+              final expertPrice = pricing['expert'] as double;
+
+          return ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              ValueListenableBuilder<SubscriptionPlan>(
+                valueListenable: AppPreferences.instance.subscriptionPlan,
+                builder: (context, plan, _) {
+                  return Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [Colors.blue.shade400, Colors.blue.shade600],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Current Plan',
+                          style: TextStyle(
+                            color: Colors.white70,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          plan.name.toUpperCase(),
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 24,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+              const SizedBox(height: 24),
+              Row(
+                children: [
+                  const Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Upgrade Your Experience',
+                          style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        SizedBox(height: 4),
+                        Text(
+                          'Choose a plan that fits your needs',
+                          style: TextStyle(
+                            color: Colors.grey,
+                            fontSize: 14,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: Colors.blue.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.blue, width: 1),
+                    ),
+                    child: Text(
+                      'Currency: $currency',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.blue.shade700,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              _PlanCard(
+                title: 'Basic',
+                priceLabel: 'FREE',
+                price: 0,
+                currencySymbol: symbol,
+                bullets: const [
+                  'Add images to vehicle',
+                  'Post requests & book trips',
+                  'Standard support',
+                  'Basic features access',
+                ],
+                isRecommended: false,
+                onSelect: () async {
+                  await AppPreferences.instance.setSubscriptionPlan(
+                    SubscriptionPlan.basic,
+                  );
+                  if (!context.mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Basic plan selected'),
+                      backgroundColor: Colors.green,
+                    ),
+                  );
+                  Navigator.pop(context);
+                },
+              ),
+            const SizedBox(height: 12),
+            _PlanCard(
+              title: 'Premium',
+              priceLabel: '$symbol${premiumPrice.toStringAsFixed(2)}/month',
+              price: premiumPrice,
+              currencySymbol: symbol,
+              bullets: const [
+                'Everything in Basic',
+                'Verify PAN / Aadhaar',
+                'Verify RC / Driving License',
+                'Priority listing',
+                'Advanced analytics',
+              ],
+              isRecommended: true,
+              onSelect: () => _purchasePlan(context, SubscriptionPlan.premium, premiumPrice),
+            ),
+            const SizedBox(height: 12),
+            _PlanCard(
+              title: 'Expert',
+              priceLabel: '$symbol${expertPrice.toStringAsFixed(2)}/month',
+              price: expertPrice,
+              currencySymbol: symbol,
+              depositAmount: pricing['deposit'] as double,
+              bullets: const [
+                'Everything in Premium',
+                'Expert connection badge',
+                'Priority customer support',
+                'Featured listings',
+                'Dedicated account manager',
+                'Refundable deposit (returned after 12 months)',
+              ],
+              isRecommended: false,
+              isComingSoon: true,
+              onSelect: null,
+            ),
+          ],
+        );
+            }, // End of FutureBuilder builder
+          ); // End of FutureBuilder
+        },
       ),
     );
   }
@@ -1208,18 +1632,24 @@ class ExpertSupportScreen extends StatelessWidget {
 class _PlanCard extends StatelessWidget {
   final String title;
   final String priceLabel;
+  final double price;
+  final String currencySymbol;
+  final double? depositAmount;
   final List<String> bullets;
   final bool isRecommended;
-  final VoidCallback? onSelect; // Made nullable for coming soon
-  final bool isComingSoon; // Added coming soon flag
+  final VoidCallback? onSelect;
+  final bool isComingSoon;
 
   const _PlanCard({
     required this.title,
     required this.priceLabel,
+    required this.price,
+    required this.currencySymbol,
+    this.depositAmount,
     required this.bullets,
     required this.isRecommended,
-    this.onSelect, // Made optional
-    this.isComingSoon = false, // Default to false
+    this.onSelect,
+    this.isComingSoon = false,
   });
 
   @override
@@ -1227,94 +1657,207 @@ class _PlanCard extends StatelessWidget {
     final color = isComingSoon 
         ? Colors.orange 
         : (isRecommended ? Colors.blue : Colors.grey);
+    
     return Card(
-      elevation: 2,
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Expanded(
+      elevation: isRecommended ? 8 : 2,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: isRecommended 
+            ? BorderSide(color: Colors.blue, width: 2)
+            : BorderSide.none,
+      ),
+      child: Container(
+        decoration: isRecommended
+            ? BoxDecoration(
+                borderRadius: BorderRadius.circular(16),
+                gradient: LinearGradient(
+                  colors: [
+                    Colors.blue.withValues(alpha: 0.05),
+                    Colors.blue.withValues(alpha: 0.1),
+                  ],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+              )
+            : null,
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Header with badges
+              Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          title,
+                          style: const TextStyle(
+                            fontSize: 24,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          priceLabel,
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w600,
+                            color: color,
+                          ),
+                        ),
+                        // Show deposit for Expert plan
+                        if (depositAmount != null) ...[
+                          const SizedBox(height: 4),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 4,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.orange.withValues(alpha: 0.1),
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(
+                                color: Colors.orange,
+                                width: 1,
+                              ),
+                            ),
+                            child: Text(
+                              '+ $currencySymbol${depositAmount!.toStringAsFixed(0)} deposit',
+                              style: const TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.orange,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          const Text(
+                            '(Refundable after 12 months)',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: Colors.grey,
+                              fontStyle: FontStyle.italic,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                  if (isRecommended)
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.blue,
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: const Text(
+                        'POPULAR',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 11,
+                        ),
+                      ),
+                    ),
+                  if (isComingSoon)
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.orange,
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: const Text(
+                        'SOON',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 11,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 20),
+              const Divider(),
+              const SizedBox(height: 16),
+              // Features list
+              ...bullets.map(
+                (b) => Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(
+                        Icons.check_circle,
+                        size: 20,
+                        color: color,
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          b,
+                          style: const TextStyle(
+                            fontSize: 14,
+                            height: 1.4,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+              // Action button
+              SizedBox(
+                width: double.infinity,
+                height: 48,
+                child: FilledButton(
+                  onPressed: isComingSoon ? null : onSelect,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: isComingSoon 
+                        ? Colors.grey[300]
+                        : (isRecommended ? Colors.blue : null),
+                    foregroundColor: isComingSoon 
+                        ? Colors.grey[600]
+                        : Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
                   child: Text(
-                    title,
+                    isComingSoon 
+                        ? 'Coming Soon' 
+                        : (price == 0 ? 'Select Free Plan' : 'Upgrade Now'),
                     style: const TextStyle(
-                      fontSize: 18,
+                      fontSize: 16,
                       fontWeight: FontWeight.bold,
                     ),
                   ),
                 ),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 6,
-                  ),
-                  decoration: BoxDecoration(
-                    color: color.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(999),
-                  ),
+              ),
+              if (price > 0 && !isComingSoon) ...[
+                const SizedBox(height: 12),
+                Center(
                   child: Text(
-                    priceLabel,
+                    'Secure payment via Razorpay/Stripe',
                     style: TextStyle(
-                      color: color,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 12,
+                      fontSize: 11,
+                      color: Colors.grey[600],
                     ),
                   ),
                 ),
               ],
-            ),
-            if (isRecommended) ...[
-              const SizedBox(height: 8),
-              Text(
-                'Recommended',
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
-                  color: Colors.blue[700],
-                ),
-              ),
             ],
-            if (isComingSoon) ...[
-              const SizedBox(height: 8),
-              Text(
-                'Coming Soon',
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
-                  color: Colors.orange[700],
-                ),
-              ),
-            ],
-            const SizedBox(height: 12),
-            ...bullets.map(
-              (b) => Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: Row(
-                  children: [
-                    Icon(Icons.check_circle, size: 18, color: color),
-                    const SizedBox(width: 10),
-                    Expanded(child: Text(b)),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 12),
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton(
-                onPressed: isComingSoon ? null : onSelect,
-                style: isComingSoon 
-                    ? FilledButton.styleFrom(
-                        backgroundColor: Colors.grey[300],
-                        foregroundColor: Colors.grey[600],
-                      )
-                    : null,
-                child: Text(isComingSoon ? 'Coming Soon' : 'Choose'),
-              ),
-            ),
-          ],
+          ),
         ),
       ),
     );

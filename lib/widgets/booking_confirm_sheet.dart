@@ -17,7 +17,6 @@ import '../services/passenger_repository.dart';
 import '../services/profile_repository.dart';
 import '../services/stripe_service.dart';
 import '../services/payment_service.dart';
-import '../services/razorpay_service.dart';
 import '../services/auth_repository.dart';
 import '../services/vehicle_repository.dart';
 
@@ -989,44 +988,25 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
                                   final countryCode = PaymentService.countryCodeFromLocation(slotLocation) ?? 'IN';
                                   final currency = (countryCode == 'IN') ? 'inr' : 'usd';
 
-                                  // ── TEST MODE BYPASS ──────────────────────────────────────
-                                  final isTestKey = RazorpayService.keyId.startsWith('rzp_test_');
                                   final profile = ProfileRepository.instance.profile.value;
-                                  Map<String, dynamic>? bookingResult;
-                                  
-                                  if (isTestKey) {
-                                    debugPrint('[Payment] Test key detected — bypassing payment gateway');
-                                    final otp = PaymentService.instance.generateTestOtp(amountInPaise);
-                                    bookingResult = {
-                                      'payment_id': 'test_${DateTime.now().millisecondsSinceEpoch}',
-                                      'gateway': 'razorpay',
-                                      'otp': otp,
-                                      'payment_intent_id': null,
-                                      'client_secret': null,
-                                      'countdown_end_time': DateTime.now()
-                                          .add(const Duration(hours: 1))
-                                          .toIso8601String(),
-                                    };
-                                  } else {
-                                    // Live key — use real payment gateway
-                                    bookingResult = await PaymentService.instance.processPayment(
-                                      amountInPaise: amountInPaise,
-                                      currency: currency,
-                                      countryCode: countryCode,
-                                      providerId: widget.providerId,
-                                      slotId: widget.slot.id,
-                                      userName: names.isNotEmpty ? names.first : 'User',
-                                      userEmail: emails.isNotEmpty && emails.first != null
-                                          ? emails.first!
-                                          : '',
-                                      userPhone: phones.isNotEmpty && phones.first != null
-                                          ? phones.first!
-                                          : (profile.phone ?? ''),
-                                      description: 'Booking: ${(widget.slot.fromLocation?.isNotEmpty ?? false) ? widget.slot.fromLocation! : (widget.slot.baseLocation ?? '')}',
-                                      commissionAmount: commissionAmount,
-                                    );
-                                  }
-                                  // ── END TEST MODE BYPASS ──────────────────────────────────
+
+                                  // Always use the real payment gateway (test keys work with real Razorpay test flow)
+                                  final bookingResult = await PaymentService.instance.processPayment(
+                                    amountInPaise: amountInPaise,
+                                    currency: currency,
+                                    countryCode: countryCode,
+                                    providerId: widget.providerId,
+                                    slotId: widget.slot.id,
+                                    userName: names.isNotEmpty ? names.first : 'User',
+                                    userEmail: emails.isNotEmpty && emails.first != null
+                                        ? emails.first!
+                                        : '',
+                                    userPhone: phones.isNotEmpty && phones.first != null
+                                        ? phones.first!
+                                        : (profile.phone ?? ''),
+                                    description: 'Booking: ${(widget.slot.fromLocation?.isNotEmpty ?? false) ? widget.slot.fromLocation! : (widget.slot.baseLocation ?? '')}',
+                                    commissionAmount: commissionAmount,
+                                  );
 
                                   if (!context.mounted) return;
                                   _closeOrderLoadingDialogIfAny();
@@ -1173,16 +1153,12 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
                                     }
                                   } else {
                                     final reason = bookingResult?['error'] as String?;
-                                    final isTestMode = RazorpayService.keyId.startsWith('rzp_test_');
                                     final message = (reason != null && reason.isNotEmpty)
                                         ? reason
                                         : 'Payment cancelled.';
-                                    final fullMessage = isTestMode
-                                        ? '$message\nTest card: 4111 1111 1111 1111, any future expiry, any CVV'
-                                        : message;
                                     ScaffoldMessenger.of(context).showSnackBar(
                                       SnackBar(
-                                        content: Text(fullMessage),
+                                        content: Text(message),
                                         backgroundColor: Colors.black87,
                                         duration: const Duration(seconds: 6),
                                       ),

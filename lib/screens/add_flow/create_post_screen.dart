@@ -203,6 +203,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     }
 
     // Step 1: Pick date
+    if (!mounted) return;
     final DateTime? pickedDate = await showDatePicker(
       context: context,
       initialDate: current,

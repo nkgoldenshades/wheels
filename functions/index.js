@@ -9,15 +9,15 @@ require('dotenv').config();
 admin.initializeApp();
 
 // Initialize Stripe
-const stripeSecretKey = process.env.STRIPE_SECRET_KEY || functions.config()?.stripe?.secret_key;
+const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
 const stripe = require('stripe')(stripeSecretKey);
 
 // Initialize Firestore-based Stripe escrow functions
 const stripeEscrow = require('./stripe-escrow');
 
 // Get Razorpay keys from environment variables ONLY — never hardcode secrets
-// Set via: firebase functions:config:set razorpay.key_id="rzp_test_..." razorpay.key_secret="..."
-// Or locally: create functions/.env with RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET
+// Set locally: add RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET to functions/.env
+// Set for deployment: use Firebase Secret Manager or .env files per environment
 const RAZORPAY_KEY_ID = process.env.RAZORPAY_KEY_ID;
 const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET;
 
@@ -327,7 +327,7 @@ exports.aiChat = functions.https.onCall(async (data, context) => {
  * Get response from Google Gemini AI
  */
 async function getGeminiResponse(message, conversationHistory = []) {
-  const GEMINI_API_KEY = process.env.GEMINI_API_KEY || functions.config()?.gemini?.api_key;
+  const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
   
   if (!GEMINI_API_KEY) {
     console.log('Gemini API key not configured, using enhanced fallback');

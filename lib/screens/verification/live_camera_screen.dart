@@ -52,11 +52,13 @@ class _LiveCameraScreenState extends State<LiveCameraScreen> {
               source: ImageSource.camera,
               imageQuality: 90,
             );
-      if (picked == null || !mounted) {
-        Navigator.pop(context);
+      if (picked == null) {
+        if (mounted) Navigator.pop(context);
         return;
       }
+      if (!mounted) return;
       final bytes = await picked.readAsBytes();
+      if (!mounted) return;
       Navigator.pop(context, bytes);
     } catch (e) {
       if (mounted) {
@@ -104,6 +106,7 @@ class _LiveCameraScreenState extends State<LiveCameraScreen> {
       debugPrint('Camera initialization error: $e');
       if (!mounted) return;
       
+      if (!mounted) return;
       String errorMessage = 'Camera error: $e';
       if (e.toString().contains('RECORD_AUDIO') || e.toString().contains('audio')) {
         errorMessage = 'Audio permission required for video recording. Please grant microphone permission.';
@@ -157,6 +160,7 @@ class _LiveCameraScreenState extends State<LiveCameraScreen> {
     } catch (e) {
       if (!mounted) return;
       
+      if (!mounted) return;
       String errorMessage = 'Failed to start recording: $e';
       if (e.toString().contains('RECORD_AUDIO') || e.toString().contains('audio')) {
         errorMessage = 'Audio permission required for video recording. Please grant microphone permission.';
