@@ -977,8 +977,8 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
                                 _showOrderLoadingDialog();
                                 
                                 try {
-                                  // Calculate application fee (10% commission)
-                                  final commissionAmount = (amountInPaise * 0.1).toInt();
+                                  // Calculate application fee (5% commission - covers gateway fees + profit)
+                                  final commissionAmount = (amountInPaise * 0.05).toInt();
 
                                   // Detect country from slot location to route payment gateway
                                   final slotLocation = (widget.slot.fromLocation?.isNotEmpty ?? false)
