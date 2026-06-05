@@ -8,10 +8,6 @@ require('dotenv').config();
 
 admin.initializeApp();
 
-// Initialize Stripe
-const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
-const stripe = require('stripe')(stripeSecretKey);
-
 // Initialize Firestore-based Stripe escrow functions
 const stripeEscrow = require('./stripe-escrow');
 
@@ -273,6 +269,11 @@ exports.autoRefundExpired = stripeEscrow.autoRefundExpired;
 exports.refundPayment = stripeEscrow.refundPayment;
 exports.releaseFunds = stripeEscrow.releaseFunds;
 exports.createCheckoutSession = stripeEscrow.createCheckoutSession;
+exports.createSubscriptionCheckoutSession = stripeEscrow.createSubscriptionCheckoutSession;
+exports.createConnectedAccount = stripeEscrow.createConnectedAccount;
+exports.stripeWebhook = stripeEscrow.stripeWebhook;
+exports.initiateStripePayout = stripeEscrow.initiateStripePayout;
+exports.initiateRazorpayPayout = stripeEscrow.initiateRazorpayPayout;
 
 /**
  * AI Chat Endpoint

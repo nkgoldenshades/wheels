@@ -75,8 +75,7 @@ class VehicleRepository {
               if (debugJson['gallery_images'] is List) {
                 debugJson['gallery_images'] = '[${(debugJson['gallery_images'] as List).length} images]';
               }
-              debugPrint('🔍 RAW VEHICLE JSON: $debugJson');
-              debugPrint('🔍 profiles value: ${json['profiles']}');
+              // Removed excessive debug logging - only log errors
             }
             
             // Flatten the profiles data into the vehicle object
@@ -84,9 +83,6 @@ class VehicleRepository {
             if (json['profiles_public'] != null) {
               vehicleData['profile_name'] = json['profiles_public']['full_name'];
               vehicleData['profile_avatar'] = json['profiles_public']['profile_photo_url'];
-              if (kDebugMode) {
-                debugPrint('✅ Profile found: ${json['profiles_public']['full_name']}');
-              }
             } else {
               if (kDebugMode) {
                 debugPrint('❌ profiles_public is NULL for vehicle: ${json['id']}');

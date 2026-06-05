@@ -100,28 +100,110 @@ class SlotDetailScreen extends StatelessWidget {
                     final updated = await _showEditSlotSheet(context, resolvedSlot);
                     if (updated == null || !context.mounted) return;
 
+                    // Detect changes and create edit history entry
+                    final changes = <String, dynamic>{};
+                    
+                    // Track price change
+                    if (resolvedSlot.price != updated.price) {
+                      changes['price'] = {
+                        'old': resolvedSlot.price.toInt(),
+                        'new': updated.price.toInt(),
+                      };
+                    }
+                    
+                    // Track capacity change
+                    if (resolvedSlot.capacity != updated.capacity) {
+                      changes['capacity'] = {
+                        'old': resolvedSlot.capacity,
+                        'new': updated.capacity,
+                      };
+                    }
+                    
+                    // Track time changes
+                    if (resolvedSlot.startTime != updated.startTime) {
+                      changes['startTime'] = {
+                        'old': resolvedSlot.startTime.toIso8601String(),
+                        'new': updated.startTime.toIso8601String(),
+                      };
+                    }
+                    
+                    if (resolvedSlot.endTime != updated.endTime) {
+                      changes['endTime'] = {
+                        'old': resolvedSlot.endTime.toIso8601String(),
+                        'new': updated.endTime.toIso8601String(),
+                      };
+                    }
+                    
+                    // Track location changes
+                    if (resolvedSlot.fromLocation != updated.fromLocation) {
+                      changes['fromLocation'] = {
+                        'old': resolvedSlot.fromLocation ?? '',
+                        'new': updated.fromLocation ?? '',
+                      };
+                    }
+                    
+                    if (resolvedSlot.toLocation != updated.toLocation) {
+                      changes['toLocation'] = {
+                        'old': resolvedSlot.toLocation ?? '',
+                        'new': updated.toLocation ?? '',
+                      };
+                    }
+                    
+                    if (resolvedSlot.baseLocation != updated.baseLocation) {
+                      changes['baseLocation'] = {
+                        'old': resolvedSlot.baseLocation ?? '',
+                        'new': updated.baseLocation ?? '',
+                      };
+                    }
+                    
+                    if (resolvedSlot.radius != updated.radius) {
+                      changes['radius'] = {
+                        'old': resolvedSlot.radius ?? 0,
+                        'new': updated.radius ?? 0,
+                      };
+                    }
+                    
+                    // Track notes/terms change
+                    if (resolvedSlot.notes != updated.notes) {
+                      changes['notes'] = {
+                        'old': resolvedSlot.notes ?? '',
+                        'new': updated.notes ?? '',
+                      };
+                    }
+                    
+                    // Add edit history if there are changes
+                    final updatedWithHistory = changes.isEmpty
+                        ? updated
+                        : updated.copyWith(
+                            editHistory: resolvedSlot.editHistory.addEdit(changes),
+                          );
+
                     final existsInProviderRepo = slot_repo.SlotRepository.instance.allSlotsRaw
-                        .any((s) => s.id == updated.id);
+                        .any((s) => s.id == updatedWithHistory.id);
                     final existsInUserRepo =
-                        CustomerSlotRepository.instance.getById(updated.id) != null;
+                        CustomerSlotRepository.instance.getById(updatedWithHistory.id) != null;
 
                     if (existsInProviderRepo) {
-                      await slot_repo.SlotRepository.instance.updateSlot(updated);
+                      await slot_repo.SlotRepository.instance.updateSlot(updatedWithHistory);
                     } else if (existsInUserRepo) {
-                      await CustomerSlotRepository.instance.updateSlot(updated);
+                      await CustomerSlotRepository.instance.updateSlot(updatedWithHistory);
                     } else {
-                      await slot_repo.SlotRepository.instance.updateSlot(updated);
+                      await slot_repo.SlotRepository.instance.updateSlot(updatedWithHistory);
                     }
 
                     // Recalculate remaining capacity based on new capacity value
                     await BookingRepository.instance.recalculateCapacity(
-                      updated.id,
-                      updated.capacity,
+                      updatedWithHistory.id,
+                      updatedWithHistory.capacity,
                     );
 
                     if (!context.mounted) return;
                     ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Post updated')),
+                      SnackBar(
+                        content: Text(changes.isEmpty 
+                            ? 'Post updated' 
+                            : 'Post updated (Edit #${updatedWithHistory.editHistory.totalEdits})'),
+                      ),
                     );
                   },
                 ),
@@ -431,12 +513,13 @@ class SlotDetailScreen extends StatelessWidget {
 
     Future<void> pickTime({required bool isStart, required void Function(void Function()) setSheetState}) async {
       final current = isStart ? startTime : endTime;
+      final now = DateTime.now();
 
-      // Step 1: Pick date
+      // Step 1: Pick date - prevent past dates
       final pickedDate = await showDatePicker(
         context: context,
-        initialDate: current,
-        firstDate: DateTime.now().subtract(const Duration(days: 1)),
+        initialDate: current.isBefore(now) ? now : current,
+        firstDate: now, // Changed: Cannot select past dates
         lastDate: DateTime.now().add(const Duration(days: 365)),
       );
       if (pickedDate == null || !context.mounted) return;
@@ -459,6 +542,18 @@ class SlotDetailScreen extends StatelessWidget {
         picked.hour,
         picked.minute,
       );
+
+      // Prevent selecting past times
+      if (newDt.isBefore(now)) {
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Cannot select a time in the past'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
 
       setSheetState(() {
         if (isStart) {
@@ -894,6 +989,18 @@ class SlotDetailScreen extends StatelessWidget {
             isProviderView: false,
             autoCloseSeconds: 3,
           ),
+        ),
+      );
+      return;
+    }
+
+    // Prevent self-booking: Check BEFORE showing payment sheet
+    if (userId == providerId) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('You cannot book your own service'),
+          backgroundColor: Colors.orange,
         ),
       );
       return;

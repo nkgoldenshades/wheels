@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'profile_repository.dart';
 
 enum SubscriptionPlan { basic, premium, expert }
 
@@ -55,10 +53,6 @@ class AppPreferences {
     final autoCurrency = _countryCurrencyMap[country] ?? 'USD';
     await setCurrencyCode(autoCurrency);
 
-    // Auto-suggest payment provider based on country
-    // Razorpay only works for Indian providers
-    final autoProvider = (country == 'India') ? 'razorpay' : 'stripe';
-    await ProfileRepository.instance.updatePaymentProvider(autoProvider);
   }
 
   // Country → Currency mapping

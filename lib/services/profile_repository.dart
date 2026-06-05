@@ -529,8 +529,7 @@ class ProfileRepository {
   Future<void> updateCountry(String country) async {
     final p = _currentProfile ?? profile.value;
     if (p.id.isEmpty) throw Exception('No profile loaded');
-    final provider = (country == 'IN' || country == 'India') ? 'razorpay' : 'stripe';
-    await saveProfile(p.copyWith(country: country, paymentProvider: provider));
+    await saveProfile(p.copyWith(country: country));
   }
 
   Future<bool> deductAICredits(int amount) async {

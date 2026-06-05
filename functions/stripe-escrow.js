@@ -23,6 +23,16 @@ const supabase = (supabaseUrl && supabaseServiceRoleKey)
     })
   : null;
 
+const stripeSupabaseSecrets = [
+  'STRIPE_SECRET_KEY',
+  'STRIPE_WEBHOOK_SECRET',
+  'SUPABASE_URL',
+  'SUPABASE_SERVICE_ROLE_KEY',
+];
+const stripeSupabaseRuntime = functions.runWith({
+  secrets: stripeSupabaseSecrets,
+});
+
 async function _getAuthUid(req) {
   const header = req.headers?.authorization || req.headers?.Authorization;
   if (!header || typeof header !== 'string') return null;
@@ -46,11 +56,131 @@ function _toInt(value) {
   return null;
 }
 
+function _stripeCountryCode(country) {
+  if (typeof country !== 'string' || country.trim() === '') return null;
+  const normalized = country.trim();
+  if (/^[a-z]{2}$/i.test(normalized)) return normalized.toUpperCase();
+
+  const countryMap = {
+    'United States': 'US',
+    'United Kingdom': 'GB',
+    Australia: 'AU',
+    Canada: 'CA',
+    Singapore: 'SG',
+    UAE: 'AE',
+    'United Arab Emirates': 'AE',
+    Germany: 'DE',
+    France: 'FR',
+    Japan: 'JP',
+    'New Zealand': 'NZ',
+    Ireland: 'IE',
+    Netherlands: 'NL',
+    Switzerland: 'CH',
+    Sweden: 'SE',
+    Norway: 'NO',
+    Denmark: 'DK',
+    Finland: 'FI',
+    Belgium: 'BE',
+    Austria: 'AT',
+    Portugal: 'PT',
+    Italy: 'IT',
+    Spain: 'ES',
+    Poland: 'PL',
+    'Czech Republic': 'CZ',
+    Hungary: 'HU',
+    Romania: 'RO',
+    'South Africa': 'ZA',
+    Brazil: 'BR',
+    Mexico: 'MX',
+    Malaysia: 'MY',
+    Thailand: 'TH',
+    Philippines: 'PH',
+    Indonesia: 'ID',
+    'South Korea': 'KR',
+    'Hong Kong': 'HK',
+    India: 'IN',
+  };
+
+  return countryMap[normalized] || null;
+}
+
+/**
+ * Create Stripe Connect Express account and onboarding link for a provider.
+ */
+exports.createConnectedAccount = stripeSupabaseRuntime.https.onRequest(async (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  if (req.method === 'OPTIONS') {
+    res.set('Access-Control-Allow-Methods', 'POST');
+    res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    return res.status(204).send('');
+  }
+
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  let callerUid = null;
+  try {
+    callerUid = await _getAuthUid(req);
+  } catch (e) {
+    return res.status(401).json({ error: 'Invalid auth token' });
+  }
+  if (!callerUid) {
+    return res.status(401).json({ error: 'Missing auth token' });
+  }
+
+  const { email, country, user_id, return_url, refresh_url } = req.body;
+
+  if (!email || !country || !user_id) {
+    return res.status(400).json({ error: 'Missing email, country, or user_id' });
+  }
+  if (callerUid !== user_id) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+
+  try {
+    if (!stripe) {
+      return res.status(500).json({ error: 'Stripe is not configured' });
+    }
+
+    const countryCode = _stripeCountryCode(country);
+    if (!countryCode) {
+      return res.status(400).json({ error: 'Unsupported or unknown Stripe country' });
+    }
+
+    const account = await stripe.accounts.create({
+      type: 'express',
+      country: countryCode,
+      email,
+      capabilities: {
+        card_payments: { requested: true },
+        transfers: { requested: true },
+      },
+      metadata: { firebase_uid: user_id },
+    });
+
+    const accountLink = await stripe.accountLinks.create({
+      account: account.id,
+      refresh_url: refresh_url || 'https://vervestrideal.com/stripe-refresh',
+      return_url: return_url || 'https://vervestrideal.com/stripe-return',
+      type: 'account_onboarding',
+    });
+
+    res.json({
+      account_id: account.id,
+      url: accountLink.url,
+    });
+  } catch (error) {
+    console.error('createConnectedAccount error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 /**
  * Create booking with escrow payment
  * Called when user books a post
  */
-exports.createBooking = functions.https.onRequest(async (req, res) => {
+exports.createBooking = stripeSupabaseRuntime.https.onRequest(async (req, res) => {
   // Enable CORS
   res.set('Access-Control-Allow-Origin', '*');
   if (req.method === 'OPTIONS') {
@@ -184,7 +314,7 @@ exports.createBooking = functions.https.onRequest(async (req, res) => {
  * Verify OTP and release funds to provider
  * Called when provider enters OTP
  */
-exports.verifyOtp = functions.https.onRequest(async (req, res) => {
+exports.verifyOtp = stripeSupabaseRuntime.https.onRequest(async (req, res) => {
   res.set('Access-Control-Allow-Origin', '*');
   if (req.method === 'OPTIONS') {
     res.set('Access-Control-Allow-Methods', 'POST');
@@ -405,7 +535,7 @@ exports.verifyOtp = functions.https.onRequest(async (req, res) => {
  * Auto-refund expired bookings
  * Run this as a scheduled function every minute
  */
-exports.autoRefundExpired = functions.pubsub
+exports.autoRefundExpired = stripeSupabaseRuntime.pubsub
   .schedule('every 1 minutes')
   .onRun(async (context) => {
     const nowIso = new Date().toISOString();
@@ -507,7 +637,7 @@ exports.autoRefundExpired = functions.pubsub
 /**
  * Manual refund endpoint (for admin/support)
  */
-exports.refundPayment = functions.https.onRequest(async (req, res) => {
+exports.refundPayment = stripeSupabaseRuntime.https.onRequest(async (req, res) => {
   res.set('Access-Control-Allow-Origin', '*');
   if (req.method === 'OPTIONS') {
     res.set('Access-Control-Allow-Methods', 'POST');
@@ -536,7 +666,7 @@ exports.refundPayment = functions.https.onRequest(async (req, res) => {
 /**
  * Release funds manually (for admin/support)
  */
-exports.releaseFunds = functions.https.onRequest(async (req, res) => {
+exports.releaseFunds = stripeSupabaseRuntime.https.onRequest(async (req, res) => {
   res.set('Access-Control-Allow-Origin', '*');
   if (req.method === 'OPTIONS') {
     res.set('Access-Control-Allow-Methods', 'POST');
@@ -589,7 +719,7 @@ exports.releaseFunds = functions.https.onRequest(async (req, res) => {
  * Create Stripe Checkout Session for web payments
  * Called when web users want to pay
  */
-exports.createCheckoutSession = functions.https.onRequest(async (req, res) => {
+exports.createCheckoutSession = stripeSupabaseRuntime.https.onRequest(async (req, res) => {
   res.set('Access-Control-Allow-Origin', '*');
   if (req.method === 'OPTIONS') {
     res.set('Access-Control-Allow-Methods', 'POST');
@@ -751,6 +881,101 @@ exports.createCheckoutSession = functions.https.onRequest(async (req, res) => {
 });
 
 /**
+ * Create Stripe Checkout Session for subscription plan payments.
+ * This does not create a booking or escrow hold.
+ */
+exports.createSubscriptionCheckoutSession = stripeSupabaseRuntime.https.onRequest(async (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  if (req.method === 'OPTIONS') {
+    res.set('Access-Control-Allow-Methods', 'POST');
+    res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    return res.status(204).send('');
+  }
+
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  let callerUid = null;
+  try {
+    callerUid = await _getAuthUid(req);
+  } catch (e) {
+    return res.status(401).json({ error: 'Invalid auth token' });
+  }
+  if (!callerUid) {
+    return res.status(401).json({ error: 'Missing auth token' });
+  }
+
+  const {
+    user_id,
+    plan_name,
+    amount,
+    currency,
+    success_url,
+    cancel_url,
+  } = req.body;
+
+  if (!user_id || !plan_name) {
+    return res.status(400).json({ error: 'Missing user_id or plan_name' });
+  }
+  if (callerUid !== user_id) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+
+  const parsedAmount = _toInt(amount);
+  const normalizedCurrency =
+    typeof currency === 'string' && currency.trim() !== ''
+      ? currency.trim().toLowerCase()
+      : 'usd';
+
+  if (parsedAmount === null || parsedAmount <= 0) {
+    return res.status(400).json({ error: 'Invalid amount' });
+  }
+
+  try {
+    if (!stripe) {
+      return res.status(500).json({ error: 'Stripe is not configured' });
+    }
+
+    const encodedPlanName = encodeURIComponent(plan_name);
+    const session = await stripe.checkout.sessions.create({
+      payment_method_types: ['card'],
+      line_items: [
+        {
+          price_data: {
+            currency: normalizedCurrency,
+            product_data: {
+              name: `${plan_name} Plan`,
+              description: 'QuickOHunt subscription plan',
+            },
+            unit_amount: parsedAmount,
+          },
+          quantity: 1,
+        },
+      ],
+      mode: 'payment',
+      success_url: success_url || `https://vaultwheels.web.app/#/payment-success?type=subscription&plan=${encodedPlanName}`,
+      cancel_url: cancel_url || 'https://vaultwheels.web.app/#/payment-cancel?type=subscription',
+      metadata: {
+        user_id,
+        plan_name,
+        type: 'subscription',
+      },
+    });
+
+    res.json({
+      success: true,
+      url: session.url,
+      session_id: session.id,
+      payment_intent: session.payment_intent,
+    });
+  } catch (error) {
+    console.error('createSubscriptionCheckoutSession error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
  * Stripe Webhook handler
  * Handles checkout.session.completed to confirm web payments
  * and payment_intent.canceled to mark expired/cancelled bookings.
@@ -758,7 +983,7 @@ exports.createCheckoutSession = functions.https.onRequest(async (req, res) => {
  * Set your webhook secret in Firebase config:
  *   firebase functions:config:set stripe.webhook_secret="whsec_..."
  */
-exports.stripeWebhook = functions.https.onRequest(async (req, res) => {
+exports.stripeWebhook = stripeSupabaseRuntime.https.onRequest(async (req, res) => {
   const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
   if (!webhookSecret) {
@@ -783,6 +1008,11 @@ exports.stripeWebhook = functions.https.onRequest(async (req, res) => {
       // Web checkout: user completed payment on Stripe-hosted page
       case 'checkout.session.completed': {
         const session = event.data.object;
+        if (session.metadata?.type === 'subscription') {
+          console.log(`Subscription checkout completed for user ${session.metadata?.user_id}`);
+          break;
+        }
+
         const bookingId = session.metadata?.booking_id;
         const paymentIntentId = session.payment_intent;
 
@@ -872,7 +1102,7 @@ exports.stripeWebhook = functions.https.onRequest(async (req, res) => {
  * Initiate Stripe payout to provider's connected account
  * Called from WithdrawScreen for international providers
  */
-exports.initiateStripePayout = functions.https.onRequest(async (req, res) => {
+exports.initiateStripePayout = stripeSupabaseRuntime.https.onRequest(async (req, res) => {
   res.set('Access-Control-Allow-Origin', '*');
   if (req.method === 'OPTIONS') {
     res.set('Access-Control-Allow-Methods', 'POST');
@@ -903,8 +1133,8 @@ exports.initiateStripePayout = functions.https.onRequest(async (req, res) => {
     // Sum all completed bookings with pending payout for this provider
     const { data: bookings, error: bookingsError } = await supabase
       .from('bookings')
-      .select('id, payment_amount, commission_amount, currency')
-      .eq('profile_provider_id', user_id)
+      .select('id, amount, commission_amount, currency')
+      .eq('provider_id', user_id)
       .eq('status', 'completed')
       .eq('payout_status', 'pending');
 
@@ -917,7 +1147,7 @@ exports.initiateStripePayout = functions.https.onRequest(async (req, res) => {
     const byCurrency = {};
     for (const b of bookings) {
       const cur = (b.currency || 'usd').toLowerCase();
-      const net = (b.payment_amount || 0) - (b.commission_amount || 0);
+      const net = (b.amount || 0) - (b.commission_amount || 0);
       byCurrency[cur] = (byCurrency[cur] || 0) + net;
     }
 
@@ -985,8 +1215,8 @@ exports.initiateRazorpayPayout = functions.https.onRequest(async (req, res) => {
     // Sum all completed INR bookings with pending payout
     const { data: bookings, error: bookingsError } = await supabase
       .from('bookings')
-      .select('id, payment_amount, commission_amount')
-      .eq('profile_provider_id', user_id)
+      .select('id, amount, commission_amount')
+      .eq('provider_id', user_id)
       .eq('status', 'completed')
       .eq('payout_status', 'pending')
       .ilike('currency', 'inr');
@@ -997,7 +1227,7 @@ exports.initiateRazorpayPayout = functions.https.onRequest(async (req, res) => {
     }
 
     const totalPaise = bookings.reduce((sum, b) => {
-      return sum + ((b.payment_amount || 0) - (b.commission_amount || 0));
+      return sum + ((b.amount || 0) - (b.commission_amount || 0));
     }, 0);
 
     if (totalPaise <= 0) {

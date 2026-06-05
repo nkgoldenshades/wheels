@@ -10,9 +10,22 @@ class StripeService {
   StripeService._();
   static final StripeService instance = StripeService._();
 
-  // Stripe test keys
-  static const String publishableKey =
+  // ═══════════════════════════════════════════════════════════
+  // 🔑 PAYMENT MODE CONFIGURATION
+  // ═══════════════════════════════════════════════════════════
+  // Set to true for TEST mode, false for PRODUCTION mode
+  static const bool USE_TEST_MODE = true; // ← CHANGE THIS TO false FOR PRODUCTION
+  
+  // TEST MODE KEYS (for development/testing)
+  static const String _testPublishableKey =
       'pk_test_51SvbBRPL6V2gHHHXPuLctk57x8CXjOHVkInRO4ZIxXezQQv6pnQYlgTbg4vcGd5yNh0tqfrZ2ntxq06EzGi2zJqP00w9c4rvqo';
+  
+  // PRODUCTION MODE KEYS (get from dashboard.stripe.com in LIVE mode)
+  // ⚠️ IMPORTANT: Add your live keys before going to production!
+  static const String _livePublishableKey = 'pk_live_XXXXXXXXXXXX'; // ← Replace with your LIVE key
+  
+  // Active publishable key based on mode
+  static String get publishableKey => USE_TEST_MODE ? _testPublishableKey : _livePublishableKey;
 
   // Firebase Cloud Functions base URL
   static const String backendUrl =
@@ -33,6 +46,9 @@ class StripeService {
 
   Future<void> init() async {
     if (_initialized) return;
+
+    debugPrint('🔑 Stripe Mode: ${USE_TEST_MODE ? "TEST 🧪" : "PRODUCTION 🚀"}');
+    debugPrint('🔑 Using Key: ${publishableKey.substring(0, 15)}...');
 
     if (kIsWeb) {
       _initialized = true;
@@ -212,7 +228,12 @@ class StripeService {
     String? refreshUrl,
   }) async {
     try {
+      debugPrint('[StripeService] createConnectedAccount: email=$email, country=$country, userId=$userId');
+      
       final headers = await _authorizedJsonHeaders();
+      debugPrint('[StripeService] Headers: ${headers.keys.join(", ")}');
+      debugPrint('[StripeService] Calling: $backendUrl/createConnectedAccount');
+      
       final response = await http.post(
         Uri.parse('$backendUrl/createConnectedAccount'),
         headers: headers,
@@ -225,15 +246,96 @@ class StripeService {
         }),
       );
 
+      debugPrint('[StripeService] Response status: ${response.statusCode}');
+      
       if (response.statusCode != 200) {
-        debugPrint('createConnectedAccount failed: ${response.statusCode} ${response.body}');
-        return null;
+        debugPrint('[StripeService] Response body: ${response.body}');
+        debugPrint(
+          'createConnectedAccount failed: ${response.statusCode} ${response.body}',
+        );
+        try {
+          final data = json.decode(response.body);
+          if (data is Map<String, dynamic>) {
+            return {
+              'error': data['error']?.toString() ??
+                  'Stripe account setup failed.',
+            };
+          }
+        } catch (_) {
+          // Fall through to a generic message below.
+        }
+        return {
+          'error': 'Stripe account setup failed (${response.statusCode}).',
+        };
       }
 
-      return json.decode(response.body) as Map<String, dynamic>;
+      final result = json.decode(response.body) as Map<String, dynamic>;
+      debugPrint('[StripeService] Account created: ${result['account_id']}');
+      return result;
     } catch (e) {
       debugPrint('createConnectedAccount error: $e');
-      return null;
+      return {'error': 'Failed to connect to Stripe: $e'};
+    }
+  }
+
+  /// Create and open Stripe Checkout for subscription plans.
+  Future<Map<String, dynamic>> processSubscriptionPayment({
+    required int amount,
+    required String currency,
+    required String planName,
+    required String userId,
+  }) async {
+    try {
+      final headers = await _authorizedJsonHeaders();
+      final response = await http.post(
+        Uri.parse('$backendUrl/createSubscriptionCheckoutSession'),
+        headers: headers,
+        body: json.encode({
+          'user_id': userId,
+          'plan_name': planName,
+          'amount': amount,
+          'currency': currency,
+        }),
+      );
+
+      if (response.statusCode != 200) {
+        try {
+          final data = json.decode(response.body);
+          if (data is Map<String, dynamic>) {
+            return {
+              'error': data['error']?.toString() ??
+                  'Could not create Stripe checkout.',
+            };
+          }
+        } catch (_) {
+          // Fall through to generic message below.
+        }
+        return {
+          'error': 'Could not create Stripe checkout (${response.statusCode}).',
+        };
+      }
+
+      final data = json.decode(response.body) as Map<String, dynamic>;
+      final checkoutUrl = data['url'] as String?;
+      if (checkoutUrl == null || checkoutUrl.isEmpty) {
+        return {'error': 'No checkout URL returned from server.'};
+      }
+
+      final launched = await launchUrl(
+        Uri.parse(checkoutUrl),
+        mode: LaunchMode.externalApplication,
+      );
+      if (!launched) {
+        return {'error': 'Could not open Stripe checkout.'};
+      }
+
+      return {
+        ...data,
+        'gateway': 'stripe',
+        'web_redirect': true,
+      };
+    } catch (e) {
+      return {'error': e.toString()};
     }
   }
 

@@ -174,6 +174,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
 
   Future<void> _selectTime({required bool isStart}) async {
     final current = isStart ? _startTime! : _endTime!;
+    final now = DateTime.now();
 
     // Get timezone for the relevant location
     String tzLabel = TimezoneUtils.getTimezoneAbbreviation();
@@ -206,9 +207,9 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     if (!mounted) return;
     final DateTime? pickedDate = await showDatePicker(
       context: context,
-      initialDate: current,
-      firstDate: DateTime.now().subtract(const Duration(days: 1)),
-      lastDate: DateTime.now().add(const Duration(days: 365)),
+      initialDate: current.isBefore(now) ? now : current,
+      firstDate: now,
+      lastDate: now.add(const Duration(days: 365)),
       helpText: 'Select date ($tzLabel)',
     );
     if (pickedDate == null || !mounted) return;
@@ -232,6 +233,19 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       pickedTime.hour,
       pickedTime.minute,
     );
+
+    // Validate that the selected time is not in the past
+    if (newDateTime.isBefore(now)) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Cannot select a time in the past'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+      return;
+    }
 
     setState(() {
       if (isStart) {

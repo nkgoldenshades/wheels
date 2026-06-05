@@ -9,9 +9,21 @@ class RazorpayService {
   RazorpayService._();
   static final RazorpayService instance = RazorpayService._();
 
-  // 🔑 Replace with YOUR key from dashboard.razorpay.com → Settings → API Keys
-  static const String _keyId = 'rzp_test_SMpj1xxJxAcT6K'; // ← PUT YOUR KEY HERE
-  static const String keyId = _keyId;
+  // ═══════════════════════════════════════════════════════════
+  // 🔑 PAYMENT MODE CONFIGURATION
+  // ═══════════════════════════════════════════════════════════
+  // Set to true for TEST mode, false for PRODUCTION mode
+  static const bool USE_TEST_MODE = true; // ← CHANGE THIS TO false FOR PRODUCTION
+  
+  // TEST MODE KEYS (for development/testing)
+  static const String _testKeyId = 'rzp_test_SvBetsinxdM1dN';
+  
+  // PRODUCTION MODE KEYS (get from dashboard.razorpay.com in LIVE mode)
+  // ⚠️ IMPORTANT: Add your live keys before going to production!
+  static const String _liveKeyId = 'rzp_live_XXXXXXXXXXXX'; // ← Replace with your LIVE key
+  
+  // Active key based on mode
+  static String get keyId => USE_TEST_MODE ? _testKeyId : _liveKeyId;
 
   Razorpay? _razorpay;
 
@@ -63,8 +75,12 @@ class RazorpayService {
     required String userName,
     String? orderId,
   }) async {
+    // Log payment mode
+    debugPrint('🔑 Razorpay Mode: ${USE_TEST_MODE ? "TEST 🧪" : "PRODUCTION 🚀"}');
+    debugPrint('🔑 Using Key: ${keyId.substring(0, 12)}...');
+    
     // Dev/placeholder key → skip payment
-    if (_keyId.contains('YourRazorpay') || _keyId.isEmpty) {
+    if (keyId.contains('YourRazorpay') || keyId.isEmpty || keyId.contains('XXXXXXXXXXXX')) {
       debugPrint('[RazorpayService] ⚠️ Placeholder key — bypassing payment');
       return {
         'payment_id': 'dev_${DateTime.now().millisecondsSinceEpoch}',
@@ -76,7 +92,7 @@ class RazorpayService {
     if (kIsWeb) {
       debugPrint('[RazorpayService] 🌐 Web payment via Checkout.js');
       return openRazorpayWeb(
-        keyId: _keyId,
+        keyId: keyId,
         amountInPaise: amountInPaise,
         description: description,
         userEmail: userEmail,
@@ -102,7 +118,7 @@ class RazorpayService {
         });
 
     final options = <String, dynamic>{
-      'key': _keyId,
+      'key': keyId,
       'amount': amountInPaise,
       'currency': 'INR',
       'name': 'VaultWheels',

@@ -361,6 +361,42 @@ class SlotCard extends StatelessWidget {
         Column(
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
+            // Edit history badge - shown if post has been edited
+            if (slot.editHistory.hasEdits) ...[
+              Builder(
+                builder: (ctx) => GestureDetector(
+                  onTap: () => _showEditHistoryDialog(ctx),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade200,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.grey.shade400, width: 1),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.edit_outlined,
+                          size: 12,
+                          color: Colors.grey.shade700,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          'Edited ${slot.editHistory.totalEdits}x',
+                          style: TextStyle(
+                            fontSize: 10,
+                            color: Colors.grey.shade700,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 4),
+            ],
             // Service type badge
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -968,6 +1004,60 @@ class SlotCard extends StatelessWidget {
       }
     } catch (_) {}
     return null;
+  }
+
+  /// Show edit history dialog
+  void _showEditHistoryDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            const Icon(Icons.history, size: 20),
+            const SizedBox(width: 8),
+            Text('Edit History (${slot.editHistory.totalEdits})'),
+          ],
+        ),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: ListView.separated(
+            shrinkWrap: true,
+            itemCount: slot.editHistory.entries.length,
+            separatorBuilder: (context, index) => const Divider(),
+            itemBuilder: (context, index) {
+              final entry = slot.editHistory.entries[index];
+              return ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: CircleAvatar(
+                  backgroundColor: Colors.grey.shade200,
+                  child: Text(
+                    '${entry.editNumber}',
+                    style: TextStyle(
+                      color: Colors.grey.shade700,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+                title: Text(
+                  entry.getDescription(),
+                  style: const TextStyle(fontSize: 14),
+                ),
+                subtitle: Text(
+                  entry.getTimeAgo(),
+                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                ),
+              );
+            },
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
   }
 }
 

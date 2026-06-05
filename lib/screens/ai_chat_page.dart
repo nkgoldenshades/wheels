@@ -4,6 +4,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/auth_repository.dart';
 import '../services/profile_repository.dart';
+import '../services/payment_service.dart';
+import '../services/app_preferences.dart';
 import 'package:image_picker/image_picker.dart';
 // import 'package:speech_to_text/speech_to_text.dart'; // Commented out for Windows compatibility
 // import 'package:permission_handler/permission_handler.dart'; // Not needed
@@ -597,18 +599,7 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
     return InkWell(
       onTap: () async {
         Navigator.pop(context); // Close dialog
-        // TODO: Integrate with payment gateway (Razorpay/Stripe)
-        // For now, just add credits directly (demo)
-        await ProfileRepository.instance.addAICredits(credits);
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('✅ Added $credits credits! (Demo mode - no payment required)'),
-              backgroundColor: Colors.green,
-              duration: const Duration(seconds: 3),
-            ),
-          );
-        }
+        await _purchaseAICredits(context, credits, price);
       },
       child: Container(
         padding: const EdgeInsets.all(12),
@@ -838,6 +829,93 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
     } catch (e) {
       debugPrint('⚠️ Failed to load conversation: $e');
       // Don't show error - just start fresh
+    }
+  }
+
+  Future<void> _purchaseAICredits(BuildContext context, int credits, int price) async {
+    final currentUser = AuthRepository.instance.currentUser;
+    if (currentUser == null) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please login to purchase AI credits'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    // Show loading
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(
+        child: CircularProgressIndicator(),
+      ),
+    );
+
+    try {
+      // Get user details
+      final profile = ProfileRepository.instance.profile.value;
+      final userName = profile.profileName.isEmpty ? 'User' : profile.profileName;
+      final userEmail = currentUser.email;
+      final userPhone = profile.phone ?? '0000000000';
+      final currency = AppPreferences.instance.currencyCode.value;
+
+      // Process payment via PaymentService (uses same subscription flow)
+      final result = await PaymentService.instance.processSubscriptionPayment(
+        planName: 'AI Credits ($credits)',
+        amount: price.toDouble(),
+        userName: userName,
+        userEmail: userEmail,
+        userPhone: userPhone,
+        currency: currency,
+      );
+
+      if (!context.mounted) return;
+      Navigator.pop(context); // Close loading
+
+      if (result['error'] != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Payment failed: ${result['error']}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+
+      if (result['web_redirect'] == true) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Complete payment to receive your AI credits.'),
+            backgroundColor: Colors.blue,
+            duration: Duration(seconds: 4),
+          ),
+        );
+        return;
+      }
+
+      // Payment successful - add credits
+      await ProfileRepository.instance.addAICredits(credits);
+
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('🎉 Added $credits AI credits!'),
+          backgroundColor: Colors.green,
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    } catch (e) {
+      if (!context.mounted) return;
+      Navigator.pop(context); // Close loading
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Payment error: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
     }
   }
 

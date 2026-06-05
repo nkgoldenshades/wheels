@@ -88,14 +88,22 @@ class CustomerSlotRepository {
     try {
       // Load from Supabase first (source of truth)
       final supabase = Supabase.instance.client;
+      final currentUser = AuthRepository.instance.currentUser;
       
-      debugPrint('🔍 Loading user posts from Supabase...');
-      debugPrint('🔍 Firebase user: ${firebase_auth.FirebaseAuth.instance.currentUser?.uid ?? "GUEST"}');
+      if (currentUser == null) {
+        debugPrint('⚠️ No user logged in - cannot load user posts');
+        _slots.value = [];
+        slotsListenable.value = [];
+        return;
+      }
       
-      // Load ALL active user posts - filter expired ones at DB level
+      debugPrint('🔍 Loading user posts from Supabase for user: ${currentUser.id}');
+      
+      // Load ONLY posts created by the current user
       final response = await supabase
           .from('posts')
           .select('*')
+          .eq('profile_id', currentUser.id) // CRITICAL: Filter by current user
           .eq('is_active', true)
           .gt('end_time', DateTime.now().toUtc().toIso8601String())
           .order('created_at', ascending: false);

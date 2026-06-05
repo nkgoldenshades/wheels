@@ -1,93 +1,129 @@
-# Setup Firebase JWT Authentication in Supabase
+# Configure Supabase to Accept Firebase JWT
 
 ## Problem
-Your Flutter app sends Firebase JWT tokens, but Supabase doesn't recognize them as authenticated sessions because Supabase hasn't been configured to validate Firebase JWTs.
+Supabase is rejecting Firebase JWT tokens because it doesn't recognize Firebase as a trusted authentication provider.
 
-## Solution: Configure Supabase to Accept Firebase JWTs
+## Solution: Add Firebase as Custom JWT Provider
 
-### Step 1: Get Your Firebase Project Details
-
+### Step 1: Get Your Firebase Project ID
 1. Go to Firebase Console: https://console.firebase.google.com
 2. Select your project
-3. Go to Project Settings (gear icon)
-4. Note down your **Project ID** (e.g., `vaultwheels-12345`)
+3. Go to **Project Settings** (gear icon)
+4. Copy your **Project ID** (e.g., `quickohunt-12345`)
 
-### Step 2: Configure Supabase JWT Settings
+### Step 2: Configure Supabase to Trust Firebase JWT
 
-1. Go to your Supabase Dashboard
-2. Navigate to **Settings** → **API**
-3. Scroll down to **JWT Settings**
-4. You need to add Firebase as a custom JWT provider
-
-### Step 3: Add Firebase JWT Verification
-
-You have two options:
-
-#### Option A: Use Supabase Auth with Firebase (Recommended)
-
-1. In Supabase Dashboard, go to **Authentication** → **Providers**
-2. Enable **Firebase** as a provider
-3. Add your Firebase credentials:
-   - Project ID: `your-firebase-project-id`
-   - Service Account JSON (download from Firebase)
-
-#### Option B: Use Custom JWT Secret (Alternative)
-
-If Option A doesn't work, you can configure Supabase to accept Firebase's public keys:
-
-1. Get Firebase's public keys from:
-   ```
-   https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com
-   ```
-
-2. In Supabase, you need to configure the JWT secret to validate Firebase tokens
-
-### Step 4: Update Your Supabase RLS Policies
-
-Your RLS policies use `auth.jwt()->>'sub'` which expects the JWT to be validated. Make sure your policies look like this:
+Go to your Supabase Dashboard and run this SQL:
 
 ```sql
--- For authenticated users (Firebase JWT)
-CREATE POLICY "users_insert_own_posts"
-ON public.posts
+-- Configure Supabase to accept Firebase JWT tokens
+-- Replace 'YOUR_FIREBASE_PROJECT_ID' with your actual Firebase project ID
+
+-- Add Firebase as a trusted JWT issuer
+INSERT INTO auth.config (key, value)
+VALUES ('jwt_aud', 'YOUR_FIREBASE_PROJECT_ID')
+ON CONFLICT (key) DO UPDATE SET value = 'YOUR_FIREBASE_PROJECT_ID';
+
+-- Set JWT secret to verify Firebase tokens
+-- Firebase uses RS256 (public key verification)
+-- We need to tell Supabase to fetch the public keys from Firebase
+
+-- Note: This requires Supabase to be configured to use Firebase's JWKS endpoint
+-- The JWKS URL for Firebase is:
+-- https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com
+```
+
+### Step 3: Alternative - Use Supabase Dashboard UI
+
+1. Go to **Supabase Dashboard** → **Authentication** → **Providers**
+2. Scroll down to **"Custom"** or **"Third-party Auth"**
+3. Add a new provider with:
+   - **Provider Name**: Firebase
+   - **JWKS URL**: `https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com`
+   - **JWT Audience**: Your Firebase Project ID
+   - **JWT Issuer**: `https://securetoken.google.com/YOUR_FIREBASE_PROJECT_ID`
+
+### Step 4: Verify Configuration
+
+Run this SQL to test:
+
+```sql
+-- Test if auth.uid() returns the Firebase UID
+SELECT 
+  auth.uid() as firebase_uid,
+  auth.role() as role,
+  (auth.jwt()->>'sub')::text as jwt_subject;
+```
+
+If `firebase_uid` shows your Firebase UID (JgBbKBwgXpTBkttVNryBMCIco172), it's working!
+
+### Step 5: Apply Proper RLS Policies
+
+Once Firebase JWT is recognized, run this SQL:
+
+```sql
+-- Drop existing policies
+DROP POLICY IF EXISTS "trip_media_select" ON storage.objects;
+DROP POLICY IF EXISTS "trip_media_insert" ON storage.objects;
+DROP POLICY IF EXISTS "trip_media_delete" ON storage.objects;
+DROP POLICY IF EXISTS "trip_media_update" ON storage.objects;
+
+-- Allow public to read
+CREATE POLICY "trip_media_select"
+ON storage.objects
+FOR SELECT
+TO public
+USING (bucket_id = 'trip_media');
+
+-- Allow authenticated users to upload to their own path
+CREATE POLICY "trip_media_insert"
+ON storage.objects
 FOR INSERT
 TO authenticated
-WITH CHECK (profile_id = auth.jwt()->>'sub');
+WITH CHECK (
+  bucket_id = 'trip_media' AND
+  (string_to_array(name, '/'))[2] = auth.uid()::text
+);
+
+-- Allow authenticated users to update their own files
+CREATE POLICY "trip_media_update"
+ON storage.objects
+FOR UPDATE
+TO authenticated
+USING (
+  bucket_id = 'trip_media' AND
+  (string_to_array(name, '/'))[2] = auth.uid()::text
+);
+
+-- Allow authenticated users to delete their own files
+CREATE POLICY "trip_media_delete"
+ON storage.objects
+FOR DELETE
+TO authenticated
+USING (
+  bucket_id = 'trip_media' AND
+  (string_to_array(name, '/'))[2] = auth.uid()::text
+);
 ```
 
-### Step 5: Verify JWT is Being Sent
+## Troubleshooting
 
-Add this debug code to check if JWT is in requests:
+If it still doesn't work, check:
+1. Firebase JWT is being sent (you see "🔐 Sending Firebase JWT to Supabase" in logs) ✅
+2. Supabase recognizes the JWT (run the test SQL above)
+3. The storage path matches the format: `{bookingId}/{userId}/{phase}/{filename}`
 
-```dart
-// In your slot_repository.dart
-final authHeaders = supabase.headers;
-debugPrint('🔑 Auth headers: ${authHeaders['Authorization']}');
-```
+## Quick Test (Temporary)
 
-## Alternative: Use Supabase Auth Instead
-
-If Firebase JWT integration is too complex, consider using Supabase Auth directly:
-
-1. Migrate from Firebase Auth to Supabase Auth
-2. Use `supabase.auth.signInWithPassword()` instead of Firebase
-3. RLS policies will work automatically
-
-## Quick Test
-
-Run this SQL in Supabase to check if JWT is being recognized:
+If you want to test quickly while setting up Firebase JWT, you can temporarily use:
 
 ```sql
--- This should return your user ID if JWT is valid
-SELECT auth.jwt()->>'sub' as user_id;
+-- TEMPORARY: Allow all authenticated users (less secure)
+CREATE POLICY "trip_media_insert"
+ON storage.objects
+FOR INSERT
+TO anon, authenticated
+WITH CHECK (bucket_id = 'trip_media');
 ```
 
-If it returns NULL, the JWT is not being validated by Supabase.
-
-## Current Issue
-
-Your app is sending Firebase JWT, but Supabase is treating requests as `anon` (anonymous) instead of `authenticated` because it doesn't know how to validate the Firebase JWT.
-
-## Recommended Fix
-
-The easiest solution is to use Supabase's built-in auth instead of Firebase Auth, OR properly configure Supabase to validate Firebase JWTs using the steps above.
+This allows uploads from anyone with the anon key, but it's not secure for production.

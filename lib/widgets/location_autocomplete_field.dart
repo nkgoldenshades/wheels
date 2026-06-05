@@ -28,7 +28,7 @@ class LocationAutocompleteField extends StatefulWidget {
 }
 
 class _LocationAutocompleteFieldState
-    extends State<LocationAutocompleteField> {
+    extends State<LocationAutocompleteField> with RouteAware {
   final LayerLink _layerLink = LayerLink();
   OverlayEntry? _overlayEntry;
   List<LocationSuggestion> _suggestions = [];
@@ -45,15 +45,46 @@ class _LocationAutocompleteFieldState
     _focusNode.addListener(_onFocusChanged);
   }
 
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Close overlay when route changes (e.g., dialog opens)
+    final route = ModalRoute.of(context);
+    if (route != null && !route.isCurrent) {
+      debugPrint('📍 Route changed - closing overlay');
+      _safeRemoveOverlay();
+    }
+  }
+
   void _onFocusChanged() {
+    if (!mounted) return; // Safety check
+    
+    debugPrint('🔍 LocationAutocomplete focus changed: hasFocus=${_focusNode.hasFocus}, tapInProgress=$_tapInOverlayInProgress');
+    
     if (_focusNode.hasFocus) {
       // Only show overlay if no location is selected
       if (_selectedLocation == null || widget.controller.text.isEmpty) {
+        debugPrint('📍 Showing overlay');
         _showOverlay();
       }
     } else {
-      if (_tapInOverlayInProgress) return;
-      _safeRemoveOverlay();
+      // Focus lost - always close overlay unless we're in the middle of selecting
+      if (_tapInOverlayInProgress) {
+        debugPrint('📍 Tap in overlay in progress, delaying removal');
+        // Give a short delay for the tap to complete
+        Future.delayed(const Duration(milliseconds: 100), () {
+          if (mounted) {
+            _tapInOverlayInProgress = false;
+            if (!_focusNode.hasFocus) {
+              debugPrint('📍 Removing overlay after tap delay');
+              _safeRemoveOverlay();
+            }
+          }
+        });
+      } else {
+        debugPrint('📍 Removing overlay immediately (focus lost)');
+        _safeRemoveOverlay();
+      }
     }
   }
 
@@ -168,12 +199,18 @@ class _LocationAutocompleteFieldState
         widget.controller.text == _getShortName(_selectedLocation!.displayName)) {
       return;
     }
+    
+    // CRITICAL: Always remove existing overlay first
     _safeRemoveOverlay();
 
     // Use post-frame callback to ensure context is valid
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       if (!_focusNode.hasFocus) return;
+      if (_overlayInserted) {
+        debugPrint('⚠️ Overlay already inserted, skipping');
+        return; // Prevent duplicate overlays
+      }
       if (_selectedLocation != null &&
           widget.controller.text ==
               _getShortName(_selectedLocation!.displayName)) {
@@ -183,6 +220,7 @@ class _LocationAutocompleteFieldState
       final overlayState = Overlay.maybeOf(context);
       if (overlayState == null) return;
 
+      debugPrint('📍 Creating new overlay entry');
       _overlayEntry = OverlayEntry(
         builder: (ctx) => Stack(
           children: [
@@ -382,10 +420,21 @@ class _LocationAutocompleteFieldState
   }
 
   void _safeRemoveOverlay() {
-    if (_overlayEntry != null && _overlayInserted) {
+    if (!mounted) return; // Don't try to remove if widget is unmounted
+    
+    debugPrint('📍 _safeRemoveOverlay called, overlayInserted=$_overlayInserted');
+    
+    if (_overlayEntry != null) {
       try {
-        _overlayEntry!.remove();
-      } catch (_) {}
+        if (_overlayInserted) {
+          _overlayEntry!.remove();
+          debugPrint('✅ Overlay removed successfully');
+        }
+        _overlayEntry!.dispose();
+        debugPrint('✅ Overlay disposed successfully');
+      } catch (e) {
+        debugPrint('❌ Error removing overlay: $e');
+      }
     }
     _overlayEntry = null;
     _overlayInserted = false;
@@ -400,9 +449,7 @@ class _LocationAutocompleteFieldState
   void _selectLocation(LocationSuggestion suggestion) {
     if (!mounted) return;
     _tapInOverlayInProgress = false;
-    _focusNode.unfocus();
-    _safeRemoveOverlay();
-
+    
     setState(() {
       _selectedLocation = suggestion;
       widget.controller.text = _getShortName(suggestion.displayName);
@@ -410,6 +457,10 @@ class _LocationAutocompleteFieldState
     });
 
     widget.onLocationSelected?.call(suggestion);
+    
+    // Remove overlay first, then unfocus
+    _safeRemoveOverlay();
+    _focusNode.unfocus();
   }
 
   void _useCurrentLocation() async {

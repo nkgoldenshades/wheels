@@ -219,10 +219,40 @@ class BookingRepository {
       uniqueBookings[booking.id] = booking;
     }
 
+    // Auto-expire overdue bookings
+    final expiredBookings = <Booking>[];
+    
+    for (final booking in uniqueBookings.values) {
+      // Check if booking is overdue (active but past deadline)
+      if (booking.isOverdue) {
+        debugPrint('⏰ Auto-expiring overdue booking: ${booking.id} (deadline: ${booking.deadlineTime})');
+        expiredBookings.add(booking);
+      }
+    }
+    
+    // Update expired bookings in database
+    for (final booking in expiredBookings) {
+      try {
+        await supabase
+            .from('bookings')
+            .update({'status': 'expired'})
+            .eq('id', booking.id);
+        
+        // Update in memory
+        uniqueBookings[booking.id] = booking.copyWith(status: BookingStatus.expired);
+        debugPrint('✅ Expired booking: ${booking.id}');
+      } catch (e) {
+        debugPrint('❌ Failed to expire booking ${booking.id}: $e');
+      }
+    }
+
     bookings.value = uniqueBookings.values.toList();
     await _persist(); // Save to local storage
     
     debugPrint('✅ Loaded ${bookings.value.length} unique bookings from Supabase');
+    if (expiredBookings.isNotEmpty) {
+      debugPrint('⏰ Auto-expired ${expiredBookings.length} overdue bookings');
+    }
   }
 
   Future<void> _persist() async {

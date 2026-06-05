@@ -5,6 +5,7 @@ import 'user_tier.dart';
 import 'post_mode.dart';
 import 'post_status.dart';
 import 'simple_seat_layout.dart';
+import 'edit_history.dart';
 
 enum BookingMode {
   shared, // Multiple customers (default)
@@ -65,6 +66,9 @@ class Slot {
   // Wait for full deadline (hours before start time)
   final int? waitForFullDeadlineHours; // Only used when postMode = waitForFull
 
+  // Edit history - track all changes made to this post
+  final EditHistory editHistory;
+
   Slot({
     required this.id,
     required this.profileId,
@@ -104,7 +108,8 @@ class Slot {
     this.postMode = PostMode.instant,
     this.postStatus = PostStatus.active,
     this.waitForFullDeadlineHours,
-  });
+    EditHistory? editHistory,
+  }) : editHistory = editHistory ?? EditHistory.empty();
 
   Slot copyWith({
     String? id,
@@ -160,6 +165,7 @@ class Slot {
     PostMode? postMode,
     PostStatus? postStatus,
     int? waitForFullDeadlineHours,
+    EditHistory? editHistory,
   }) {
     return Slot(
       id: id ?? this.id,
@@ -204,6 +210,7 @@ class Slot {
       postMode: postMode ?? this.postMode,
       postStatus: postStatus ?? this.postStatus,
       waitForFullDeadlineHours: waitForFullDeadlineHours ?? this.waitForFullDeadlineHours,
+      editHistory: editHistory ?? this.editHistory,
     );
   }
 
@@ -246,6 +253,7 @@ class Slot {
       'postmode': postMode.dbValue,
       'post_status': postStatus.dbValue,
       'wait_for_full_deadline_hours': waitForFullDeadlineHours,
+      'edit_history': editHistory.toJson(),
       'updated_at': DateTime.now().toIso8601String(),
     };
   }
@@ -326,6 +334,7 @@ class Slot {
         explicitStatus: json['post_status'] as String?,
       ),
       waitForFullDeadlineHours: json['wait_for_full_deadline_hours'] ?? json['waitForFullDeadlineHours'],
+      editHistory: EditHistory.fromJson(json['edit_history'] ?? json['editHistory'] ?? json['Edittimesanddetai']),
     );
   }
 }

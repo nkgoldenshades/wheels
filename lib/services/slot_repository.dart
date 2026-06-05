@@ -145,12 +145,11 @@ class SlotRepository {
       debugPrint('🔍 Firebase user: ${firebase_auth.FirebaseAuth.instance.currentUser?.uid ?? "GUEST"}');
       
       // Guest-first: Load posts for everyone (not just logged-in users)
-      // Load ALL active posts - filter expired ones at DB level
+      // Load ALL active posts - including expired ones (filter in UI, not DB)
       final response = await supabase
           .from('posts')
           .select('*')
           .eq('is_active', true)
-          .gt('end_time', DateTime.now().toUtc().toIso8601String())
           .order('created_at', ascending: false);
 
       debugPrint('🔍 Supabase response: ${response.length} posts found');
@@ -515,10 +514,15 @@ class SlotRepository {
         // Post mode
         'postmode': slot.postMode.dbValue,
         'is_active': slot.isAvailable,
+        // Edit history - save to Edittimesanddetai column (user's typo in Supabase)
+        'Edittimesanddetai': slot.editHistory.toJson(),
         'updated_at': DateTime.now().toIso8601String(),
       }).eq('id', slot.id);
 
       debugPrint('✅ Slot updated in Supabase: ${slot.id}');
+      if (slot.editHistory.hasEdits) {
+        debugPrint('📝 Edit history saved: ${slot.editHistory.totalEdits} edits');
+      }
     } catch (e) {
       debugPrint('❌ Failed to update slot in Supabase: $e');
     }

@@ -1,10 +1,12 @@
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-import '../config/supabase_config.dart';
+import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
+import 'package:cloud_functions/cloud_functions.dart';
 import 'stripe_service.dart';
 import 'razorpay_service.dart';
 import 'auth_repository.dart';
+import 'profile_repository.dart';
 
 /// Unified payment gateway router.
 /// - India (countryCode == 'IN') → Razorpay
@@ -13,8 +15,32 @@ class PaymentService {
   PaymentService._();
   static final PaymentService instance = PaymentService._();
 
-  static const String _supabaseUrl = SupabaseConfig.url;
-  static const String _supabaseAnonKey = SupabaseConfig.anonKey;
+  // Firebase Cloud Functions (mobile/desktop only)
+  FirebaseFunctions? _functions;
+  
+  // Firebase Cloud Functions HTTP URL (for web)
+  static const String _firebaseFunctionsUrl = 'https://us-central1-quickohunt-app.cloudfunctions.net';
+
+  Future<Map<String, String>> _authorizedJsonHeaders() async {
+    final headers = <String, String>{'Content-Type': 'application/json'};
+    final user = firebase_auth.FirebaseAuth.instance.currentUser;
+    if (user == null) return headers;
+    final token = await user.getIdToken(true);
+    if (token != null && token.isNotEmpty) {
+      headers['Authorization'] = 'Bearer $token';
+    }
+    return headers;
+  }
+
+  void _initFunctions() {
+    if (_functions == null && !kIsWeb) {
+      try {
+        _functions = FirebaseFunctions.instanceFor(region: 'us-central1');
+      } catch (e) {
+        debugPrint('[PaymentService] Failed to init Firebase Functions: $e');
+      }
+    }
+  }
 
   /// Extract the ISO country code from a stored location string.
   /// Format: `Name|lat,lon|district,state,postcode,country,CC`
@@ -32,7 +58,7 @@ class PaymentService {
   bool _isIndia(String? countryCode) =>
       (countryCode ?? '').toUpperCase() == 'IN';
 
-  /// Create a Razorpay order via the Supabase Edge Function.
+  /// Create a Razorpay order via Firebase Function (callable on mobile, HTTP on web).
   /// Returns a map with `id`, `amount`, `currency` matching Razorpay order shape.
   Future<Map<String, dynamic>> createOrder({
     required int amount,
@@ -40,41 +66,74 @@ class PaymentService {
     Map<String, String>? notes,
   }) async {
     try {
-      final response = await http.post(
-        Uri.parse('$_supabaseUrl/functions/v1/create-razorpay-order'),
-        headers: {
-          'Content-Type': 'application/json',
-          'apikey': _supabaseAnonKey,
-          'Authorization': 'Bearer $_supabaseAnonKey',
-        },
-        body: jsonEncode({
-          'amount': amount, // already in paise
+      debugPrint('[PaymentService] createOrder: kIsWeb=$kIsWeb, amount=$amount, currency=$currency');
+      
+      if (kIsWeb) {
+        // Web: Use HTTP endpoint
+        debugPrint('[PaymentService] Using HTTP endpoint for web');
+        final headers = await _authorizedJsonHeaders();
+        debugPrint('[PaymentService] Headers: ${headers.keys.join(", ")}');
+        
+        final response = await http.post(
+          Uri.parse('$_firebaseFunctionsUrl/createRazorpayOrder'),
+          headers: headers,
+          body: jsonEncode({
+            'amount': amount,
+            'currency': currency.toUpperCase(),
+            'receipt': 'rcpt_${DateTime.now().millisecondsSinceEpoch}',
+            'notes': notes ?? {},
+          }),
+        );
+
+        debugPrint('[PaymentService] HTTP Response: ${response.statusCode}');
+        
+        if (response.statusCode == 200) {
+          final data = jsonDecode(response.body) as Map<String, dynamic>;
+          debugPrint('[PaymentService] Order created: ${data['id']}');
+          return {
+            'id': data['id'] as String,
+            'amount': data['amount'],
+            'currency': data['currency'],
+          };
+        } else {
+          debugPrint('[PaymentService] HTTP Error body: ${response.body}');
+          final err = jsonDecode(response.body);
+          debugPrint('[PaymentService] createOrder error: ${err['error']}');
+          return {'error': err['error'] ?? 'Failed to create order'};
+        }
+      } else {
+        // Mobile/Desktop: Use callable function
+        debugPrint('[PaymentService] Using callable function for mobile/desktop');
+        _initFunctions();
+        if (_functions == null) {
+          return {'error': 'Firebase Functions not available'};
+        }
+        
+        final callable = _functions!.httpsCallable('createRazorpayOrder');
+        final result = await callable.call({
+          'amount': amount,
           'currency': currency.toUpperCase(),
           'receipt': 'rcpt_${DateTime.now().millisecondsSinceEpoch}',
           'notes': notes ?? {},
-        }),
-      );
+        });
 
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body) as Map<String, dynamic>;
-        // Edge function returns { orderId, amount, currency, receipt }
+        final data = result.data as Map<String, dynamic>;
         return {
           'id': data['orderId'] as String,
           'amount': data['amount'],
           'currency': data['currency'],
         };
-      } else {
-        final err = jsonDecode(response.body);
-        debugPrint('[PaymentService] createOrder error: ${err['error']}');
-        return {'error': err['error'] ?? 'Failed to create order'};
       }
     } catch (e) {
       debugPrint('[PaymentService] createOrder exception: $e');
+      if (e is FirebaseFunctionsException) {
+        return {'error': e.message ?? 'Failed to create order'};
+      }
       return {'error': e.toString()};
     }
   }
 
-  /// Verify Razorpay payment signature via the Supabase Edge Function (HMAC-SHA256).
+  /// Verify Razorpay payment signature via Firebase Function (callable on mobile, HTTP on web).
   /// Returns `{ 'verified': true }` on valid signature, or `{ 'error': '...' }`.
   Future<Map<String, dynamic>> verifyPayment({
     required String razorpayOrderId,
@@ -82,29 +141,53 @@ class PaymentService {
     required String razorpaySignature,
   }) async {
     try {
-      final response = await http.post(
-        Uri.parse('$_supabaseUrl/functions/v1/verify-razorpay-payment'),
-        headers: {
-          'Content-Type': 'application/json',
-          'apikey': _supabaseAnonKey,
-          'Authorization': 'Bearer $_supabaseAnonKey',
-        },
-        body: jsonEncode({
+      if (kIsWeb) {
+        // Web: Use HTTP endpoint
+        final headers = await _authorizedJsonHeaders();
+        final response = await http.post(
+          Uri.parse('$_firebaseFunctionsUrl/verifyRazorpayPayment'),
+          headers: headers,
+          body: jsonEncode({
+            'razorpay_order_id': razorpayOrderId,
+            'razorpay_payment_id': razorpayPaymentId,
+            'razorpay_signature': razorpaySignature,
+          }),
+        );
+
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        if (response.statusCode == 200 && data['verified'] == true) {
+          return {'verified': true, 'payment_id': razorpayPaymentId};
+        } else {
+          debugPrint('[PaymentService] verifyPayment failed');
+          return {'verified': false, 'error': 'Signature verification failed'};
+        }
+      } else {
+        // Mobile/Desktop: Use callable function
+        _initFunctions();
+        if (_functions == null) {
+          return {'verified': false, 'error': 'Firebase Functions not available'};
+        }
+        
+        final callable = _functions!.httpsCallable('verifyRazorpayPayment');
+        final result = await callable.call({
           'razorpay_order_id': razorpayOrderId,
           'razorpay_payment_id': razorpayPaymentId,
           'razorpay_signature': razorpaySignature,
-        }),
-      );
+        });
 
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
-      if (response.statusCode == 200 && data['verified'] == true) {
-        return {'verified': true, 'payment_id': razorpayPaymentId};
-      } else {
-        debugPrint('[PaymentService] verifyPayment failed: ${data['error']}');
-        return {'verified': false, 'error': data['error'] ?? 'Signature verification failed'};
+        final data = result.data as Map<String, dynamic>;
+        if (data['verified'] == true) {
+          return {'verified': true, 'payment_id': razorpayPaymentId};
+        } else {
+          debugPrint('[PaymentService] verifyPayment failed');
+          return {'verified': false, 'error': 'Signature verification failed'};
+        }
       }
     } catch (e) {
       debugPrint('[PaymentService] verifyPayment exception: $e');
+      if (e is FirebaseFunctionsException) {
+        return {'verified': false, 'error': e.message ?? 'Verification failed'};
+      }
       return {'verified': false, 'error': e.toString()};
     }
   }
@@ -264,8 +347,8 @@ class PaymentService {
     return base.toString().padLeft(6, '0');
   }
 
-  /// Process subscription payment for Premium/Expert plans
-  /// Routes to Razorpay (India) or Stripe (international)
+  /// Process subscription payment for Premium/Expert plans.
+  /// Routes by the user's selected payment provider, not by currency.
   /// Returns result map with `payment_id` on success or `error` on failure
   Future<Map<String, dynamic>> processSubscriptionPayment({
     required String planName,
@@ -279,10 +362,23 @@ class PaymentService {
     if (currentUser == null) return {'error': 'Not logged in'};
 
     final amountInSmallestUnit = (amount * 100).toInt(); // Convert to paise/cents
+    final selectedGateway = ProfileRepository.instance.profile.value.paymentProvider;
 
-    if (_isIndia(currency == 'INR' ? 'IN' : null) || currency == 'INR') {
+    if (selectedGateway == null || selectedGateway.trim().isEmpty) {
+      return {
+        'error': 'Please choose a payment gateway in Profile Settings before purchasing a plan.',
+      };
+    }
+
+    if (selectedGateway == 'razorpay') {
       // ── Razorpay path for India ──
       debugPrint('[PaymentService] Processing subscription via Razorpay');
+
+      if (currency.toUpperCase() != 'INR') {
+        return {
+          'error': 'Razorpay plan payments are currently available only with INR pricing.',
+        };
+      }
 
       // Create order first
       final orderResult = await createOrder(
@@ -326,21 +422,17 @@ class PaymentService {
         'plan': planName,
         'gateway': 'razorpay',
       };
-    } else {
+    } else if (selectedGateway == 'stripe') {
       // ── Stripe path for international ──
       debugPrint('[PaymentService] Processing subscription via Stripe');
       await StripeService.instance.init();
       
-      final result = await StripeService.instance.processPayment(
+      final result = await StripeService.instance.processSubscriptionPayment(
         amount: amountInSmallestUnit,
         currency: currency.toLowerCase(),
-        providerId: '', // No provider for subscriptions
+        planName: planName,
         userId: currentUser.id,
-        applicationFee: 0, // No commission on subscriptions
-        slotId: 'subscription_$planName',
       );
-
-      if (result == null) return {'error': 'Payment cancelled'};
       
       return {
         ...result,
@@ -348,6 +440,8 @@ class PaymentService {
         'gateway': 'stripe',
       };
     }
+
+    return {'error': 'Unsupported payment gateway: $selectedGateway'};
   }
 }
 

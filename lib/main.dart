@@ -1394,6 +1394,17 @@ class PlansScreen extends StatelessWidget {
         return;
       }
 
+      if (result['web_redirect'] == true) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Complete payment in Stripe to activate your plan.'),
+            backgroundColor: Colors.blue,
+            duration: Duration(seconds: 4),
+          ),
+        );
+        return;
+      }
+
       // Payment successful - activate plan
       await AppPreferences.instance.setSubscriptionPlan(plan);
 
@@ -3561,7 +3572,9 @@ class SettingsPage extends StatelessWidget {
                   ValueListenableBuilder<ProfileInfo>(
                     valueListenable: ProfileRepository.instance.profile,
                     builder: (context, profile, _) {
-                      final isRazorpay = (profile.paymentProvider ?? 'razorpay') == 'razorpay';
+                      final selectedProvider = profile.paymentProvider;
+                      final isRazorpay = selectedProvider == 'razorpay';
+                      final isStripe = selectedProvider == 'stripe';
 
                       return Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -3587,7 +3600,7 @@ class SettingsPage extends StatelessWidget {
                                         Icon(Icons.account_balance, color: isRazorpay ? Colors.blue : Colors.grey, size: 28),
                                         const SizedBox(height: 4),
                                         Text('Razorpay', style: TextStyle(fontWeight: FontWeight.bold, color: isRazorpay ? Colors.blue : Colors.grey[700])),
-                                        Text('India only', style: TextStyle(fontSize: 10, color: isRazorpay ? Colors.blue : Colors.grey[600])),
+                                        Text('Bank payout', style: TextStyle(fontSize: 10, color: isRazorpay ? Colors.blue : Colors.grey[600])),
                                       ],
                                     ),
                                   ),
@@ -3600,18 +3613,18 @@ class SettingsPage extends StatelessWidget {
                                   child: Container(
                                     padding: const EdgeInsets.all(12),
                                     decoration: BoxDecoration(
-                                      color: !isRazorpay ? Colors.purple.withValues(alpha: 0.1) : Colors.grey[100],
+                                      color: isStripe ? Colors.purple.withValues(alpha: 0.1) : Colors.grey[100],
                                       borderRadius: BorderRadius.circular(8),
                                       border: Border.all(
-                                        color: !isRazorpay ? Colors.purple : Colors.grey.shade300,
-                                        width: !isRazorpay ? 2 : 1,
+                                        color: isStripe ? Colors.purple : Colors.grey.shade300,
+                                        width: isStripe ? 2 : 1,
                                       ),
                                     ),
                                     child: Column(
                                       children: [
-                                        Icon(Icons.credit_card, color: !isRazorpay ? Colors.purple : Colors.grey, size: 28),
+                                        Icon(Icons.credit_card, color: isStripe ? Colors.purple : Colors.grey, size: 28),
                                         const SizedBox(height: 4),
-                                        Text('Stripe', style: TextStyle(fontWeight: FontWeight.bold, color: !isRazorpay ? Colors.purple : Colors.grey[700])),
+                                        Text('Stripe', style: TextStyle(fontWeight: FontWeight.bold, color: isStripe ? Colors.purple : Colors.grey[700])),
                                         Text('International', style: TextStyle(fontSize: 10, color: Colors.grey[600])),
                                       ],
                                     ),
@@ -3623,6 +3636,20 @@ class SettingsPage extends StatelessWidget {
                           const SizedBox(height: 16),
 
                           // Razorpay Details
+                          if (selectedProvider == null || selectedProvider.isEmpty)
+                            Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: Colors.grey.withValues(alpha: 0.08),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: Colors.grey.shade300),
+                              ),
+                              child: const Text(
+                                'Choose a payment gateway to set up payouts.',
+                                style: TextStyle(fontSize: 13, color: Colors.grey),
+                              ),
+                            ),
                           if (isRazorpay) ...[
                             const Text('Razorpay Bank Details', style: TextStyle(fontWeight: FontWeight.w600)),
                             const SizedBox(height: 8),
@@ -3729,7 +3756,7 @@ class SettingsPage extends StatelessWidget {
                           ],
 
                           // Stripe Details
-                          if (!isRazorpay) ...[
+                          if (isStripe) ...[
                             const Text('Stripe Connect', style: TextStyle(fontWeight: FontWeight.w600)),
                             const SizedBox(height: 8),
                             if (profile.stripeAccountId != null && profile.stripeAccountId!.isNotEmpty) ...[
@@ -3805,12 +3832,21 @@ class SettingsPage extends StatelessWidget {
                                           ScaffoldMessenger.of(context).showSnackBar(
                                             const SnackBar(content: Text('Setting up Stripe account...')),
                                           );
+                                          final stripeCountry = currentProfile.country ??
+                                              AppPreferences.instance.preferredCountry.value;
                                           final result = await StripeService.instance.createConnectedAccount(
                                             email: currentProfile.email!,
-                                            country: AppPreferences.instance.preferredCountry.value,
+                                            country: stripeCountry,
                                             userId: currentProfile.id,
                                           );
                                           if (result == null || !context.mounted) return;
+                                          final setupError = result['error'] as String?;
+                                          if (setupError != null && setupError.isNotEmpty) {
+                                            ScaffoldMessenger.of(context).showSnackBar(
+                                              SnackBar(content: Text(setupError)),
+                                            );
+                                            return;
+                                          }
                                           final onboardingUrl = result['url'] as String?;
                                           final accountId = result['account_id'] as String?;
                                           if (accountId != null) {
@@ -7574,9 +7610,6 @@ class _RequestsBodyState extends State<_RequestsBody> {
                     slot: bookingSlot,
                     isRiderView: isRiderView,
                   ),
-                  const SizedBox(height: 6),
-                  // Timing section ? from booking snapshot
-                  _BookingTimeBanner(booking: b),
                 ],
                 // Refund section ? shown regardless of bookingSlot
                 if (bookingSlot == null && b.tripEndTime != null && DateTime.now().isAfter(b.tripEndTime!)) ...[
@@ -8079,6 +8112,21 @@ class _RequestsBodyState extends State<_RequestsBody> {
                         reviewerId: AuthRepository.instance.currentUser?.id ?? '',
                       ) ? 'View Reviews' : 'Leave Review',
                     ),
+                  ),
+                ],
+                // Trip Media for Provider ? upload photos/video for start & end of trip
+                if (b.status == BookingStatus.accepted ||
+                    b.status == BookingStatus.completed ||
+                    b.status == BookingStatus.pending ||
+                    b.status == BookingStatus.inProgress) ...[
+                  const SizedBox(height: 12),
+                  const Divider(),
+                  TripMediaWidget(
+                    booking: b,
+                    isProvider: !isRiderView,
+                    onUpdated: (updated) async {
+                      await BookingRepository.instance.updateTripMedia(b.id, updated);
+                    },
                   ),
                 ],
               ],
@@ -9740,6 +9788,8 @@ class PaymentSuccessScreen extends StatefulWidget {
 
 class _PaymentSuccessScreenState extends State<PaymentSuccessScreen> {
   String? _bookingId;
+  String? _paymentType;
+  SubscriptionPlan? _activatedPlan;
   bool _loading = true;
   Booking? _booking;
   SlotEntry? _slotEntry;
@@ -9750,10 +9800,33 @@ class _PaymentSuccessScreenState extends State<PaymentSuccessScreen> {
     _extractBookingIdAndLoadDetails();
   }
 
+  Map<String, String> _routeQueryParameters() {
+    final uri = Uri.base;
+    if (uri.queryParameters.isNotEmpty) return uri.queryParameters;
+
+    final queryStart = uri.fragment.indexOf('?');
+    if (queryStart < 0 || queryStart == uri.fragment.length - 1) {
+      return const {};
+    }
+    return Uri.splitQueryString(uri.fragment.substring(queryStart + 1));
+  }
+
   Future<void> _extractBookingIdAndLoadDetails() async {
     // Extract booking_id from URL query parameters
-    final uri = Uri.base;
-    _bookingId = uri.queryParameters['booking_id'];
+    final params = _routeQueryParameters();
+    _bookingId = params['booking_id'];
+    _paymentType = params['type'];
+    final planName = params['plan'];
+
+    if (_paymentType == 'subscription' && planName != null) {
+      _activatedPlan = SubscriptionPlan.values.firstWhere(
+        (p) => p.name == planName.toLowerCase(),
+        orElse: () => SubscriptionPlan.basic,
+      );
+      if (_activatedPlan != SubscriptionPlan.basic) {
+        await AppPreferences.instance.setSubscriptionPlan(_activatedPlan!);
+      }
+    }
     
     if (_bookingId != null) {
       // Try to find the booking in local storage
@@ -9840,9 +9913,11 @@ class _PaymentSuccessScreenState extends State<PaymentSuccessScreen> {
                 ),
               ),
               const SizedBox(height: 12),
-              const Text(
-                'Your booking has been confirmed.',
-                style: TextStyle(
+              Text(
+                _paymentType == 'subscription'
+                    ? '${(_activatedPlan?.name ?? 'premium').toUpperCase()} plan activated.'
+                    : 'Your booking has been confirmed.',
+                style: const TextStyle(
                   fontSize: 16,
                   color: Colors.grey,
                 ),
@@ -9952,30 +10027,32 @@ class _PaymentSuccessScreenState extends State<PaymentSuccessScreen> {
                   ),
                 ),
               ],
-              const SizedBox(height: 24),
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: Colors.blue[50],
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.blue[200]!),
-                ),
-                child: Row(
-                  children: [
-                    Icon(Icons.info_outline, color: Colors.blue[700], size: 20),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        'The provider will receive an OTP to confirm the service start.',
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: Colors.blue[900],
+              if (_paymentType != 'subscription') ...[
+                const SizedBox(height: 24),
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.blue[50],
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.blue[200]!),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.info_outline, color: Colors.blue[700], size: 20),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          'The provider will receive an OTP to confirm the service start.',
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: Colors.blue[900],
+                          ),
                         ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
+              ],
               const SizedBox(height: 32),
               ElevatedButton(
                 onPressed: () {
@@ -10042,7 +10119,14 @@ class _PaymentCancelScreenState extends State<PaymentCancelScreen> {
 
   void _extractBookingId() {
     final uri = Uri.base;
-    _bookingId = uri.queryParameters['booking_id'];
+    var params = uri.queryParameters;
+    if (params.isEmpty) {
+      final queryStart = uri.fragment.indexOf('?');
+      if (queryStart >= 0 && queryStart < uri.fragment.length - 1) {
+        params = Uri.splitQueryString(uri.fragment.substring(queryStart + 1));
+      }
+    }
+    _bookingId = params['booking_id'];
     setState(() {
       _loading = false;
     });
