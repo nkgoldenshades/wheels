@@ -2902,16 +2902,31 @@ class _EarningsPageState extends State<EarningsPage> {
           }
 
           // Get bookings where current user is the provider
+          // Show all bookings (not just completed) for better visibility
           final providerBookings = allBookings
-              .where(
-                (b) =>
-                    b.providerId == currentUser.id &&
-                    b.status == BookingStatus.completed,
-              )
+              .where((b) => b.providerId == currentUser.id)
+              .toList();
+          
+          // Separate completed vs pending
+          final completedBookings = providerBookings
+              .where((b) => b.status == BookingStatus.completed)
+              .toList();
+          final pendingBookings = providerBookings
+              .where((b) => 
+                  b.status == BookingStatus.pending ||
+                  b.status == BookingStatus.accepted ||
+                  b.status == BookingStatus.confirmed ||
+                  b.status == BookingStatus.inProgress)
               .toList();
 
-          // Calculate total earnings
-          final totalEarnings = providerBookings.fold<double>(
+          // Calculate total earnings (completed only for accurate earnings)
+          final totalEarnings = completedBookings.fold<double>(
+            0,
+            (sum, booking) => sum + booking.price,
+          );
+          
+          // Calculate expected earnings (pending + completed)
+          final expectedEarnings = providerBookings.fold<double>(
             0,
             (sum, booking) => sum + booking.price,
           );
@@ -2925,7 +2940,7 @@ class _EarningsPageState extends State<EarningsPage> {
           double parcelEarnings = 0;
           double leaseEarnings = 0;
 
-          for (var booking in providerBookings) {
+          for (var booking in completedBookings) {
             try {
               final slot = allSlots.firstWhere((s) => s.id == booking.slotId);
               if (slot.serviceType == ServiceType.passenger) {
@@ -2965,14 +2980,32 @@ class _EarningsPageState extends State<EarningsPage> {
                           color: Colors.green,
                         ),
                       ),
-                      const SizedBox(height: 8),
+                      const SizedBox(height: 4),
                       Text(
-                        '${providerBookings.length} completed trips',
+                        '${completedBookings.length} completed trips',
                         style: const TextStyle(
                           fontSize: 14,
                           color: Colors.grey,
                         ),
                       ),
+                      if (pendingBookings.isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: Colors.orange.shade100,
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Text(
+                            '+ ${AppPreferences.instance.currencySymbol}${(expectedEarnings - totalEarnings).toStringAsFixed(2)} pending (${pendingBookings.length} trips)',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.orange.shade900,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ),
@@ -8892,16 +8925,31 @@ class _SpendingPageState extends State<SpendingPage> {
           }
 
           // Get bookings where current user is the customer
+          // Show all bookings (not just completed) for better visibility
           final userBookings = allBookings
-              .where(
-                (b) =>
-                    b.userId == currentUser.id &&
-                    b.status == BookingStatus.completed,
-              )
+              .where((b) => b.userId == currentUser.id)
+              .toList();
+          
+          // Separate completed vs pending
+          final completedBookings = userBookings
+              .where((b) => b.status == BookingStatus.completed)
+              .toList();
+          final pendingBookings = userBookings
+              .where((b) => 
+                  b.status == BookingStatus.pending ||
+                  b.status == BookingStatus.accepted ||
+                  b.status == BookingStatus.confirmed ||
+                  b.status == BookingStatus.inProgress)
               .toList();
 
-          // Calculate total spending
-          final totalSpending = userBookings.fold<double>(
+          // Calculate total spending (completed only for accurate spending)
+          final totalSpending = completedBookings.fold<double>(
+            0,
+            (sum, booking) => sum + booking.price,
+          );
+          
+          // Calculate total committed (pending + completed)
+          final totalCommitted = userBookings.fold<double>(
             0,
             (sum, booking) => sum + booking.price,
           );
@@ -8915,7 +8963,7 @@ class _SpendingPageState extends State<SpendingPage> {
           double parcelSpending = 0;
           double leaseSpending = 0;
 
-          for (var booking in userBookings) {
+          for (var booking in completedBookings) {
             try {
               final slot = allSlots.firstWhere((s) => s.id == booking.slotId);
               if (slot.serviceType == ServiceType.passenger) {
@@ -8964,12 +9012,30 @@ class _SpendingPageState extends State<SpendingPage> {
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        '${userBookings.length} completed trips',
+                        '${completedBookings.length} completed trips',
                         style: const TextStyle(
                           fontSize: 14,
                           color: Colors.grey,
                         ),
                       ),
+                      if (pendingBookings.isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: Colors.orange.shade100,
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Text(
+                            '+ ${AppPreferences.instance.currencySymbol}${(totalCommitted - totalSpending).toStringAsFixed(2)} pending (${pendingBookings.length} trips)',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.orange.shade900,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ),
