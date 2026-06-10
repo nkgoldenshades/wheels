@@ -76,6 +76,7 @@ class Vehicle {
   final String? operatorGender; // 'male', 'female', or null
   final String? operatorPhoto; // base64 or URL
   final String? operatorLicense; // License number for records
+  final DateTime? operatorDob; // Date of birth
   
   // Operator Document (single upload - can be image or PDF)
   final String? operatorDocumentUrl; // Single document upload
@@ -168,6 +169,7 @@ class Vehicle {
     this.operatorGender,
     this.operatorPhoto,
     this.operatorLicense,
+    this.operatorDob,
     // Operator Document
     this.operatorDocumentUrl,
     this.operatorDocumentVerified = false,
@@ -239,6 +241,7 @@ class Vehicle {
     String? operatorGender,
     String? operatorPhoto,
     String? operatorLicense,
+    DateTime? operatorDob,
     // Operator Document
     String? operatorDocumentUrl,
     bool? operatorDocumentVerified,
@@ -309,6 +312,7 @@ class Vehicle {
       operatorGender: operatorGender ?? this.operatorGender,
       operatorPhoto: operatorPhoto ?? this.operatorPhoto,
       operatorLicense: operatorLicense ?? this.operatorLicense,
+      operatorDob: operatorDob ?? this.operatorDob,
       // Operator Document
       operatorDocumentUrl: operatorDocumentUrl ?? this.operatorDocumentUrl,
       operatorDocumentVerified: operatorDocumentVerified ?? this.operatorDocumentVerified,
@@ -389,6 +393,7 @@ class Vehicle {
       'operator_gender': operatorGender,
       'operator_photo': operatorPhoto,
       'operator_license': operatorLicense,
+      'operator_dob': operatorDob?.toIso8601String().split('T').first,
       'operator_document_url': operatorDocumentUrl,
       'operator_document_verified': operatorDocumentVerified,
       'currency': currency,
@@ -510,6 +515,9 @@ class Vehicle {
       operatorGender: json['operator_gender'] ?? json['operatorGender'],
       operatorPhoto: json['operator_photo'] ?? json['operatorPhoto'],
       operatorLicense: json['operator_license'] ?? json['operatorLicense'],
+      operatorDob: json['operator_dob'] != null || json['operatorDob'] != null
+          ? DateTime.tryParse(json['operator_dob'] ?? json['operatorDob'])
+          : null,
       
       // Operator Document
       operatorDocumentUrl: json['operator_document_url'] ?? json['operatorDocumentUrl'],

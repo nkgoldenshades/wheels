@@ -467,6 +467,7 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
     final operatorLicenseCtrl = TextEditingController(text: vehicle.operatorLicense ?? '');
     String? operatorPhoto = vehicle.operatorPhoto;
     String? operatorGender = vehicle.operatorGender; // 'male', 'female', or null
+    DateTime? operatorDob = vehicle.operatorDob;
     String? operatorDocument = vehicle.operatorDocumentUrl; // Single document (image or PDF)
 
     final picker = ImagePicker();
@@ -782,6 +783,39 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                       onChanged: (v) => setModalState(() => operatorGender = v),
                     ),
                     const SizedBox(height: 12),
+                    
+                    // Date of Birth Picker
+                    InkWell(
+                      onTap: () async {
+                        final picked = await showDatePicker(
+                          context: ctx,
+                          initialDate: operatorDob ?? DateTime(1990, 1, 1),
+                          firstDate: DateTime(1940),
+                          lastDate: DateTime.now(),
+                          helpText: 'Select Date of Birth',
+                        );
+                        if (picked != null) {
+                          setModalState(() => operatorDob = picked);
+                        }
+                      },
+                      child: InputDecorator(
+                        decoration: const InputDecoration(
+                          labelText: 'Date of Birth',
+                          border: OutlineInputBorder(),
+                          prefixIcon: Icon(Icons.cake_outlined),
+                        ),
+                        child: Text(
+                          operatorDob != null
+                              ? '${operatorDob!.day.toString().padLeft(2, '0')}/${operatorDob!.month.toString().padLeft(2, '0')}/${operatorDob!.year}'
+                              : 'Not set',
+                          style: TextStyle(
+                            color: operatorDob != null ? Colors.black87 : Colors.grey,
+                            fontSize: 16,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
                     TextField(
                       controller: operatorLicenseCtrl,
                       decoration: const InputDecoration(
@@ -927,6 +961,7 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                             operatorName: operatorNameCtrl.text.trim().isEmpty ? null : operatorNameCtrl.text.trim(),
                             operatorPhone: operatorPhoneCtrl.text.trim().isEmpty ? null : operatorPhoneCtrl.text.trim(),
                             operatorGender: operatorGender,
+                            operatorDob: operatorDob,
                             operatorLicense: operatorLicenseCtrl.text.trim().isEmpty ? null : operatorLicenseCtrl.text.trim(),
                             operatorPhoto: operatorPhoto,
                             operatorDocumentUrl: operatorDocument,
@@ -1161,6 +1196,17 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                             const Icon(Icons.phone, size: 14, color: Colors.grey),
                             const SizedBox(width: 4),
                             Text(vehicle.operatorPhone!, style: const TextStyle(fontSize: 13, color: Colors.grey)),
+                          ],
+                        ),
+                      ],
+                      if (vehicle.operatorDob != null) ...[
+                        const SizedBox(height: 4),
+                        Row(
+                          children: [
+                            const Icon(Icons.cake, size: 14, color: Colors.grey),
+                            const SizedBox(width: 4),
+                            Text('DOB: ${vehicle.operatorDob!.day.toString().padLeft(2, '0')}/${vehicle.operatorDob!.month.toString().padLeft(2, '0')}/${vehicle.operatorDob!.year}', 
+                                style: const TextStyle(fontSize: 13, color: Colors.grey)),
                           ],
                         ),
                       ],
