@@ -1205,8 +1205,15 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                           children: [
                             const Icon(Icons.cake, size: 14, color: Colors.grey),
                             const SizedBox(width: 4),
-                            Text('DOB: ${vehicle.operatorDob!.day.toString().padLeft(2, '0')}/${vehicle.operatorDob!.month.toString().padLeft(2, '0')}/${vehicle.operatorDob!.year}', 
-                                style: const TextStyle(fontSize: 13, color: Colors.grey)),
+                            Builder(
+                              builder: (context) {
+                                final age = _calculateAge(vehicle.operatorDob!);
+                                return Text(
+                                  'Age: $age years (${vehicle.operatorDob!.day.toString().padLeft(2, '0')}/${vehicle.operatorDob!.month.toString().padLeft(2, '0')}/${vehicle.operatorDob!.year})', 
+                                  style: const TextStyle(fontSize: 13, color: Colors.grey),
+                                );
+                              },
+                            ),
                           ],
                         ),
                       ],
@@ -1240,6 +1247,19 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
         style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.blue.shade700),
       ),
     );
+  }
+
+  /// Calculate age from date of birth
+  int _calculateAge(DateTime dob) {
+    final now = DateTime.now();
+    int age = now.year - dob.year;
+    
+    // Check if birthday hasn't occurred yet this year
+    if (now.month < dob.month || (now.month == dob.month && now.day < dob.day)) {
+      age--;
+    }
+    
+    return age;
   }
 
   void _showFullImageDialog(BuildContext context, String imageData, String title) {
