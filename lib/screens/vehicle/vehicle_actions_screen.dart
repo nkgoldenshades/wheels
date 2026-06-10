@@ -466,6 +466,8 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
     final operatorPhoneCtrl = TextEditingController(text: vehicle.operatorPhone ?? '');
     final operatorLicenseCtrl = TextEditingController(text: vehicle.operatorLicense ?? '');
     String? operatorPhoto = vehicle.operatorPhoto;
+    String? operatorGender = vehicle.operatorGender; // 'male', 'female', or null
+    String? operatorDocument = vehicle.operatorDocumentUrl; // Single document (image or PDF)
 
     final picker = ImagePicker();
 
@@ -481,7 +483,7 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
               final file = await picker.pickImage(source: ImageSource.gallery, maxWidth: 1024, maxHeight: 1024, imageQuality: 85);
               if (file == null) return;
               final bytes = await file.readAsBytes();
-              setModalState(() => profileImage = base64Encode(bytes));
+              if (ctx.mounted) setModalState(() => profileImage = base64Encode(bytes));
             }
 
             Future<void> pickGalleryImages() async {
@@ -489,21 +491,29 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
               if (files.isEmpty) return;
               final encoded = <String>[];
               for (final f in files) { encoded.add(base64Encode(await f.readAsBytes())); }
-              setModalState(() => galleryImages.addAll(encoded));
+              if (ctx.mounted) setModalState(() => galleryImages.addAll(encoded));
             }
 
             Future<void> pickVideo() async {
               final file = await picker.pickVideo(source: ImageSource.gallery, maxDuration: const Duration(seconds: 60));
               if (file == null) return;
               final bytes = await file.readAsBytes();
-              setModalState(() => videoUrl = base64Encode(bytes));
+              if (ctx.mounted) setModalState(() => videoUrl = base64Encode(bytes));
             }
 
             Future<void> pickOperatorPhoto() async {
               final file = await picker.pickImage(source: ImageSource.gallery, maxWidth: 512, maxHeight: 512, imageQuality: 85);
               if (file == null) return;
               final bytes = await file.readAsBytes();
-              setModalState(() => operatorPhoto = base64Encode(bytes));
+              if (ctx.mounted) setModalState(() => operatorPhoto = base64Encode(bytes));
+            }
+
+            Future<void> pickOperatorDocument() async {
+              // Allow picking any file (image or PDF)
+              final file = await picker.pickImage(source: ImageSource.gallery, maxWidth: 2048, maxHeight: 2048, imageQuality: 90);
+              if (file == null) return;
+              final bytes = await file.readAsBytes();
+              if (ctx.mounted) setModalState(() => operatorDocument = base64Encode(bytes));
             }
 
             return Padding(
@@ -663,15 +673,79 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                       children: [
                         const Icon(Icons.person_outline, size: 20, color: Colors.blue),
                         const SizedBox(width: 8),
-                        const Text('Vehicle Operator (Optional)', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16)),
+                        const Text('Vehicle Operator', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16)),
                       ],
                     ),
                     const SizedBox(height: 4),
                     const Text(
-                      'Assign a person who operates/handles this vehicle. Their contact will be shown to users instead of yours.',
+                      'Assign a person who operates/handles this vehicle.',
                       style: TextStyle(fontSize: 12, color: Colors.grey),
                     ),
                     const SizedBox(height: 12),
+                    
+                    // Operator Photo
+                    Row(
+                      children: [
+                        GestureDetector(
+                          onTap: () {
+                            if (operatorPhoto != null) {
+                              _showFullImageDialog(context, operatorPhoto!, 'Operator Photo');
+                            }
+                          },
+                          child: Stack(
+                            children: [
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(40),
+                                child: operatorPhoto != null
+                                    ? Image.memory(base64Decode(operatorPhoto!), width: 80, height: 80, fit: BoxFit.cover)
+                                    : Container(
+                                        width: 80,
+                                        height: 80,
+                                        color: Colors.grey[200],
+                                        child: const Icon(Icons.person, size: 40, color: Colors.grey),
+                                      ),
+                              ),
+                              if (operatorPhoto != null)
+                                Positioned(
+                                  bottom: 0,
+                                  right: 0,
+                                  child: Container(
+                                    decoration: BoxDecoration(
+                                      color: Colors.black54,
+                                      shape: BoxShape.circle,
+                                    ),
+                                    padding: const EdgeInsets.all(4),
+                                    child: const Icon(Icons.zoom_in, size: 16, color: Colors.white),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text('Profile Photo', style: TextStyle(fontWeight: FontWeight.w500)),
+                              const SizedBox(height: 4),
+                              OutlinedButton.icon(
+                                onPressed: pickOperatorPhoto,
+                                icon: const Icon(Icons.photo_camera, size: 16),
+                                label: Text(operatorPhoto != null ? 'Change' : 'Add Photo'),
+                                style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8)),
+                              ),
+                            ],
+                          ),
+                        ),
+                        if (operatorPhoto != null)
+                          IconButton(
+                            icon: const Icon(Icons.close, color: Colors.red),
+                            onPressed: () => setModalState(() => operatorPhoto = null),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    
                     TextField(
                       controller: operatorNameCtrl,
                       decoration: const InputDecoration(
@@ -693,6 +767,21 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                       ),
                     ),
                     const SizedBox(height: 12),
+                    DropdownButtonFormField<String>(
+                      initialValue: operatorGender,
+                      decoration: const InputDecoration(
+                        labelText: 'Operator gender',
+                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.person),
+                      ),
+                      items: const [
+                        DropdownMenuItem(value: null, child: Text('Not specified')),
+                        DropdownMenuItem(value: 'male', child: Text('Male')),
+                        DropdownMenuItem(value: 'female', child: Text('Female')),
+                      ],
+                      onChanged: (v) => setModalState(() => operatorGender = v),
+                    ),
+                    const SizedBox(height: 12),
                     TextField(
                       controller: operatorLicenseCtrl,
                       decoration: const InputDecoration(
@@ -702,30 +791,116 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                         prefixIcon: Icon(Icons.credit_card_outlined),
                       ),
                     ),
+                    const SizedBox(height: 16),
+                    
+                    // Operator Document Upload
+                    const Text('Operator Document (Optional)', style: TextStyle(fontWeight: FontWeight.w600)),
+                    const SizedBox(height: 4),
+                    const Text('Upload ID, driving license, or any verification document (Image or PDF)', 
+                        style: TextStyle(fontSize: 11, color: Colors.grey)),
                     const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        if (operatorPhoto != null)
-                          ClipRRect(
-                            borderRadius: BorderRadius.circular(8),
-                            child: Image.memory(base64Decode(operatorPhoto!), width: 60, height: 60, fit: BoxFit.cover),
+                    
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        border: Border.all(color: Colors.grey.shade300),
+                        borderRadius: BorderRadius.circular(8),
+                        color: Colors.grey[50],
+                      ),
+                      child: Column(
+                        children: [
+                          if (operatorDocument != null)
+                            GestureDetector(
+                              onTap: () => _showFullImageDialog(context, operatorDocument!, 'Operator Document'),
+                              child: Container(
+                                height: 120,
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(color: Colors.blue.shade200, width: 2),
+                                ),
+                                child: ClipRRect(
+                                  borderRadius: BorderRadius.circular(8),
+                                  child: Stack(
+                                    fit: StackFit.expand,
+                                    children: [
+                                      Image.memory(base64Decode(operatorDocument!), fit: BoxFit.cover),
+                                      Positioned(
+                                        top: 4,
+                                        right: 4,
+                                        child: Container(
+                                          padding: const EdgeInsets.all(4),
+                                          decoration: const BoxDecoration(
+                                            color: Colors.black54,
+                                            shape: BoxShape.circle,
+                                          ),
+                                          child: const Icon(Icons.zoom_in, size: 16, color: Colors.white),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            )
+                          else
+                            Container(
+                              height: 120,
+                              decoration: BoxDecoration(
+                                color: Colors.grey[200],
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: Colors.grey.shade300, style: BorderStyle.solid),
+                              ),
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(Icons.upload_file, size: 40, color: Colors.grey[400]),
+                                  const SizedBox(height: 8),
+                                  Text('No document uploaded', style: TextStyle(color: Colors.grey[600], fontSize: 12)),
+                                ],
+                              ),
+                            ),
+                          const SizedBox(height: 12),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: OutlinedButton.icon(
+                                  onPressed: pickOperatorDocument,
+                                  icon: const Icon(Icons.upload_file, size: 18),
+                                  label: Text(operatorDocument != null ? 'Change Document' : 'Upload Document'),
+                                  style: OutlinedButton.styleFrom(
+                                    padding: const EdgeInsets.symmetric(vertical: 12),
+                                  ),
+                                ),
+                              ),
+                              if (operatorDocument != null) ...[
+                                const SizedBox(width: 8),
+                                IconButton(
+                                  onPressed: () => setModalState(() => operatorDocument = null),
+                                  icon: const Icon(Icons.delete, color: Colors.red),
+                                  tooltip: 'Remove document',
+                                ),
+                              ],
+                            ],
                           ),
-                        if (operatorPhoto != null) const SizedBox(width: 12),
-                        Expanded(
-                          child: OutlinedButton.icon(
-                            onPressed: pickOperatorPhoto,
-                            icon: const Icon(Icons.photo_camera, size: 16),
-                            label: Text(operatorPhoto != null ? 'Change photo' : 'Add operator photo'),
-                          ),
-                        ),
-                        if (operatorPhoto != null) ...[
-                          const SizedBox(width: 8),
-                          IconButton(
-                            icon: const Icon(Icons.close, color: Colors.red),
-                            onPressed: () => setModalState(() => operatorPhoto = null),
-                          ),
+                          if (operatorDocument != null)
+                            Container(
+                              margin: const EdgeInsets.only(top: 8),
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: Colors.green.shade50,
+                                borderRadius: BorderRadius.circular(6),
+                                border: Border.all(color: Colors.green.shade200),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.check_circle, size: 16, color: Colors.green[700]),
+                                  const SizedBox(width: 6),
+                                  Text('Document uploaded ✓', style: TextStyle(fontSize: 12, color: Colors.green[700], fontWeight: FontWeight.w500)),
+                                ],
+                              ),
+                            ),
                         ],
-                      ],
+                      ),
                     ),
                     const SizedBox(height: 16),
                     SizedBox(
@@ -751,8 +926,10 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                             videoUrl: videoUrl,
                             operatorName: operatorNameCtrl.text.trim().isEmpty ? null : operatorNameCtrl.text.trim(),
                             operatorPhone: operatorPhoneCtrl.text.trim().isEmpty ? null : operatorPhoneCtrl.text.trim(),
+                            operatorGender: operatorGender,
                             operatorLicense: operatorLicenseCtrl.text.trim().isEmpty ? null : operatorLicenseCtrl.text.trim(),
                             operatorPhoto: operatorPhoto,
+                            operatorDocumentUrl: operatorDocument,
                           );
                           if (widget.isUserMode) {
                             await CustomerVehicleRepository.instance.updateVehicle(updated);
@@ -897,25 +1074,85 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
             const SizedBox(height: 12),
             Row(
               children: [
-                // Operator photo
-                if (vehicle.operatorPhoto != null && vehicle.operatorPhoto!.isNotEmpty)
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(30),
-                    child: vehicle.operatorPhoto!.startsWith('http')
-                        ? Image.network(vehicle.operatorPhoto!, width: 56, height: 56, fit: BoxFit.cover,
-                            errorBuilder: (_, _, _) => _operatorAvatar(vehicle.operatorName))
-                        : Image.memory(base64Decode(vehicle.operatorPhoto!), width: 56, height: 56, fit: BoxFit.cover),
-                  )
-                else
-                  _operatorAvatar(vehicle.operatorName),
+                // Operator photo - tappable to view full size
+                GestureDetector(
+                  onTap: () {
+                    if (vehicle.operatorPhoto != null && vehicle.operatorPhoto!.isNotEmpty) {
+                      _showFullImageDialog(context, vehicle.operatorPhoto!, 'Operator Photo');
+                    }
+                  },
+                  child: Stack(
+                    children: [
+                      if (vehicle.operatorPhoto != null && vehicle.operatorPhoto!.isNotEmpty)
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(30),
+                          child: vehicle.operatorPhoto!.startsWith('http')
+                              ? Image.network(vehicle.operatorPhoto!, width: 56, height: 56, fit: BoxFit.cover,
+                                  errorBuilder: (_, _, _) => _operatorAvatar(vehicle.operatorName))
+                              : Image.memory(base64Decode(vehicle.operatorPhoto!), width: 56, height: 56, fit: BoxFit.cover),
+                        )
+                      else
+                        _operatorAvatar(vehicle.operatorName),
+                      if (vehicle.operatorPhoto != null && vehicle.operatorPhoto!.isNotEmpty)
+                        Positioned(
+                          bottom: 0,
+                          right: 0,
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: Colors.black54,
+                              shape: BoxShape.circle,
+                            ),
+                            padding: const EdgeInsets.all(2),
+                            child: const Icon(Icons.zoom_in, size: 14, color: Colors.white),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        vehicle.operatorName ?? '',
-                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                      Row(
+                        children: [
+                          Text(
+                            vehicle.operatorName ?? '',
+                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                          ),
+                          if (vehicle.operatorGender != null) ...[
+                            const SizedBox(width: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: vehicle.operatorGender == 'male' ? Colors.blue.shade50 : Colors.pink.shade50,
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color: vehicle.operatorGender == 'male' ? Colors.blue.shade200 : Colors.pink.shade200,
+                                ),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    vehicle.operatorGender == 'male' ? Icons.male : Icons.female,
+                                    size: 14,
+                                    color: vehicle.operatorGender == 'male' ? Colors.blue.shade700 : Colors.pink.shade700,
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    vehicle.operatorGender == 'male' ? 'Male' : 'Female',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w600,
+                                      color: vehicle.operatorGender == 'male' ? Colors.blue.shade700 : Colors.pink.shade700,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ],
                       ),
                       if (vehicle.operatorPhone != null && vehicle.operatorPhone!.isNotEmpty) ...[
                         const SizedBox(height: 4),
@@ -955,6 +1192,47 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
       child: Text(
         name != null && name.isNotEmpty ? name[0].toUpperCase() : 'O',
         style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.blue.shade700),
+      ),
+    );
+  }
+
+  void _showFullImageDialog(BuildContext context, String imageData, String title) {
+    showDialog(
+      context: context,
+      builder: (context) => Dialog(
+        backgroundColor: Colors.black,
+        insetPadding: const EdgeInsets.all(20),
+        child: Stack(
+          children: [
+            Center(
+              child: InteractiveViewer(
+                child: imageData.startsWith('http')
+                    ? Image.network(imageData, errorBuilder: (_, __, ___) => const Icon(Icons.error, color: Colors.white))
+                    : Image.memory(base64Decode(imageData)),
+              ),
+            ),
+            Positioned(
+              top: 10,
+              left: 10,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: Colors.black54,
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+              ),
+            ),
+            Positioned(
+              top: 10,
+              right: 10,
+              child: IconButton(
+                icon: const Icon(Icons.close, color: Colors.white),
+                onPressed: () => Navigator.pop(context),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

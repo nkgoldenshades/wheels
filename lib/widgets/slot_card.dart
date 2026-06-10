@@ -348,9 +348,34 @@ class SlotCard extends StatelessWidget {
                   vehicle.type,
                   if (vehicle.year != null) '${vehicle.year}',
                 ].join(' · '),
-                style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 14, color: Colors.grey[700]),
               ),
+              // Operator info
+              if (vehicle.operatorName != null && vehicle.operatorName!.isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Row(
+                  children: [
+                    Icon(Icons.person_outline, size: 12, color: Colors.blue[700]),
+                    const SizedBox(width: 4),
+                    Text(
+                      vehicle.operatorName!,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.blue[700],
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    if (vehicle.operatorGender != null) ...[
+                      const SizedBox(width: 4),
+                      Icon(
+                        vehicle.operatorGender == 'male' ? Icons.male : Icons.female,
+                        size: 12,
+                        color: vehicle.operatorGender == 'male' ? Colors.blue[700] : Colors.pink[700],
+                      ),
+                    ],
+                  ],
+                ),
+              ],
             ],
           ),
         ),
@@ -1008,6 +1033,10 @@ class SlotCard extends StatelessWidget {
 
   /// Show edit history dialog
   void _showEditHistoryDialog(BuildContext context) {
+    // Sort entries by timestamp - most recent first
+    final sortedEntries = [...slot.editHistory.entries]
+      ..sort((a, b) => b.timestamp.compareTo(a.timestamp));
+    
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -1022,10 +1051,10 @@ class SlotCard extends StatelessWidget {
           width: double.maxFinite,
           child: ListView.separated(
             shrinkWrap: true,
-            itemCount: slot.editHistory.entries.length,
+            itemCount: sortedEntries.length,
             separatorBuilder: (context, index) => const Divider(),
             itemBuilder: (context, index) {
-              final entry = slot.editHistory.entries[index];
+              final entry = sortedEntries[index];
               return ListTile(
                 contentPadding: EdgeInsets.zero,
                 leading: CircleAvatar(
@@ -1043,7 +1072,7 @@ class SlotCard extends StatelessWidget {
                   style: const TextStyle(fontSize: 14),
                 ),
                 subtitle: Text(
-                  entry.getTimeAgo(),
+                  entry.getFormattedDateTime(),
                   style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
                 ),
               );

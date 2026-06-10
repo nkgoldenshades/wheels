@@ -73,8 +73,13 @@ class Vehicle {
   // Operator information (optional - person who operates/handles this vehicle)
   final String? operatorName;
   final String? operatorPhone;
+  final String? operatorGender; // 'male', 'female', or null
   final String? operatorPhoto; // base64 or URL
   final String? operatorLicense; // License number for records
+  
+  // Operator Document (single upload - can be image or PDF)
+  final String? operatorDocumentUrl; // Single document upload
+  final bool operatorDocumentVerified;
 
   // Currency and country (for pricing)
   final String currency; // INR, USD, EUR, etc.
@@ -160,8 +165,12 @@ class Vehicle {
     // Operator
     this.operatorName,
     this.operatorPhone,
+    this.operatorGender,
     this.operatorPhoto,
     this.operatorLicense,
+    // Operator Document
+    this.operatorDocumentUrl,
+    this.operatorDocumentVerified = false,
     // Currency and country
     this.currency = 'INR',
     this.countryCode = 'IN',
@@ -227,8 +236,12 @@ class Vehicle {
     // Operator
     String? operatorName,
     String? operatorPhone,
+    String? operatorGender,
     String? operatorPhoto,
     String? operatorLicense,
+    // Operator Document
+    String? operatorDocumentUrl,
+    bool? operatorDocumentVerified,
     // Currency and country
     String? currency,
     String? countryCode,
@@ -293,8 +306,12 @@ class Vehicle {
       // Operator
       operatorName: operatorName ?? this.operatorName,
       operatorPhone: operatorPhone ?? this.operatorPhone,
+      operatorGender: operatorGender ?? this.operatorGender,
       operatorPhoto: operatorPhoto ?? this.operatorPhoto,
       operatorLicense: operatorLicense ?? this.operatorLicense,
+      // Operator Document
+      operatorDocumentUrl: operatorDocumentUrl ?? this.operatorDocumentUrl,
+      operatorDocumentVerified: operatorDocumentVerified ?? this.operatorDocumentVerified,
       // Currency and country
       currency: currency ?? this.currency,
       countryCode: countryCode ?? this.countryCode,
@@ -369,8 +386,11 @@ class Vehicle {
       'pan_image': panImageBase64,
       'operator_name': operatorName,
       'operator_phone': operatorPhone,
+      'operator_gender': operatorGender,
       'operator_photo': operatorPhoto,
       'operator_license': operatorLicense,
+      'operator_document_url': operatorDocumentUrl,
+      'operator_document_verified': operatorDocumentVerified,
       'currency': currency,
       'country_code': countryCode,
     };
@@ -487,8 +507,13 @@ class Vehicle {
       // Operator
       operatorName: json['operator_name'] ?? json['operatorName'],
       operatorPhone: json['operator_phone'] ?? json['operatorPhone'],
+      operatorGender: json['operator_gender'] ?? json['operatorGender'],
       operatorPhoto: json['operator_photo'] ?? json['operatorPhoto'],
       operatorLicense: json['operator_license'] ?? json['operatorLicense'],
+      
+      // Operator Document
+      operatorDocumentUrl: json['operator_document_url'] ?? json['operatorDocumentUrl'],
+      operatorDocumentVerified: json['operator_document_verified'] ?? json['operatorDocumentVerified'] ?? false,
       
       // Currency and country
       currency: json['currency'] ?? 'INR',

@@ -1302,6 +1302,62 @@ class _Header extends StatelessWidget {
                 '🚗 ${vehicle.name}$yearText',
                 style: TextStyle(color: Colors.grey[800]),
               ),
+              // Operator info if available
+              if (vehicle.operatorName != null && vehicle.operatorName!.isNotEmpty) ...[
+                const SizedBox(height: 6),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.shade50,
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: Colors.blue.shade200),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.person_outline, size: 14, color: Colors.blue),
+                      const SizedBox(width: 4),
+                      Text(
+                        'Operator: ${vehicle.operatorName}',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.blue.shade700,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      if (vehicle.operatorGender != null) ...[
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: vehicle.operatorGender == 'male' ? Colors.blue.shade100 : Colors.pink.shade100,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                vehicle.operatorGender == 'male' ? Icons.male : Icons.female,
+                                size: 12,
+                                color: vehicle.operatorGender == 'male' ? Colors.blue.shade700 : Colors.pink.shade700,
+                              ),
+                              const SizedBox(width: 2),
+                              Text(
+                                vehicle.operatorGender == 'male' ? 'Male' : 'Female',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w600,
+                                  color: vehicle.operatorGender == 'male' ? Colors.blue.shade700 : Colors.pink.shade700,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
               const SizedBox(height: 10),
               Container(
                 padding: const EdgeInsets.symmetric(

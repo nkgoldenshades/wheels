@@ -114,29 +114,29 @@ void main() async {
 
   // CRITICAL: Initialize Firebase FIRST before starting app
   // This prevents splash screen from accessing Firebase before it's ready
-  if (kDebugMode) print('? Initializing Firebase...');
+  if (kDebugMode) print('🔥 Initializing Firebase...');
   try {
     await Firebase.initializeApp(
       options: DefaultFirebaseOptions.currentPlatform,
     );
-    if (kDebugMode) print('? Firebase initialized');
+    if (kDebugMode) print('✅ Firebase initialized');
   } catch (e) {
     // Check if already initialized
     try {
       Firebase.app();
-      if (kDebugMode) print('? Firebase already initialized');
+      if (kDebugMode) print('✅ Firebase already initialized');
     } catch (_) {
-      if (kDebugMode) print('?? Firebase unavailable: $e');
+      if (kDebugMode) print('⚠️ Firebase unavailable: $e');
     }
   }
   
   // Initialize AuthRepository immediately (splash screen needs it)
-  if (kDebugMode) print('? Initializing AuthRepository...');
+  if (kDebugMode) print('🔐 Initializing AuthRepository...');
   try {
     await AuthRepository.instance.init();
-    if (kDebugMode) print('? AuthRepository initialized');
+    if (kDebugMode) print('✅ AuthRepository initialized');
   } catch (e) {
-    if (kDebugMode) print('?? AuthRepository init failed: $e');
+    if (kDebugMode) print('⚠️ AuthRepository init failed: $e');
   }
   
   // Now start app - Firebase and Auth are ready
@@ -148,7 +148,7 @@ void main() async {
 }
 
 // Background initialization that doesn't block app startup
-void _initializeServicesInBackground() async {
+Future<void> _initializeServicesInBackground() async {
   try {
     if (kDebugMode) print('?? Starting background initialization...');
     
@@ -3383,6 +3383,25 @@ class SettingsPage extends StatelessWidget {
                       labelText: 'Contact number',
                       border: OutlineInputBorder(),
                     ),
+                  ),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<String>(
+                    initialValue: info.gender,
+                    decoration: const InputDecoration(
+                      labelText: 'Gender',
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.person),
+                    ),
+                    items: const [
+                      DropdownMenuItem(value: 'male', child: Text('Male')),
+                      DropdownMenuItem(value: 'female', child: Text('Female')),
+                      DropdownMenuItem(value: 'other', child: Text('Other')),
+                    ],
+                    onChanged: (value) async {
+                      await ProfileRepository.instance.update(
+                        gender: value,
+                      );
+                    },
                   ),
                   const SizedBox(height: 12),
                   DropdownButtonFormField<String>(
