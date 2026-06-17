@@ -48,6 +48,8 @@ import 'widgets/review_dialog.dart';
 import 'services/profile_repository.dart';
 import 'services/profile_name_registry.dart';
 import 'services/app_preferences.dart';
+import 'services/dispute_service.dart';
+
 import 'services/passenger_repository.dart';
 import 'services/stripe_service.dart';
 import 'services/payment_service.dart';
@@ -57,7 +59,7 @@ import 'screens/auth/splash_screen.dart';
 import 'screens/auth/login_screen.dart';
 import 'screens/auth/register_screen.dart';
 import 'screens/reviews_screen.dart';
-import 'screens/ai_chat_page.dart';
+import 'screens/ai_chat_page.dart'; // ← Keep original
 import 'widgets/voice_ai_overlay.dart';
 import 'services/voice_ai_service.dart';
 import 'services/pricing_service.dart';
@@ -155,11 +157,11 @@ Future<void> _initializeServicesInBackground() async {
     // Helper function to wrap repository inits with timeout
     Future<void> initWithTimeout(Future<void> future, String name) async {
       try {
-        if (kDebugMode) print('? Starting $name...');
+        if (kDebugMode) print('⏳ Starting $name...');
         await future.timeout(
-          const Duration(seconds: 5),
+          const Duration(seconds: 30),
           onTimeout: () {
-            throw TimeoutException('$name initialization timed out', const Duration(seconds: 5));
+            throw TimeoutException('$name initialization timed out', const Duration(seconds: 30));
           },
         );
         if (kDebugMode) print('? $name initialized');
@@ -1330,13 +1332,13 @@ class PlansScreen extends StatelessWidget {
         'tier': pricing[4],
       };
     } else {
-      // Default to Tier 1 USD for unknown currencies
+      // Default to INR for unknown currencies (India-first app)
       return {
-        'symbol': '\$',
-        'premium': 12.99,
-        'expert': 59.99,
-        'deposit': 599,
-        'tier': 1,
+        'symbol': '₹',
+        'premium': 999,
+        'expert': 4999,
+        'deposit': 50000,
+        'tier': 2,
       };
     }
   }
@@ -4257,6 +4259,10 @@ class _PostsPageState extends State<PostsPage> {
 
   double? _minPrice;
   double? _maxPrice;
+  double? _minRating; // Minimum provider rating filter
+  double? _maxRating; // Maximum provider rating filter
+  int? _minRatingCount; // Minimum number of ratings filter
+  int? _maxRatingCount; // Maximum number of ratings filter
   DateTime? _fromDateTime;
   DateTime? _toDateTime;
   double? _maxDistanceKm;
@@ -4605,7 +4611,10 @@ class _PostsPageState extends State<PostsPage> {
                           (service) => Padding(
                             padding: const EdgeInsets.only(right: 8),
                             child: FilterChip(
-                              label: Text(_serviceLabel(service)),
+                              label: Text(
+                                _serviceLabel(service),
+                                style: const TextStyle(fontSize: 14),
+                              ),
                               selected: _selectedServiceType == service,
                               onSelected: (_) {
                                 setState(() {
@@ -5018,7 +5027,13 @@ class _PostsPageState extends State<PostsPage> {
       repoItems = allProviderSlots
           .where(
             // Filter out expired posts (end time has passed)
-            (e) => e.slot.endTime.isAfter(now),
+            (e) {
+              final isActive = e.slot.endTime.isAfter(now);
+              if (!isActive && kDebugMode) {
+                debugPrint('⏰ Filtered expired post: ${e.slot.id} ended ${e.slot.endTime}');
+              }
+              return isActive;
+            },
           )
           // REMOVED: Vehicle online status filter - show ALL posts for common feed
           // .where(
@@ -5085,10 +5100,65 @@ class _PostsPageState extends State<PostsPage> {
       '?? After price filter (${_minPrice ?? "any"}-${_maxPrice ?? "any"}): ${priceFiltered.length}',
     );
 
-    // Apply service type filter
-    final serviceFiltered = _selectedServiceType == null
+    // Apply rating filter (min and max rating)
+    final ratingFiltered = (_minRating == null && _maxRating == null)
         ? priceFiltered
         : priceFiltered
+            .where((e) {
+              // Get provider rating from profile
+              // For now, using vehicle average_rating as proxy
+              // In future, query profiles table for provider_rating
+              final rating = e.vehicle.averageRating;
+              
+              // Check min condition
+              if (_minRating != null && rating < _minRating!) {
+                return false;
+              }
+              
+              // Check max condition
+              if (_maxRating != null && rating > _maxRating!) {
+                return false;
+              }
+              
+              return true;
+            })
+            .toList(growable: false);
+    debugPrint(
+      '⭐ After rating filter (${_minRating?.toStringAsFixed(1) ?? "any"}-${_maxRating?.toStringAsFixed(1) ?? "any"} stars): ${ratingFiltered.length}',
+    );
+
+    // Apply rating count filter (min and max number of ratings)
+    final ratingCountFiltered = (_minRatingCount == null && _maxRatingCount == null)
+        ? ratingFiltered
+        : ratingFiltered
+            .where((e) {
+              // Count reviews for this vehicle's provider
+              final reviews = ReviewRepository.instance.reviews.value
+                  .where((r) => r.revieweeId == e.vehicle.userId)
+                  .toList();
+              final count = reviews.length;
+              
+              // Check min condition
+              if (_minRatingCount != null && count < _minRatingCount!) {
+                return false;
+              }
+              
+              // Check max condition
+              if (_maxRatingCount != null && count > _maxRatingCount!) {
+                return false;
+              }
+              
+              return true;
+            })
+            .toList(growable: false);
+    debugPrint(
+      '🔢 After rating count filter (${_minRatingCount ?? "any"}-${_maxRatingCount ?? "any"} ratings): ${ratingCountFiltered.length}',
+    );
+
+    // Apply service type filter
+    final serviceFiltered = _selectedServiceType == null
+        ? ratingCountFiltered
+        : ratingCountFiltered
               .where((e) => e.slot.serviceType == _selectedServiceType)
               .toList();
 
@@ -5745,6 +5815,186 @@ class _PostsPageState extends State<PostsPage> {
                           ),
                         ],
                       ),
+                      const SizedBox(height: 16),
+                      // Rating Filter (Min and Max)
+                      const Text(
+                        'Provider Rating (Stars)',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              decoration: const InputDecoration(
+                                labelText: 'Min Rating',
+                                hintText: '0.0',
+                                border: OutlineInputBorder(),
+                                prefixIcon: Icon(Icons.star),
+                              ),
+                              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                              controller: TextEditingController(
+                                text: _minRating?.toStringAsFixed(1) ?? '',
+                              ),
+                              onChanged: (value) {
+                                if (value.isEmpty) {
+                                  setSheetState(() {
+                                    _minRating = null;
+                                  });
+                                  return;
+                                }
+                                final parsed = double.tryParse(value);
+                                if (parsed == null) return;
+                                // Limit to 0.0-5.0 range
+                                if (parsed < 0.0) {
+                                  setSheetState(() {
+                                    _minRating = 0.0;
+                                  });
+                                } else if (parsed > 5.0) {
+                                  setSheetState(() {
+                                    _minRating = 5.0;
+                                  });
+                                } else {
+                                  setSheetState(() {
+                                    _minRating = parsed;
+                                  });
+                                }
+                              },
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: TextField(
+                              decoration: const InputDecoration(
+                                labelText: 'Max Rating',
+                                hintText: '5.0',
+                                border: OutlineInputBorder(),
+                                prefixIcon: Icon(Icons.star),
+                              ),
+                              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                              controller: TextEditingController(
+                                text: _maxRating?.toStringAsFixed(1) ?? '',
+                              ),
+                              onChanged: (value) {
+                                if (value.isEmpty) {
+                                  setSheetState(() {
+                                    _maxRating = null;
+                                  });
+                                  return;
+                                }
+                                final parsed = double.tryParse(value);
+                                if (parsed == null) return;
+                                // Limit to 0.0-5.0 range
+                                if (parsed < 0.0) {
+                                  setSheetState(() {
+                                    _maxRating = 0.0;
+                                  });
+                                } else if (parsed > 5.0) {
+                                  setSheetState(() {
+                                    _maxRating = 5.0;
+                                  });
+                                } else {
+                                  setSheetState(() {
+                                    _maxRating = parsed;
+                                  });
+                                }
+                              },
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      // Rating Count Filter (Min and Max)
+                      const Text(
+                        'Number of Ratings',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              decoration: const InputDecoration(
+                                labelText: 'Min Ratings',
+                                border: OutlineInputBorder(),
+                                prefixIcon: Icon(Icons.reviews),
+                              ),
+                              keyboardType: TextInputType.number,
+                              controller: TextEditingController(
+                                text: _minRatingCount?.toString() ?? '',
+                              ),
+                              onChanged: (value) {
+                                if (value.isEmpty) {
+                                  setSheetState(() {
+                                    _minRatingCount = null;
+                                  });
+                                  return;
+                                }
+                                final parsed = int.tryParse(value);
+                                if (parsed == null) return;
+                                // Limit to reasonable range: 0-500
+                                if (parsed < 0) {
+                                  setSheetState(() {
+                                    _minRatingCount = 0;
+                                  });
+                                } else if (parsed > 500) {
+                                  setSheetState(() {
+                                    _minRatingCount = 500;
+                                  });
+                                } else {
+                                  setSheetState(() {
+                                    _minRatingCount = parsed;
+                                  });
+                                }
+                              },
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: TextField(
+                              decoration: const InputDecoration(
+                                labelText: 'Max Ratings',
+                                border: OutlineInputBorder(),
+                                prefixIcon: Icon(Icons.reviews),
+                              ),
+                              keyboardType: TextInputType.number,
+                              controller: TextEditingController(
+                                text: _maxRatingCount?.toString() ?? '',
+                              ),
+                              onChanged: (value) {
+                                if (value.isEmpty) {
+                                  setSheetState(() {
+                                    _maxRatingCount = null;
+                                  });
+                                  return;
+                                }
+                                final parsed = int.tryParse(value);
+                                if (parsed == null) return;
+                                // Limit to reasonable range: 0-500
+                                if (parsed < 0) {
+                                  setSheetState(() {
+                                    _maxRatingCount = 0;
+                                  });
+                                } else if (parsed > 500) {
+                                  setSheetState(() {
+                                    _maxRatingCount = 500;
+                                  });
+                                } else {
+                                  setSheetState(() {
+                                    _maxRatingCount = parsed;
+                                  });
+                                }
+                              },
+                            ),
+                          ),
+                        ],
+                      ),
                       const SizedBox(height: 12),
                       ListTile(
                         contentPadding: EdgeInsets.zero,
@@ -5999,6 +6249,10 @@ class _PostsPageState extends State<PostsPage> {
                                 setState(() {
                                   _minPrice = null;
                                   _maxPrice = null;
+                                  _minRating = null;
+                                  _maxRating = null;
+                                  _minRatingCount = null;
+                                  _maxRatingCount = null;
                                   _fromDateTime = null;
                                   _toDateTime = null;
                                   _nearestEnabled = false;
@@ -6443,39 +6697,102 @@ class RequestsPage extends StatefulWidget {
 }
 
 class _RequestsPageState extends State<RequestsPage> {
-  DateTimeRange? _dateRange;
+  DateTime? _fromDateTime;
+  DateTime? _toDateTime;
 
-  void _showDateRangeFilter() async {
-    final picked = await showDateRangePicker(
+  Future<DateTime?> _pickDateTime(BuildContext context, {DateTime? initial}) async {
+    final now = DateTime.now();
+    final initDate = initial ?? now;
+
+    final pickedDate = await showDatePicker(
       context: context,
+      initialDate: initDate,
       firstDate: DateTime(2020),
       lastDate: DateTime.now().add(const Duration(days: 365)),
-      initialDateRange: _dateRange,
-      builder: (context, child) {
-        return Theme(
-          data: Theme.of(context).copyWith(
-            colorScheme: ColorScheme.light(
-              primary: Colors.blue,
-              onPrimary: Colors.white,
-              surface: Colors.white,
-              onSurface: Colors.black,
-            ),
-          ),
-          child: child!,
+    );
+    if (pickedDate == null || !context.mounted) return null;
+
+    final pickedTime = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(initDate),
+    );
+    if (pickedTime == null) return null;
+
+    return DateTime(pickedDate.year, pickedDate.month, pickedDate.day, pickedTime.hour, pickedTime.minute);
+  }
+
+  void _showDateTimeRangeFilter() async {
+    DateTime? from = _fromDateTime;
+    DateTime? to = _toDateTime;
+
+    await showDialog(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setDialogState) {
+            String fmtDT(DateTime? dt) {
+              if (dt == null) return 'Not set';
+              return '${dt.day}/${dt.month}/${dt.year}  ${dt.hour.toString().padLeft(2,'0')}:${dt.minute.toString().padLeft(2,'0')}';
+            }
+            return AlertDialog(
+              title: const Text('Filter by Date & Time'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.calendar_today, color: Colors.blue),
+                    title: const Text('From'),
+                    subtitle: Text(fmtDT(from), style: const TextStyle(fontWeight: FontWeight.w600)),
+                    onTap: () async {
+                      final picked = await _pickDateTime(ctx, initial: from);
+                      if (picked != null) setDialogState(() => from = picked);
+                    },
+                  ),
+                  const Divider(),
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.calendar_today, color: Colors.green),
+                    title: const Text('To'),
+                    subtitle: Text(fmtDT(to), style: const TextStyle(fontWeight: FontWeight.w600)),
+                    onTap: () async {
+                      final picked = await _pickDateTime(ctx, initial: to ?? from);
+                      if (picked != null) setDialogState(() => to = picked);
+                    },
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () {
+                    setState(() { _fromDateTime = null; _toDateTime = null; });
+                    Navigator.pop(ctx);
+                  },
+                  child: const Text('Clear', style: TextStyle(color: Colors.red)),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: () {
+                    setState(() { _fromDateTime = from; _toDateTime = to; });
+                    Navigator.pop(ctx);
+                  },
+                  child: const Text('Apply'),
+                ),
+              ],
+            );
+          },
         );
       },
     );
-
-    if (picked != null) {
-      setState(() {
-        _dateRange = picked;
-      });
-    }
   }
 
   void _clearDateFilter() {
     setState(() {
-      _dateRange = null;
+      _fromDateTime = null;
+      _toDateTime = null;
     });
   }
 
@@ -6486,7 +6803,7 @@ class _RequestsPageState extends State<RequestsPage> {
         title: const Text('Requests'),
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
         actions: [
-          if (_dateRange != null)
+          if (_fromDateTime != null || _toDateTime != null)
             IconButton(
               icon: const Icon(Icons.clear),
               tooltip: 'Clear date filter',
@@ -6494,23 +6811,26 @@ class _RequestsPageState extends State<RequestsPage> {
             ),
           IconButton(
             icon: Icon(
-              _dateRange != null ? Icons.filter_alt : Icons.filter_alt_outlined,
-              color: _dateRange != null ? Colors.blue : null,
+              (_fromDateTime != null || _toDateTime != null) ? Icons.filter_alt : Icons.filter_alt_outlined,
+              color: (_fromDateTime != null || _toDateTime != null) ? Colors.blue : null,
             ),
-            tooltip: 'Filter by date range',
-            onPressed: _showDateRangeFilter,
+            tooltip: 'Filter by date & time range',
+            
+
+            onPressed: _showDateTimeRangeFilter,
           ),
         ],
       ),
-      body: _RequestsBody(dateRange: _dateRange),
+      body: _RequestsBody(fromDateTime: _fromDateTime, toDateTime: _toDateTime),
     );
   }
 }
 
 class _RequestsBody extends StatefulWidget {
-  final DateTimeRange? dateRange;
+  final DateTime? fromDateTime;
+  final DateTime? toDateTime;
   
-  const _RequestsBody({this.dateRange});
+  const _RequestsBody({this.fromDateTime, this.toDateTime});
 
   @override
   State<_RequestsBody> createState() => _RequestsBodyState();
@@ -6578,8 +6898,8 @@ class _RequestsBodyState extends State<_RequestsBody> {
     );
   }
 
-  String _formatDate(DateTime date) {
-    return '${date.day}/${date.month}/${date.year}';
+  String _formatDateTime(DateTime dt) {
+    return '${dt.day}/${dt.month}/${dt.year} ${dt.hour.toString().padLeft(2,'0')}:${dt.minute.toString().padLeft(2,'0')}';
   }
 
   @override
@@ -6717,7 +7037,7 @@ class _RequestsBodyState extends State<_RequestsBody> {
           ),
         ),
         const SizedBox(height: 8),
-        if (widget.dateRange != null)
+        if (widget.fromDateTime != null || widget.toDateTime != null)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Container(
@@ -6733,7 +7053,7 @@ class _RequestsBodyState extends State<_RequestsBody> {
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      'Filtered: ${_formatDate(widget.dateRange!.start)} - ${_formatDate(widget.dateRange!.end)}',
+                      'Filtered: ${widget.fromDateTime != null ? _formatDateTime(widget.fromDateTime!) : 'Any'} → ${widget.toDateTime != null ? _formatDateTime(widget.toDateTime!) : 'Any'}',
                       style: const TextStyle(fontSize: 12, color: Colors.blue),
                     ),
                   ),
@@ -6741,7 +7061,7 @@ class _RequestsBodyState extends State<_RequestsBody> {
               ),
             ),
           ),
-        if (widget.dateRange != null) const SizedBox(height: 8),
+        if (widget.fromDateTime != null || widget.toDateTime != null) const SizedBox(height: 8),
         Expanded(
           child: _isLoading
               ? const Center(child: CircularProgressIndicator())
@@ -6774,14 +7094,11 @@ class _RequestsBodyState extends State<_RequestsBody> {
                           return false;
                         }
                         
-                        // Date range filter
-                        if (widget.dateRange != null) {
+                        // Date & time range filter
+                        if (widget.fromDateTime != null || widget.toDateTime != null) {
                           final bookingDate = b.createdAt;
-                          final startDate = widget.dateRange!.start;
-                          final endDate = widget.dateRange!.end.add(const Duration(days: 1)); // Include end date
-                          if (bookingDate.isBefore(startDate) || bookingDate.isAfter(endDate)) {
-                            return false;
-                          }
+                          if (widget.fromDateTime != null && bookingDate.isBefore(widget.fromDateTime!)) return false;
+                          if (widget.toDateTime != null && bookingDate.isAfter(widget.toDateTime!)) return false;
                         }
                         
                         if (_query.isEmpty) return true;
@@ -6800,15 +7117,27 @@ class _RequestsBodyState extends State<_RequestsBody> {
                         } else {
                           if (a.providerId != currentUser.id) return false;
                         }
-                        
-                        // Date range filter
-                        if (widget.dateRange != null) {
-                          final acceptanceDate = a.createdAt;
-                          final startDate = widget.dateRange!.start;
-                          final endDate = widget.dateRange!.end.add(const Duration(days: 1)); // Include end date
-                          if (acceptanceDate.isBefore(startDate) || acceptanceDate.isAfter(endDate)) {
-                            return false;
+
+                        // Map AcceptanceStatus → BookingStatus for chip filtering
+                        if (_statusFilters.isNotEmpty) {
+                          final BookingStatus mappedStatus;
+                          switch (a.status) {
+                            case AcceptanceStatus.pending:
+                              mappedStatus = BookingStatus.pending;
+                            case AcceptanceStatus.otpVerified:
+                            case AcceptanceStatus.paid:
+                              mappedStatus = BookingStatus.completed;
+                            case AcceptanceStatus.cancelled:
+                              mappedStatus = BookingStatus.cancelled;
                           }
+                          if (!_statusFilters.contains(mappedStatus)) return false;
+                        }
+                        
+                        // Date & time range filter
+                        if (widget.fromDateTime != null || widget.toDateTime != null) {
+                          final acceptanceDate = a.createdAt;
+                          if (widget.fromDateTime != null && acceptanceDate.isBefore(widget.fromDateTime!)) return false;
+                          if (widget.toDateTime != null && acceptanceDate.isAfter(widget.toDateTime!)) return false;
                         }
                         
                         if (_query.isEmpty) return true;
@@ -7171,9 +7500,7 @@ class _RequestsBodyState extends State<_RequestsBody> {
         }
       }
     }
-    final Slot? slotForMap = b.status == BookingStatus.accepted
-        ? bookingSlot
-        : null;
+    final Slot? slotForMap = bookingSlot; // Show map for all bookings, not just accepted
 
     return Card(
       elevation: 2,
@@ -7236,7 +7563,7 @@ class _RequestsBodyState extends State<_RequestsBody> {
                         ),
                       ),
                       Text(
-                        '${b.userAge ?? '?'} yrs ? ${b.userGender?.name ?? 'Any'}${b.seatKey != null ? ' ? Seat: ${b.seatKey}' : ''}',
+                        '${b.userAge != null ? '${b.userAge} yrs' : ''}${b.userAge != null && b.userGender != null ? ' · ' : ''}${b.userGender?.name ?? ''}${b.seatKey != null ? ' · Seat: ${b.seatKey}' : ''}',
                         style: TextStyle(fontSize: 12, color: Colors.grey[600]),
                       ),
                     ],
@@ -7375,9 +7702,78 @@ class _RequestsBodyState extends State<_RequestsBody> {
                 },
               ),
             ] else
-              Text(
-                'Booked: ${_fmtDateTime(b.createdAt)}',
-                style: TextStyle(color: Colors.grey[700]),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Show time banner from booking snapshot even without slot
+                  _BookingTimeBanner(booking: b),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Booked: ${_fmtDateTime(b.createdAt)}',
+                    style: TextStyle(color: Colors.grey[700]),
+                  ),
+                  const SizedBox(height: 8),
+                  // Show provider info for customer (rider) view
+                  if (isRiderView) ...[
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: Colors.grey[50],
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.grey.shade200),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Provider: ${b.providerName ?? _providerName(b.providerId)}',
+                            style: const TextStyle(fontWeight: FontWeight.w600),
+                          ),
+                          if (b.providerPhone != null && b.providerPhone!.isNotEmpty) ...[
+                            const SizedBox(height: 4),
+                            Text(
+                              'Contact: ${b.providerPhone}',
+                              style: TextStyle(color: Colors.grey[700]),
+                            ),
+                          ],
+                          if (b.providerEmail != null && b.providerEmail!.isNotEmpty) ...[
+                            const SizedBox(height: 4),
+                            Text(
+                              'Email: ${b.providerEmail}',
+                              style: TextStyle(color: Colors.grey[700]),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ] else ...[
+                    // Provider view — show customer info
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: Colors.grey[50],
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.grey.shade200),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'User: ${b.userName ?? 'N/A'}',
+                            style: const TextStyle(fontWeight: FontWeight.w600),
+                          ),
+                          if (b.userPhone != null && b.userPhone!.isNotEmpty) ...[
+                            const SizedBox(height: 4),
+                            Text(
+                              'Contact: ${b.userPhone}',
+                              style: TextStyle(color: Colors.grey[700]),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ],
+                ],
               ),
             if (slotForMap != null) ...[
               const SizedBox(height: 6),
@@ -7416,9 +7812,8 @@ class _RequestsBodyState extends State<_RequestsBody> {
                 ],
               ),
             ],
-            if (b.status == BookingStatus.accepted ||
-                b.status == BookingStatus.completed ||
-                b.status == BookingStatus.pending) ...[
+            // Show full card details for ALL booking statuses
+            ...[
               const SizedBox(height: 12),
               if (isRiderView) ...[
                 Container(
@@ -7692,11 +8087,12 @@ class _RequestsBodyState extends State<_RequestsBody> {
                     ],
                   ),
                 ],
-                // Trip Media ? upload photos/video for start & end of trip
+                // Trip Media — show if active OR if media already exists
                 if (b.status == BookingStatus.accepted ||
                     b.status == BookingStatus.completed ||
                     b.status == BookingStatus.pending ||
-                    b.status == BookingStatus.inProgress) ...[
+                    b.status == BookingStatus.inProgress ||
+                    !b.tripMedia.isEmpty) ...[
                   const SizedBox(height: 12),
                   const Divider(),
                   TripMediaWidget(
@@ -7707,12 +8103,24 @@ class _RequestsBodyState extends State<_RequestsBody> {
                     },
                   ),
                 ],
-                if (b.status == BookingStatus.completed) ...[
+                // Customer review button - ALWAYS check GPS verification
+                if (b.customerCanReview) ...[
                   const SizedBox(height: 10),
                   OutlinedButton.icon(
                     onPressed: () {
                       final currentUser = AuthRepository.instance.currentUser;
                       if (currentUser == null) return;
+
+                      // Check if review is blocked
+                      if (b.reviewBlockedReason != null) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('⚠️ ${b.reviewBlockedReason}'),
+                            backgroundColor: Colors.orange,
+                          ),
+                        );
+                        return;
+                      }
 
                       final hasReviewed = ReviewRepository.instance.hasReviewed(
                         bookingId: b.id,
@@ -7883,7 +8291,7 @@ class _RequestsBodyState extends State<_RequestsBody> {
                       ],
                     ),
                   )
-                else if (bookingSlot != null && DateTime.now().isAfter(bookingSlot.endTime))
+                else if (bookingSlot != null && DateTime.now().isAfter(bookingSlot.endTime) && !b.otpVerified)
                   // After end time: OTP entry for provider
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -7978,7 +8386,7 @@ class _RequestsBodyState extends State<_RequestsBody> {
                       ),
                     ],
                   )
-                else
+                else if (!b.otpVerified)
                   Row(
                     children: [
                       Expanded(
@@ -8113,13 +8521,24 @@ class _RequestsBodyState extends State<_RequestsBody> {
                       ),
                     ],
                   ),
-                // Add review button for completed trips (provider view)
-                if (!isRiderView && b.status == BookingStatus.completed) ...[
+                // Provider review button - ALWAYS check GPS verification
+                if (!isRiderView && b.providerCanReview) ...[
                   const SizedBox(height: 10),
                   OutlinedButton.icon(
                     onPressed: () {
                       final currentUser = AuthRepository.instance.currentUser;
                       if (currentUser == null) return;
+
+                      // Check if review is blocked
+                      if (b.reviewBlockedReason != null) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('⚠️ ${b.reviewBlockedReason}'),
+                            backgroundColor: Colors.orange,
+                          ),
+                        );
+                        return;
+                      }
 
                       final hasReviewed = ReviewRepository.instance.hasReviewed(
                         bookingId: b.id,
@@ -8166,11 +8585,12 @@ class _RequestsBodyState extends State<_RequestsBody> {
                     ),
                   ),
                 ],
-                // Trip Media for Provider ? upload photos/video for start & end of trip
+                // Trip Media for Provider — show if active OR if media already exists
                 if (b.status == BookingStatus.accepted ||
                     b.status == BookingStatus.completed ||
                     b.status == BookingStatus.pending ||
-                    b.status == BookingStatus.inProgress) ...[
+                    b.status == BookingStatus.inProgress ||
+                    !b.tripMedia.isEmpty) ...[
                   const SizedBox(height: 12),
                   const Divider(),
                   TripMediaWidget(
@@ -8254,24 +8674,31 @@ class _RequestsBodyState extends State<_RequestsBody> {
                 ),
               ],
 
-              // -- Raise dispute (only when expired ? trip ended without OTP) --
-              if (b.status == BookingStatus.expired && isRiderView) ...[
-                const SizedBox(height: 10),
-                OutlinedButton.icon(
-                  onPressed: () => _showRaiseDisputeDialog(context, b),
-                  icon: const Icon(Icons.report_problem_outlined, size: 16),
-                  label: const Text('Raise a Dispute',
-                      style: TextStyle(fontSize: 13)),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: Colors.deepOrange,
-                    side: const BorderSide(color: Colors.deepOrange),
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    minimumSize: Size.zero,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
-                ),
-              ],
+              // ── DISPUTE FEATURE DISABLED FOR LAUNCH ─────────────────────────
+              // Decision: Launch without disputes (self-healing system is enough)
+              // See: WHY_NO_DISPUTES_NEEDED.md
+              // TODO: Re-enable after 3-6 months if support tickets show it's needed
+              //
+              // -- Raise dispute (expired bookings - both customer and provider can dispute) --
+              // if (b.status == BookingStatus.expired) ...[
+              //   const SizedBox(height: 10),
+              //   OutlinedButton.icon(
+              //     onPressed: () => _showRaiseDisputeDialog(context, b),
+              //     icon: const Icon(Icons.report_problem_outlined, size: 16),
+              //     label: Text(
+              //       isRiderView ? 'Raise a Dispute' : 'Contest Expiry',
+              //       style: const TextStyle(fontSize: 13),
+              //     ),
+              //     style: OutlinedButton.styleFrom(
+              //       foregroundColor: Colors.deepOrange,
+              //       side: const BorderSide(color: Colors.deepOrange),
+              //       padding:
+              //           const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              //       minimumSize: Size.zero,
+              //       tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              //     ),
+              //   ),
+              // ],
             ],
           ],
         ),
@@ -8289,28 +8716,51 @@ class _RequestsBodyState extends State<_RequestsBody> {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Row(
           children: [
-            Icon(Icons.gavel, color: Colors.deepOrange[700]),
+            Icon(Icons.smart_toy, color: Colors.deepOrange[700]),
             const SizedBox(width: 8),
-            const Text('Raise a Dispute'),
+            const Text('AI Dispute Resolution'),
           ],
         ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'Describe the issue. Support will review and resolve within 24 hours.',
-              style: TextStyle(fontSize: 13, color: Colors.grey),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.blue.shade50,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.blue.shade200),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.auto_awesome, color: Colors.blue[700], size: 20),
+                  const SizedBox(width: 8),
+                  const Expanded(
+                    child: Text(
+                      '🤖 AI Mediator will resolve this fairly by analyzing evidence from both sides',
+                      style: TextStyle(fontSize: 12, color: Colors.black87),
+                    ),
+                  ),
+                ],
+              ),
             ),
             const SizedBox(height: 12),
+            const Text(
+              'Briefly describe the issue (optional):',
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
             TextField(
               controller: reasonCtrl,
               maxLines: 3,
-              maxLength: 300,
+              maxLength: 200,
               decoration: const InputDecoration(
-                hintText: 'e.g. Provider did not show up, wrong route taken...',
+                hintText: 'e.g. Provider no-show, vehicle issue, wrong route...',
                 border: OutlineInputBorder(),
                 contentPadding: EdgeInsets.all(10),
+                helperText: 'You can provide more details in the AI chat',
+                helperMaxLines: 2,
               ),
             ),
           ],
@@ -8326,23 +8776,53 @@ class _RequestsBodyState extends State<_RequestsBody> {
               backgroundColor: Colors.deepOrange,
               foregroundColor: Colors.white,
             ),
-            child: const Text('Submit'),
+            child: const Text('Start AI Mediation'),
           ),
         ],
       ),
     );
 
     if (confirmed != true || !context.mounted) return;
-    final reason = reasonCtrl.text.trim();
-    if (reason.isEmpty) return;
+    final reason = reasonCtrl.text.trim().isEmpty ? null : reasonCtrl.text.trim();
 
     final messenger = ScaffoldMessenger.of(context);
+    
+    // Show loading dialog
+    if (context.mounted) {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => const Center(
+          child: Card(
+            child: Padding(
+              padding: EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  CircularProgressIndicator(),
+                  SizedBox(height: 16),
+                  Text('🤖 Creating dispute mediation...'),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+    
     try {
+      // Create AI-powered dispute with 2 separate chat threads
+      final customerConversationId = await DisputeService.instance.createDispute(
+        bookingId: b.id,
+        disputeReason: reason,
+      );
+
+      // Update booking status
       await Supabase.instance.client
           .from('bookings')
           .update({
             'status': BookingStatus.disputed.dbValue,
-            'dispute_reason': reason,
+            'dispute_reason': reason ?? 'Customer raised a dispute',
             'disputed_at': DateTime.now().toUtc().toIso8601String(),
           })
           .eq('id', int.parse(b.id));
@@ -8352,13 +8832,36 @@ class _RequestsBodyState extends State<_RequestsBody> {
         status: BookingStatus.disputed,
       );
 
+      // Close loading
+      if (context.mounted) Navigator.pop(context);
+
+      // Open customer's dispute chat
+      if (context.mounted) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => AIChatPage(
+              conversationId: customerConversationId,
+              isDisputeMode: true,
+            ),
+          ),
+        );
+      }
+
       messenger.showSnackBar(
         const SnackBar(
-          content: Text('Dispute submitted. Support will review within 24 hours.'),
-          backgroundColor: Colors.deepOrange,
+          content: Text('🤖 AI Mediation started! Talk to the AI to resolve this dispute.'),
+          backgroundColor: Colors.green,
+          duration: Duration(seconds: 4),
         ),
       );
     } catch (e) {
+      // Close loading if still open
+      if (context.mounted) {
+        Navigator.of(context, rootNavigator: true).pop();
+      }
+      
+      debugPrint('❌ Failed to create dispute: $e');
       messenger.showSnackBar(
         SnackBar(
           content: Text('Failed to submit: $e'),
@@ -9374,6 +9877,66 @@ class _ProfilePageState extends State<ProfilePage> {
                           ],
                         ),
                         const SizedBox(height: 8),
+                        // Rating Display
+                        if (info.providerTotalReviews > 0 || info.customerTotalReviews > 0) ...[
+                          Wrap(
+                            spacing: 12,
+                            runSpacing: 4,
+                            children: [
+                              if (info.providerTotalReviews > 0)
+                                Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(Icons.business, size: 14, color: Colors.blue),
+                                    const SizedBox(width: 4),
+                                    const Icon(Icons.star, size: 14, color: Colors.amber),
+                                    const SizedBox(width: 2),
+                                    Text(
+                                      info.providerRating.toStringAsFixed(1),
+                                      style: const TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 2),
+                                    Text(
+                                      '(${info.providerTotalReviews})',
+                                      style: const TextStyle(
+                                        fontSize: 12,
+                                        color: Colors.grey,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              if (info.customerTotalReviews > 0)
+                                Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(Icons.person, size: 14, color: Colors.green),
+                                    const SizedBox(width: 4),
+                                    const Icon(Icons.star, size: 14, color: Colors.amber),
+                                    const SizedBox(width: 2),
+                                    Text(
+                                      info.customerRating.toStringAsFixed(1),
+                                      style: const TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 2),
+                                    Text(
+                                      '(${info.customerTotalReviews})',
+                                      style: const TextStyle(
+                                        fontSize: 12,
+                                        color: Colors.grey,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                        ],
                         const Text(
                           'Passionate about transportation and helping others move efficiently.',
                           style: TextStyle(fontSize: 14, color: Colors.grey),

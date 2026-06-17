@@ -169,6 +169,17 @@ class Booking {
   // Trip media — photos/videos uploaded by provider & customer at start/end
   final TripMedia tripMedia;
 
+  // GPS tracking for review verification
+  final double? customerArrivalLat;
+  final double? customerArrivalLng;
+  final DateTime? customerArrivalTime;
+  final bool customerGpsVerified;
+  
+  final double? providerArrivalLat;
+  final double? providerArrivalLng;
+  final DateTime? providerArrivalTime;
+  final bool providerGpsVerified;
+
   Booking({
     required this.id,
     required this.slotId,
@@ -216,6 +227,15 @@ class Booking {
     this.rangeKm,
     // trip media
     this.tripMedia = TripMedia.empty,
+    // GPS tracking
+    this.customerArrivalLat,
+    this.customerArrivalLng,
+    this.customerArrivalTime,
+    this.customerGpsVerified = false,
+    this.providerArrivalLat,
+    this.providerArrivalLng,
+    this.providerArrivalTime,
+    this.providerGpsVerified = false,
   }) : deadlineTime = deadlineTime ?? tripEndTime;
 
   Booking copyWith({
@@ -246,6 +266,14 @@ class Booking {
     bool? isFullVehicleLocked,
     PostMode? postMode,
     TripMedia? tripMedia,
+    double? customerArrivalLat,
+    double? customerArrivalLng,
+    DateTime? customerArrivalTime,
+    bool? customerGpsVerified,
+    double? providerArrivalLat,
+    double? providerArrivalLng,
+    DateTime? providerArrivalTime,
+    bool? providerGpsVerified,
   }) {
     return Booking(
       id: id ?? this.id,
@@ -294,6 +322,15 @@ class Booking {
       rangeKm: rangeKm,
       // trip media
       tripMedia: tripMedia ?? this.tripMedia,
+      // GPS tracking
+      customerArrivalLat: customerArrivalLat ?? this.customerArrivalLat,
+      customerArrivalLng: customerArrivalLng ?? this.customerArrivalLng,
+      customerArrivalTime: customerArrivalTime ?? this.customerArrivalTime,
+      customerGpsVerified: customerGpsVerified ?? this.customerGpsVerified,
+      providerArrivalLat: providerArrivalLat ?? this.providerArrivalLat,
+      providerArrivalLng: providerArrivalLng ?? this.providerArrivalLng,
+      providerArrivalTime: providerArrivalTime ?? this.providerArrivalTime,
+      providerGpsVerified: providerGpsVerified ?? this.providerGpsVerified,
     );
   }
 
@@ -345,6 +382,15 @@ class Booking {
       'rangeKm': rangeKm,
       // trip media
       'tripMedia': tripMedia.toJson(),
+      // GPS tracking
+      'customerArrivalLat': customerArrivalLat,
+      'customerArrivalLng': customerArrivalLng,
+      'customerArrivalTime': customerArrivalTime?.toIso8601String(),
+      'customerGpsVerified': customerGpsVerified,
+      'providerArrivalLat': providerArrivalLat,
+      'providerArrivalLng': providerArrivalLng,
+      'providerArrivalTime': providerArrivalTime?.toIso8601String(),
+      'providerGpsVerified': providerGpsVerified,
     };
   }
 
@@ -390,6 +436,15 @@ class Booking {
       if (tripEndTime != null)   'end_time':   tripEndTime!.toUtc().toIso8601String(),
       // deadline_time not sent — DB uses end_time directly
       'trip_media': tripMedia.toJson(),
+      // GPS tracking
+      if (customerArrivalLat != null) 'customer_arrival_lat': customerArrivalLat,
+      if (customerArrivalLng != null) 'customer_arrival_lng': customerArrivalLng,
+      if (customerArrivalTime != null) 'customer_arrival_time': customerArrivalTime!.toUtc().toIso8601String(),
+      'customer_gps_verified': customerGpsVerified,
+      if (providerArrivalLat != null) 'provider_arrival_lat': providerArrivalLat,
+      if (providerArrivalLng != null) 'provider_arrival_lng': providerArrivalLng,
+      if (providerArrivalTime != null) 'provider_arrival_time': providerArrivalTime!.toUtc().toIso8601String(),
+      'provider_gps_verified': providerGpsVerified,
     };
   }
 
@@ -478,6 +533,19 @@ class Booking {
       tripMedia: TripMedia.fromJson(
         (json['tripMedia'] ?? json['trip_media']) as Map<String, dynamic>?,
       ),
+      // GPS tracking
+      customerArrivalLat: (json['customerArrivalLat'] ?? json['customer_arrival_lat'] as num?)?.toDouble(),
+      customerArrivalLng: (json['customerArrivalLng'] ?? json['customer_arrival_lng'] as num?)?.toDouble(),
+      customerArrivalTime: (json['customerArrivalTime'] ?? json['customer_arrival_time']) != null
+          ? DateTime.tryParse(json['customerArrivalTime'] ?? json['customer_arrival_time'])?.toLocal()
+          : null,
+      customerGpsVerified: json['customerGpsVerified'] ?? json['customer_gps_verified'] ?? false,
+      providerArrivalLat: (json['providerArrivalLat'] ?? json['provider_arrival_lat'] as num?)?.toDouble(),
+      providerArrivalLng: (json['providerArrivalLng'] ?? json['provider_arrival_lng'] as num?)?.toDouble(),
+      providerArrivalTime: (json['providerArrivalTime'] ?? json['provider_arrival_time']) != null
+          ? DateTime.tryParse(json['providerArrivalTime'] ?? json['provider_arrival_time'])?.toLocal()
+          : null,
+      providerGpsVerified: json['providerGpsVerified'] ?? json['provider_gps_verified'] ?? false,
     );
   }
   
@@ -493,6 +561,8 @@ class Booking {
   /// True if deadline has passed and booking is still active (should auto-expire)
   bool get isOverdue {
     if (deadlineTime == null) return false;
+    // Never expire a booking that has been OTP-verified — it's completed
+    if (otpVerified) return false;
     return DateTime.now().isAfter(deadlineTime!) && status.isActive;
   }
 
@@ -503,6 +573,99 @@ class Booking {
   /// True if trip has ended (now >= tripEndTime)
   bool get tripHasEnded =>
       tripEndTime != null && DateTime.now().isAfter(tripEndTime!);
+
+  // ── Review eligibility helpers ──────────────────────────────────────────
+
+  /// Can customer leave a review?
+  /// Rules:
+  /// 1. Must be AFTER trip end time
+  /// 2. If completed (OTP verified) → can review
+  /// 3. If expired (no OTP) → must have GPS proof of arrival
+  bool get customerCanReview {
+    // Must be after trip end time
+    if (tripEndTime != null && DateTime.now().isBefore(tripEndTime!)) {
+      return false; // Trip still happening or hasn't ended yet
+    }
+    
+    // If completed with OTP → can review (OTP is proof trip happened)
+    if (status == BookingStatus.completed && otpVerified) {
+      return true;
+    }
+    
+    // If expired without OTP → need GPS proof customer actually showed up
+    // Check trip_media JSON for GPS data
+    if (status == BookingStatus.expired) {
+      return tripMedia.start.customer.hasGps;
+    }
+    
+    return false;
+  }
+
+  /// Can provider leave a review?
+  /// Rules:
+  /// 1. Must be AFTER trip end time
+  /// 2. If completed (OTP verified) → can review
+  /// 3. If expired (no OTP) → must have GPS proof of arrival
+  bool get providerCanReview {
+    // Must be after trip end time
+    if (tripEndTime != null && DateTime.now().isBefore(tripEndTime!)) {
+      return false; // Trip still happening or hasn't ended yet
+    }
+    
+    // If completed with OTP → can review (OTP is proof trip happened)
+    if (status == BookingStatus.completed && otpVerified) {
+      return true;
+    }
+    
+    // If expired without OTP → need GPS proof provider actually showed up
+    // Check trip_media JSON for GPS data
+    if (status == BookingStatus.expired) {
+      return tripMedia.start.provider.hasGps;
+    }
+    
+    return false;
+  }
+
+  /// Human-readable reason why review is not allowed
+  String? get reviewBlockedReason {
+    // Check if trip hasn't ended yet
+    if (tripEndTime != null && DateTime.now().isBefore(tripEndTime!)) {
+      return 'Reviews available after trip ends (${_formatEndTime()})';
+    }
+    
+    final hasCustomerGps = tripMedia.start.customer.hasGps;
+    final hasProviderGps = tripMedia.start.provider.hasGps;
+    
+    // If completed with OTP → allowed
+    if (status == BookingStatus.completed && otpVerified) {
+      return null; // Allowed
+    }
+    
+    // If expired and didn't show up
+    if (status == BookingStatus.expired) {
+      if (!hasCustomerGps && !hasProviderGps) {
+        return 'Neither party arrived at pickup location (GPS verification failed)';
+      }
+      if (!hasCustomerGps) {
+        return 'Customer did not arrive at pickup location (GPS verification failed)';
+      }
+      if (!hasProviderGps) {
+        return 'Provider did not arrive at pickup location (GPS verification failed)';
+      }
+    }
+    
+    // General case - not completed and not expired
+    return 'Reviews available after trip ends';
+  }
+  
+  String _formatEndTime() {
+    if (tripEndTime == null) return '';
+    final now = DateTime.now();
+    final diff = tripEndTime!.difference(now);
+    if (diff.inHours > 0) return '${diff.inHours}h ${diff.inMinutes % 60}m';
+    if (diff.inMinutes > 0) return '${diff.inMinutes}m';
+    return 'soon';
+  }
 
   // Helper to parse booking mode from different formats
   static BookingMode _parseBookingMode(dynamic value) {
