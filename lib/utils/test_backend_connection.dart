@@ -115,12 +115,11 @@ class BackendConnectionTest {
     debugPrint('\n📊 Test 4: Table Access');
     
     final tables = [
-      'profiles',
+      'profiles_public',
       'vehicles',
-      'posts', // Changed from 'slots'
+      'posts',
       'bookings',
       'reviews',
-      // Note: user_posts and user_post_acceptances may not exist in your schema
     ];
 
     for (final table in tables) {

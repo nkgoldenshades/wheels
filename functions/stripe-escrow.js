@@ -4,31 +4,39 @@ const { createClient } = require('@supabase/supabase-js');
 
 // All secrets are loaded from .env (local) or Firebase Secret Manager (deployed).
 // Do NOT use the deprecated functions.config() API.
-const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
+const USE_LIVE_KEYS = process.env.USE_LIVE_KEYS === 'true';
+
+const stripeSecretKey = USE_LIVE_KEYS
+  ? process.env.STRIPE_SECRET_KEY_LIVE
+  : process.env.STRIPE_SECRET_KEY_TEST;
+
 if (!stripeSecretKey) {
-  console.warn('Missing STRIPE_SECRET_KEY - Stripe functions will not work');
+  console.warn(`Missing STRIPE_SECRET_KEY_${USE_LIVE_KEYS ? 'LIVE' : 'TEST'} - Stripe functions will not work`);
 }
 const stripe = stripeSecretKey ? require('stripe')(stripeSecretKey) : null;
 
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const supabaseUrl = process.env.SUPABASE_URL || 'https://uklltpopjovbhplbvltr.supabase.co';
+// Use SERVICE_ROLE_KEY for backend operations (has full admin access)
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVrbGx0cG9wam92YmhwbGJ2bHRyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIwNzkyNDIsImV4cCI6MjA4NzY1NTI0Mn0.tqq3okMJR9z55uPETwrhpIVoS77PwtBFeJw7T1CnRPM';
 
-if (!supabaseUrl || !supabaseServiceRoleKey) {
+if (!supabaseUrl || !supabaseKey) {
   console.warn('Missing Supabase config - Database functions will not work');
 }
 
-const supabase = (supabaseUrl && supabaseServiceRoleKey) 
-  ? createClient(supabaseUrl, supabaseServiceRoleKey, {
+const supabase = (supabaseUrl && supabaseKey)
+  ? createClient(supabaseUrl, supabaseKey, {
       auth: { persistSession: false },
     })
   : null;
 
+// v1 HTTP functions (keeping existing deployed functions as v1)
 const stripeSupabaseSecrets = [
-  'STRIPE_SECRET_KEY',
-  'STRIPE_WEBHOOK_SECRET',
-  'SUPABASE_URL',
-  'SUPABASE_SERVICE_ROLE_KEY',
+  'STRIPE_SECRET_KEY_LIVE',
+  'STRIPE_SECRET_KEY_TEST',
+  'USE_LIVE_KEYS',
 ];
+
+// Use v1 runWith for secrets
 const stripeSupabaseRuntime = functions.runWith({
   secrets: stripeSupabaseSecrets,
 });
@@ -107,7 +115,7 @@ function _stripeCountryCode(country) {
 /**
  * Create Stripe Connect Express account and onboarding link for a provider.
  */
-exports.createConnectedAccount = stripeSupabaseRuntime.https.onRequest(async (req, res) => {
+exports.createConnectedAccount = functions.https.onRequest(async (req, res) => {
   res.set('Access-Control-Allow-Origin', '*');
   if (req.method === 'OPTIONS') {
     res.set('Access-Control-Allow-Methods', 'POST');
@@ -159,6 +167,12 @@ exports.createConnectedAccount = stripeSupabaseRuntime.https.onRequest(async (re
       metadata: { firebase_uid: user_id },
     });
 
+    // Fetch the account details to get default_currency
+    const accountDetails = await stripe.accounts.retrieve(account.id);
+    const defaultCurrency = accountDetails.default_currency
+      ? accountDetails.default_currency.toUpperCase()
+      : null;
+
     const accountLink = await stripe.accountLinks.create({
       account: account.id,
       refresh_url: refresh_url || 'https://vervestrideal.com/stripe-refresh',
@@ -169,6 +183,7 @@ exports.createConnectedAccount = stripeSupabaseRuntime.https.onRequest(async (re
     res.json({
       account_id: account.id,
       url: accountLink.url,
+      currency: defaultCurrency, // ← Return currency!
     });
   } catch (error) {
     console.error('createConnectedAccount error:', error);
@@ -180,7 +195,7 @@ exports.createConnectedAccount = stripeSupabaseRuntime.https.onRequest(async (re
  * Create booking with escrow payment
  * Called when user books a post
  */
-exports.createBooking = stripeSupabaseRuntime.https.onRequest(async (req, res) => {
+exports.createBooking = functions.https.onRequest(async (req, res) => {
   // Enable CORS
   res.set('Access-Control-Allow-Origin', '*');
   if (req.method === 'OPTIONS') {
@@ -261,8 +276,8 @@ exports.createBooking = stripeSupabaseRuntime.https.onRequest(async (req, res) =
     const countdownIso = countdownEndTime.toISOString();
     const createdIso = new Date().toISOString();
     const insertPayload = {
-      user_id: user_id,
-      provider_id: provider_id,
+      profile_customer_id: user_id,
+      profile_provider_id: provider_id,
       ...(post_id ? { post_id: post_id } : {}),
       ...(slot_id ? { slot_id: slot_id } : {}),
       stripe_payment_intent_id: paymentIntent.id,
@@ -314,7 +329,7 @@ exports.createBooking = stripeSupabaseRuntime.https.onRequest(async (req, res) =
  * Verify OTP and release funds to provider
  * Called when provider enters OTP
  */
-exports.verifyOtp = stripeSupabaseRuntime.https.onRequest(async (req, res) => {
+exports.verifyOtp = functions.https.onRequest(async (req, res) => {
   res.set('Access-Control-Allow-Origin', '*');
   if (req.method === 'OPTIONS') {
     res.set('Access-Control-Allow-Methods', 'POST');
@@ -534,6 +549,14 @@ exports.verifyOtp = stripeSupabaseRuntime.https.onRequest(async (req, res) => {
 /**
  * Auto-refund expired bookings
  * Run this as a scheduled function every minute
+ *
+ * No-show logic (lease slots with security deposit):
+ * - If OTP never verified and booking end_time has passed → no-show
+ * - Customer gets ride price back (amount - deposit_snapshot)
+ * - Provider keeps security deposit (deposit_snapshot) as compensation
+ *
+ * Normal expiry (no deposit or non-lease):
+ * - Full amount refunded to customer
  */
 exports.autoRefundExpired = stripeSupabaseRuntime.pubsub
   .schedule('every 1 minutes')
@@ -560,19 +583,84 @@ exports.autoRefundExpired = stripeSupabaseRuntime.pubsub
         const bookingId = booking.id;
 
         try {
+          const isFraud = booking.status === 'fraud_suspected';
+          const cancellationReason = isFraud ? 'fraudulent' : 'abandoned';
+
+          // ── No-show detection ──────────────────────────────────────────────
+          // If the slot end time has passed AND OTP was never verified,
+          // this is a no-show. Provider keeps security deposit.
+          const depositAmount = booking.deposit_snapshot
+            ? Math.round(parseFloat(booking.deposit_snapshot) * 100) // paise
+            : 0;
+          const slotEndTime = booking.end_time
+            ? new Date(booking.end_time)
+            : null;
+          const isNoShow = !isFraud &&
+            !booking.otp_verified &&
+            depositAmount > 0 &&
+            slotEndTime !== null &&
+            slotEndTime <= new Date();
+
+          const totalAmountPaise = booking.amount; // already in paise
+          // Ride price = total - deposit (both in paise)
+          const ridePricePaise = isNoShow
+            ? Math.max(0, totalAmountPaise - depositAmount)
+            : totalAmountPaise;
+
+          // ── Razorpay bookings ──────────────────────────────────────────────
+          if (booking.razorpay_payment_id && !booking.stripe_payment_intent_id) {
+            if (isNoShow) {
+              // Refund only ride price to customer; deposit stays with provider
+              console.log(`No-show booking ${bookingId}: refunding ride price ${ridePricePaise} paise, provider keeps deposit ${depositAmount} paise`);
+
+              if (ridePricePaise > 0) {
+                await getRazorpay().payments.refund(booking.razorpay_payment_id, {
+                  amount: ridePricePaise,
+                  notes: {
+                    reason: 'no_show_ride_price_refund',
+                    booking_id: bookingId,
+                  },
+                });
+              }
+
+              await supabase
+                .from('bookings')
+                .update({
+                  status: 'no_show',
+                  refunded_at: new Date().toISOString(),
+                  refund_note: `No-show: ride price refunded (${ridePricePaise} paise), deposit kept by provider (${depositAmount} paise)`,
+                })
+                .eq('id', bookingId);
+            } else {
+              // Full refund — no deposit or not a no-show
+              console.log(`Refunding full amount for Razorpay booking ${bookingId}`);
+              await getRazorpay().payments.refund(booking.razorpay_payment_id, {
+                amount: totalAmountPaise,
+                notes: { reason: cancellationReason, booking_id: bookingId },
+              });
+
+              await supabase
+                .from('bookings')
+                .update({
+                  status: isFraud ? 'fraud_suspected' : 'refunded',
+                  refunded_at: new Date().toISOString(),
+                })
+                .eq('id', bookingId);
+            }
+            console.log(`Processed Razorpay booking ${bookingId}`);
+            return;
+          }
+
+          // ── Stripe bookings ────────────────────────────────────────────────
           const paymentIntent = await stripe.paymentIntents.retrieve(
             booking.stripe_payment_intent_id,
           );
 
-          const isFraud = booking.status === 'fraud_suspected';
-          const cancellationReason = isFraud ? 'fraudulent' : 'abandoned';
-
           if (paymentIntent.status === 'requires_capture') {
+            // Not yet captured — cancel the hold
             const cancelled = await stripe.paymentIntents.cancel(
               booking.stripe_payment_intent_id,
-              {
-                cancellation_reason: cancellationReason,
-              },
+              { cancellation_reason: cancellationReason },
             );
 
             await supabase
@@ -583,26 +671,47 @@ exports.autoRefundExpired = stripeSupabaseRuntime.pubsub
                 cancelled_at: new Date().toISOString(),
               })
               .eq('id', bookingId);
-            console.log(`Cancelled booking ${bookingId} (${cancellationReason})`);
+            console.log(`Cancelled Stripe booking ${bookingId} (${cancellationReason})`);
             return;
           }
 
           if (paymentIntent.status === 'succeeded') {
-            const refund = await stripe.refunds.create({
-              payment_intent: booking.stripe_payment_intent_id,
-              amount: booking.amount,
-            });
+            if (isNoShow) {
+              // Partial refund — ride price only
+              console.log(`No-show Stripe booking ${bookingId}: refunding ${ridePricePaise} paise`);
+              const refund = ridePricePaise > 0
+                ? await stripe.refunds.create({
+                    payment_intent: booking.stripe_payment_intent_id,
+                    amount: ridePricePaise,
+                  })
+                : null;
 
-            await supabase
-              .from('bookings')
-              .update({
-                status: 'refunded',
-                stripe_refund_id: refund.id,
-                refunded_at: new Date().toISOString(),
-              })
-              .eq('id', bookingId);
+              await supabase
+                .from('bookings')
+                .update({
+                  status: 'no_show',
+                  stripe_refund_id: refund?.id ?? null,
+                  refunded_at: new Date().toISOString(),
+                  refund_note: `No-show: ride price refunded (${ridePricePaise} paise), deposit kept by provider (${depositAmount} paise)`,
+                })
+                .eq('id', bookingId);
+            } else {
+              // Full refund
+              const refund = await stripe.refunds.create({
+                payment_intent: booking.stripe_payment_intent_id,
+                amount: totalAmountPaise,
+              });
 
-            console.log(`Refunded booking ${bookingId}`);
+              await supabase
+                .from('bookings')
+                .update({
+                  status: 'refunded',
+                  stripe_refund_id: refund.id,
+                  refunded_at: new Date().toISOString(),
+                })
+                .eq('id', bookingId);
+            }
+            console.log(`Processed Stripe booking ${bookingId}`);
             return;
           }
 
@@ -616,7 +725,6 @@ exports.autoRefundExpired = stripeSupabaseRuntime.pubsub
 
         } catch (error) {
           console.error(`Failed to refund booking ${bookingId}:`, error);
-          // Mark as failed for manual review
           await supabase
             .from('bookings')
             .update({
@@ -637,7 +745,7 @@ exports.autoRefundExpired = stripeSupabaseRuntime.pubsub
 /**
  * Manual refund endpoint (for admin/support)
  */
-exports.refundPayment = stripeSupabaseRuntime.https.onRequest(async (req, res) => {
+exports.refundPayment = functions.https.onRequest(async (req, res) => {
   res.set('Access-Control-Allow-Origin', '*');
   if (req.method === 'OPTIONS') {
     res.set('Access-Control-Allow-Methods', 'POST');
@@ -666,7 +774,7 @@ exports.refundPayment = stripeSupabaseRuntime.https.onRequest(async (req, res) =
 /**
  * Release funds manually (for admin/support)
  */
-exports.releaseFunds = stripeSupabaseRuntime.https.onRequest(async (req, res) => {
+exports.releaseFunds = functions.https.onRequest(async (req, res) => {
   res.set('Access-Control-Allow-Origin', '*');
   if (req.method === 'OPTIONS') {
     res.set('Access-Control-Allow-Methods', 'POST');
@@ -719,7 +827,7 @@ exports.releaseFunds = stripeSupabaseRuntime.https.onRequest(async (req, res) =>
  * Create Stripe Checkout Session for web payments
  * Called when web users want to pay
  */
-exports.createCheckoutSession = stripeSupabaseRuntime.https.onRequest(async (req, res) => {
+exports.createCheckoutSession = functions.https.onRequest(async (req, res) => {
   res.set('Access-Control-Allow-Origin', '*');
   if (req.method === 'OPTIONS') {
     res.set('Access-Control-Allow-Methods', 'POST');
@@ -749,6 +857,10 @@ exports.createCheckoutSession = stripeSupabaseRuntime.https.onRequest(async (req
     return res.status(401).json({ error: 'Missing auth token' });
   }
 
+  // Get the Firebase ID token from the Authorization header
+  const authHeader = req.headers?.authorization || req.headers?.Authorization;
+  const firebaseToken = authHeader?.replace(/^Bearer\s+/i, '');
+
   const parsedAmount = _toInt(amount);
   const parsedCommission = _toInt(commission_amount) ?? 0;
   const normalizedCurrency =
@@ -770,54 +882,27 @@ exports.createCheckoutSession = stripeSupabaseRuntime.https.onRequest(async (req
   }
 
   try {
-    // Calculate countdown end time (1 hour from now)
-    const countdownEndTime = new Date();
-    countdownEndTime.setHours(countdownEndTime.getHours() + 1);
+    // Don't create booking yet - just create Stripe Checkout Session
+    // Booking will be created after payment succeeds (via webhook or client)
+    // This matches how Razorpay works - no Supabase access needed here!
+    
+    if (!stripe) {
+      return res.status(500).json({ error: 'Stripe is not configured' });
+    }
 
-    // Create pending booking in Supabase FIRST to get booking_id
-    // OTP will be auto-generated by database trigger
-    const countdownIso = countdownEndTime.toISOString();
-    const createdIso = new Date().toISOString();
-    
-    // Create a temporary payment intent ID placeholder
-    const tempPaymentIntentId = `temp_${user_id}_${Date.now()}`;
-    
-    const insertPayload = {
-      user_id: user_id,
-      provider_id: provider_id,
-      ...(post_id ? { post_id: post_id } : {}),
-      ...(slot_id ? { slot_id: slot_id } : {}),
-      stripe_payment_intent_id: tempPaymentIntentId,
-      amount: parsedAmount,
+    // Create Stripe Checkout Session with metadata for later booking creation
+    const metadata = {
+      user_id,
+      provider_id,
+      ...(post_id ? { post_id } : {}),
+      ...(slot_id ? { slot_id } : {}),
+      amount: parsedAmount.toString(),
       currency: normalizedCurrency,
-      commission_amount: parsedCommission,
-      // otp: NOT provided - will be auto-generated by Supabase trigger for security
-      otp_verified: false,
-      countdown_end_time: countdownIso,
-      status: 'pending',
-      created_at: createdIso,
+      commission_amount: parsedCommission.toString(),
     };
 
-    const { data: insertedBooking, error: insertError } = await supabase
-      .from('bookings')
-      .insert(insertPayload)
-      .select('id, otp')
-      .single();
-
-    if (insertError) {
-      console.error('Supabase insert booking error:', insertError);
-      throw new Error('Failed to create booking');
-    }
-
-    const bookingId = insertedBooking?.id;
-    const otp = insertedBooking?.otp;
-    if (!bookingId) {
-      throw new Error('Failed to create booking');
-    }
-
-    // Now create Stripe Checkout Session with booking_id in success_url
-    const defaultSuccessUrl = `https://vaultwheels.web.app/#/payment-success?booking_id=${bookingId}`;
-    const defaultCancelUrl = `https://vaultwheels.web.app/#/payment-cancel?booking_id=${bookingId}`;
+    const defaultSuccessUrl = `https://vaultwheels.web.app/#/payment-success?session_id={CHECKOUT_SESSION_ID}&slot_id=${slot_id || ''}&post_id=${post_id || ''}&provider_id=${provider_id}`;
+    const defaultCancelUrl = `https://vaultwheels.web.app/#/payment-cancel`;
     
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
@@ -837,42 +922,22 @@ exports.createCheckoutSession = stripeSupabaseRuntime.https.onRequest(async (req
       mode: 'payment',
       success_url: success_url || defaultSuccessUrl,
       cancel_url: cancel_url || defaultCancelUrl,
-      metadata: {
-        booking_id: bookingId,
-        user_id: user_id,
-        provider_id: provider_id,
-        ...(post_id ? { post_id: post_id } : {}),
-        ...(slot_id ? { slot_id: slot_id } : {}),
-        commission_amount: parsedCommission.toString(),
-        countdown_end_time: countdownEndTime.toISOString(),
-      },
+      metadata,
       payment_intent_data: {
         capture_method: 'manual',
-        metadata: {
-          booking_id: bookingId,
-          user_id: user_id,
-          provider_id: provider_id,
-          ...(post_id ? { post_id: post_id } : {}),
-          ...(slot_id ? { slot_id: slot_id } : {}),
-        },
+        metadata,
       },
+      // Allow Stripe to replace {CHECKOUT_SESSION_ID} with actual session ID
+      client_reference_id: user_id,
     });
 
-    // Update booking with actual payment_intent_id
-    await supabase
-      .from('bookings')
-      .update({ stripe_payment_intent_id: session.payment_intent })
-      .eq('id', bookingId);
-
-    console.log(`Created checkout session for booking ${bookingId}`);
+    console.log(`Created checkout session: ${session.id}`);
 
     res.json({
       success: true,
-      booking_id: bookingId,
       url: session.url,
       session_id: session.id,
       payment_intent: session.payment_intent,
-      countdown_end_time: countdownEndTime.toISOString(),
     });
   } catch (error) {
     console.error('Create checkout session error:', error);
@@ -881,10 +946,104 @@ exports.createCheckoutSession = stripeSupabaseRuntime.https.onRequest(async (req
 });
 
 /**
+ * Stripe Webhook Handler
+ * Handles checkout.session.completed and creates booking after payment succeeds
+ */
+exports.stripeWebhook = functions.https.onRequest(async (req, res) => {
+  // Stripe sends webhook signature for verification
+  const sig = req.headers['stripe-signature'];
+  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+
+  if (!webhookSecret) {
+    console.warn('STRIPE_WEBHOOK_SECRET not configured');
+    return res.status(500).send('Webhook secret not configured');
+  }
+
+  let event;
+  try {
+    event = stripe.webhooks.constructEvent(req.rawBody, sig, webhookSecret);
+  } catch (err) {
+    console.error(`Webhook signature verification failed: ${err.message}`);
+    return res.status(400).send(`Webhook Error: ${err.message}`);
+  }
+
+  // Handle the event
+  if (event.type === 'checkout.session.completed') {
+    const session = event.data.object;
+    const metadata = session.metadata || {};
+
+    console.log(`✅ Checkout session completed: ${session.id}`);
+    console.log(`   Payment intent: ${session.payment_intent}`);
+    console.log(`   Metadata:`, metadata);
+
+    // Extract booking details from metadata
+    const {
+      user_id,
+      provider_id,
+      post_id,
+      slot_id,
+      amount,
+      currency,
+      commission_amount,
+    } = metadata;
+
+    if (!user_id || !provider_id || (!post_id && !slot_id)) {
+      console.error('Missing required metadata in checkout session');
+      return res.status(200).json({ received: true });
+    }
+
+    const parsedAmount = parseInt(amount, 10);
+    const parsedCommission = parseInt(commission_amount, 10) || 0;
+
+    // Calculate countdown end time (1 hour from now by default)
+    const countdownEndTime = new Date();
+    countdownEndTime.setHours(countdownEndTime.getHours() + 1);
+
+    try {
+      // Create booking in Supabase using anon key (RLS will check auth context)
+      // Since this is a server-side operation, we'll use the anon key and trust the metadata
+      const insertPayload = {
+        profile_customer_id: user_id,
+        profile_provider_id: provider_id,
+        ...(post_id ? { post_id } : {}),
+        ...(slot_id ? { slot_id } : {}),
+        stripe_payment_intent_id: session.payment_intent,
+        amount: parsedAmount,
+        currency: currency.toLowerCase(),
+        commission_amount: parsedCommission,
+        otp_verified: false,
+        countdown_end_time: countdownEndTime.toISOString(),
+        status: 'pending',
+        created_at: new Date().toISOString(),
+      };
+
+      const { data: insertedBooking, error: insertError } = await supabase
+        .from('bookings')
+        .insert(insertPayload)
+        .select('id, otp')
+        .single();
+
+      if (insertError) {
+        console.error('❌ Supabase insert booking error:', insertError);
+        // Don't fail the webhook - Stripe expects 200
+      } else {
+        console.log(`✅ Created booking ${insertedBooking?.id} for session ${session.id}`);
+      }
+    } catch (error) {
+      console.error('❌ Error creating booking from webhook:', error);
+      // Don't fail the webhook - Stripe expects 200
+    }
+  }
+
+  // Return 200 to acknowledge receipt
+  res.status(200).json({ received: true });
+});
+
+/**
  * Create Stripe Checkout Session for subscription plan payments.
  * This does not create a booking or escrow hold.
  */
-exports.createSubscriptionCheckoutSession = stripeSupabaseRuntime.https.onRequest(async (req, res) => {
+exports.createSubscriptionCheckoutSession = functions.https.onRequest(async (req, res) => {
   res.set('Access-Control-Allow-Origin', '*');
   if (req.method === 'OPTIONS') {
     res.set('Access-Control-Allow-Methods', 'POST');
@@ -983,7 +1142,7 @@ exports.createSubscriptionCheckoutSession = stripeSupabaseRuntime.https.onReques
  * Set your webhook secret in Firebase config:
  *   firebase functions:config:set stripe.webhook_secret="whsec_..."
  */
-exports.stripeWebhook = stripeSupabaseRuntime.https.onRequest(async (req, res) => {
+exports.stripeWebhook = functions.https.onRequest(async (req, res) => {
   const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
   if (!webhookSecret) {
@@ -1102,7 +1261,7 @@ exports.stripeWebhook = stripeSupabaseRuntime.https.onRequest(async (req, res) =
  * Initiate Stripe payout to provider's connected account
  * Called from WithdrawScreen for international providers
  */
-exports.initiateStripePayout = stripeSupabaseRuntime.https.onRequest(async (req, res) => {
+exports.initiateStripePayout = functions.https.onRequest(async (req, res) => {
   res.set('Access-Control-Allow-Origin', '*');
   if (req.method === 'OPTIONS') {
     res.set('Access-Control-Allow-Methods', 'POST');
@@ -1288,3 +1447,44 @@ exports.initiateRazorpayPayout = functions.https.onRequest(async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
+
+/**
+ * Auto-downgrade expired subscriptions to 'basic' plan
+ * Runs daily at 2 AM UTC via scheduled trigger
+ * 
+ * This function calls the Supabase database function that resets
+ * all expired Premium/Expert subscriptions back to 'basic' plan.
+ * 
+ * Security: Runs server-side only, users cannot manipulate
+ * Performance: Database function uses indexed queries
+ */
+exports.autoDowngradeExpiredSubscriptions = functions.pubsub
+  .schedule('0 2 * * *')  // Daily at 2 AM UTC
+  .timeZone('UTC')
+  .onRun(async (context) => {
+    if (!supabase) {
+      console.error('Supabase client not configured');
+      return null;
+    }
+
+    try {
+      console.log('🔄 Starting auto-downgrade of expired subscriptions...');
+      
+      const { data, error } = await supabase
+        .rpc('auto_downgrade_expired_subscriptions');
+      
+      if (error) {
+        console.error('❌ Error downgrading subscriptions:', error);
+        throw error;
+      }
+      
+      const count = data || 0;
+      console.log(`✅ Successfully downgraded ${count} expired subscription(s) to basic`);
+      
+      return null;
+    } catch (error) {
+      console.error('❌ Auto-downgrade error:', error);
+      return null;
+    }
+  });

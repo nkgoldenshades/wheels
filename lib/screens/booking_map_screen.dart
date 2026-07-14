@@ -733,7 +733,7 @@ class _BookingMapScreenState extends State<BookingMapScreen> {
                     _buildLegendItem(
                       Icons.info_outline,
                       'Details',
-                      '${widget.booking!.userAge ?? '?'} yrs · ${widget.booking!.userGender?.name ?? 'Any'}',
+                      '${widget.booking!.userAge != null ? '${widget.booking!.userAge} yrs' : ''}${widget.booking!.userAge != null && widget.booking!.userGender != null ? ' · ' : ''}${widget.booking!.userGender?.name ?? ''}',
                     ),
                     _buildLegendItem(
                       Icons.calendar_today,

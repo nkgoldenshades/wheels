@@ -44,7 +44,9 @@ Future<String?> _uploadVehicleSensitiveDoc({
     final supabase = Supabase.instance.client;
     final timestamp = DateTime.now().millisecondsSinceEpoch;
     final path = '$vehicleId/$docType/${docType}_$timestamp.$extension';
-    await supabase.storage.from('vehicle_sensitive_media').uploadBinary(path, bytes);
+    await supabase.storage
+        .from('vehicle_sensitive_media')
+        .uploadBinary(path, bytes);
     return supabase.storage.from('vehicle_sensitive_media').getPublicUrl(path);
   } catch (e) {
     debugPrint('❌ Vehicle sensitive doc upload failed: $e');
@@ -54,19 +56,27 @@ Future<String?> _uploadVehicleSensitiveDoc({
 
 Color _bookingStatusColor(BookingStatus s) {
   switch (s) {
-    case BookingStatus.pending:             return Colors.orange;
+    case BookingStatus.pending:
+      return Colors.orange;
     case BookingStatus.accepted:
-    case BookingStatus.confirmed:           return Colors.blue;
-    case BookingStatus.inProgress:          return Colors.teal;
-    case BookingStatus.completed:           return Colors.green;
+    case BookingStatus.confirmed:
+      return Colors.blue;
+    case BookingStatus.inProgress:
+      return Colors.teal;
+    case BookingStatus.completed:
+      return Colors.green;
     case BookingStatus.rejected:
-    case BookingStatus.noShow:              return Colors.red;
-    case BookingStatus.disputed:            return Colors.deepOrange;
-    case BookingStatus.expired:             return Colors.grey;
+    case BookingStatus.noShow:
+      return Colors.red;
+    case BookingStatus.disputed:
+      return Colors.deepOrange;
+    case BookingStatus.expired:
+      return Colors.grey;
     case BookingStatus.refunded:
     case BookingStatus.cancelled:
     case BookingStatus.cancelledByCustomer:
-    case BookingStatus.cancelledByProvider: return Colors.purple;
+    case BookingStatus.cancelledByProvider:
+      return Colors.purple;
   }
 }
 
@@ -98,7 +108,7 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
         documentType == DocumentType.insurance;
   }
 
-  dynamic get _vehicleRepo => widget.isUserMode 
+  dynamic get _vehicleRepo => widget.isUserMode
       ? CustomerVehicleRepository.instance
       : widget.vehicleRepository!;
 
@@ -120,9 +130,7 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
         final vehicle = _vehicleRepo.getById(widget.vehicleId);
         if (vehicle == null) {
           return const Scaffold(
-            body: SafeArea(
-              child: Center(child: Text('Vehicle not found')),
-            ),
+            body: SafeArea(child: Center(child: Text('Vehicle not found'))),
           );
         }
 
@@ -151,20 +159,23 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
             },
             child: const Icon(Icons.add),
           ),
-          body: ValueListenableBuilder(
-            valueListenable: widget.isUserMode
-                ? CustomerSlotRepository.instance.slotsListenable
-                : SlotRepository.instance.slotsListenable,
-            builder: (context, _, child) {
-              final entries = widget.isUserMode
-                  ? CustomerSlotRepository.instance.allSlots
-                      .where((e) => e.slot.vehicleId == vehicle.id)
-                      .toList()
-                  : SlotRepository.instance.getSlotEntriesByVehicleId(vehicle.id);
+          body: FutureBuilder<List<SlotEntry>>(
+            future: widget.isUserMode
+                ? CustomerSlotRepository.instance.getAllSlotsForVehicle(
+                    vehicle.id,
+                  )
+                : SlotRepository.instance.getAllSlotsForVehicle(vehicle.id),
+            builder: (context, snapshot) {
+              // Show loading while fetching
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Center(child: CircularProgressIndicator());
+              }
+
+              // Get entries from snapshot, fallback to empty list
+              final entries = snapshot.data ?? [];
 
               return ListView(
-                padding:
-                    const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
+                padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
                 children: [
                   _buildVehicleStatsCard(vehicle, entries.length),
                   const SizedBox(height: 4),
@@ -180,7 +191,8 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                         ),
                       ),
                     )
-                  else ...entries.map((e) => _buildSlotCard(context, e)),
+                  else
+                    ...entries.map((e) => _buildSlotCard(context, e)),
                   const SizedBox(height: 12),
                   _buildGpsSettingsCard(vehicle),
                   const SizedBox(height: 12),
@@ -264,7 +276,8 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                   builder: (ctx) => AlertDialog(
                     title: const Text('Delete post?'),
                     content: const Text(
-                        'This will permanently remove this post.\n\nNote: posts with active bookings cannot be deleted.'),
+                      'This will permanently remove this post.\n\nNote: posts with active bookings cannot be deleted.',
+                    ),
                     actions: [
                       TextButton(
                         onPressed: () => Navigator.pop(ctx, false),
@@ -272,7 +285,9 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                       ),
                       TextButton(
                         onPressed: () => Navigator.pop(ctx, true),
-                        style: TextButton.styleFrom(foregroundColor: Colors.red),
+                        style: TextButton.styleFrom(
+                          foregroundColor: Colors.red,
+                        ),
                         child: const Text('Delete'),
                       ),
                     ],
@@ -281,7 +296,9 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                 if (confirm != true || !context.mounted) return;
                 try {
                   if (widget.isUserMode) {
-                    await CustomerSlotRepository.instance.deleteSlot(entry.slot.id);
+                    await CustomerSlotRepository.instance.deleteSlot(
+                      entry.slot.id,
+                    );
                   } else {
                     await SlotRepository.instance.deleteSlot(entry.slot.id);
                   }
@@ -300,14 +317,23 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                   if (!context.mounted) return;
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
-                      content: Text('Failed to delete: ${e.toString().split('\n').first}'),
+                      content: Text(
+                        'Failed to delete: ${e.toString().split('\n').first}',
+                      ),
                       backgroundColor: Colors.red,
                     ),
                   );
                 }
               },
-              icon: const Icon(Icons.delete_outline, size: 16, color: Colors.red),
-              label: const Text('Delete post', style: TextStyle(color: Colors.red, fontSize: 13)),
+              icon: const Icon(
+                Icons.delete_outline,
+                size: 16,
+                color: Colors.red,
+              ),
+              label: const Text(
+                'Delete post',
+                style: TextStyle(color: Colors.red, fontSize: 13),
+              ),
               style: TextButton.styleFrom(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 minimumSize: Size.zero,
@@ -321,7 +347,10 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
   }
 
   void _showActiveBookingsDialog(
-      BuildContext context, int activeCount, SlotEntry entry) {
+    BuildContext context,
+    int activeCount,
+    SlotEntry entry,
+  ) {
     // Find the latest deadline_time across active bookings for this slot
     final activeBookings = BookingRepository.instance.bookings.value
         .where((b) => b.slotId == entry.slot.id && b.status.isActive)
@@ -341,7 +370,8 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
       final h = latestDeadline.hour.toString().padLeft(2, '0');
       final m = latestDeadline.minute.toString().padLeft(2, '0');
       final d = '${latestDeadline.day}/${latestDeadline.month}';
-      unlockHint = 'Delete will be available after $d $h:$m (booking deadline).';
+      unlockHint =
+          'Delete will be available after $d $h:$m (booking deadline).';
     } else if (latestDeadline != null) {
       unlockHint = 'Deadline has passed — try deleting again.';
     } else {
@@ -383,9 +413,10 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                     child: Text(
                       unlockHint,
                       style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.blue[800],
-                          fontWeight: FontWeight.w500),
+                        fontSize: 12,
+                        color: Colors.blue[800],
+                        fontWeight: FontWeight.w500,
+                      ),
                     ),
                   ),
                 ],
@@ -402,14 +433,19 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
               child: const Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Or do this now:',
-                      style: TextStyle(
-                          fontWeight: FontWeight.bold, fontSize: 13)),
+                  Text(
+                    'Or do this now:',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                  ),
                   SizedBox(height: 4),
-                  Text('• Mark post inactive — stops new bookings',
-                      style: TextStyle(fontSize: 13)),
-                  Text('• Cancel/refund active bookings first',
-                      style: TextStyle(fontSize: 13)),
+                  Text(
+                    '• Mark post inactive — stops new bookings',
+                    style: TextStyle(fontSize: 13),
+                  ),
+                  Text(
+                    '• Cancel/refund active bookings first',
+                    style: TextStyle(fontSize: 13),
+                  ),
                 ],
               ),
             ),
@@ -431,7 +467,9 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
               }
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(
-                  content: Text('Post marked inactive — no new bookings allowed'),
+                  content: Text(
+                    'Post marked inactive — no new bookings allowed',
+                  ),
                   backgroundColor: Colors.orange,
                 ),
               );
@@ -450,10 +488,26 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
   Future<void> _openEditSheet(BuildContext context, Vehicle vehicle) async {
     final nameCtrl = TextEditingController(text: vehicle.name);
     final typeCtrl = TextEditingController(text: vehicle.type);
-    final yearCtrl = TextEditingController(text: vehicle.year?.toString() ?? '');
+    final yearCtrl = TextEditingController(
+      text: vehicle.year?.toString() ?? '',
+    );
 
-    final vehicleTypes = ['Car','Bike','Truck','Bus','Van','Ship','Boat','Rocket','Train','Flight','Other'];
-    String? selectedType = vehicleTypes.contains(vehicle.type) ? vehicle.type : 'Other';
+    final vehicleTypes = [
+      'Car',
+      'Bike',
+      'Truck',
+      'Bus',
+      'Van',
+      'Ship',
+      'Boat',
+      'Rocket',
+      'Train',
+      'Flight',
+      'Other',
+    ];
+    String? selectedType = vehicleTypes.contains(vehicle.type)
+        ? vehicle.type
+        : 'Other';
     if (selectedType == 'Other') typeCtrl.text = vehicle.type;
 
     // Media state
@@ -462,13 +516,21 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
     String? videoUrl = vehicle.videoUrl;
 
     // Operator state
-    final operatorNameCtrl = TextEditingController(text: vehicle.operatorName ?? '');
-    final operatorPhoneCtrl = TextEditingController(text: vehicle.operatorPhone ?? '');
-    final operatorLicenseCtrl = TextEditingController(text: vehicle.operatorLicense ?? '');
+    final operatorNameCtrl = TextEditingController(
+      text: vehicle.operatorName ?? '',
+    );
+    final operatorPhoneCtrl = TextEditingController(
+      text: vehicle.operatorPhone ?? '',
+    );
+    final operatorLicenseCtrl = TextEditingController(
+      text: vehicle.operatorLicense ?? '',
+    );
     String? operatorPhoto = vehicle.operatorPhoto;
-    String? operatorGender = vehicle.operatorGender; // 'male', 'female', or null
+    String? operatorGender =
+        vehicle.operatorGender; // 'male', 'female', or null
     DateTime? operatorDob = vehicle.operatorDob;
-    String? operatorDocument = vehicle.operatorDocumentUrl; // Single document (image or PDF)
+    String? operatorDocument =
+        vehicle.operatorDocumentUrl; // Single document (image or PDF)
 
     final picker = ImagePicker();
 
@@ -479,47 +541,82 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
       builder: (ctx) {
         return StatefulBuilder(
           builder: (ctx, setModalState) {
-
             Future<void> pickProfileImage() async {
-              final file = await picker.pickImage(source: ImageSource.gallery, maxWidth: 1024, maxHeight: 1024, imageQuality: 85);
+              final file = await picker.pickImage(
+                source: ImageSource.gallery,
+                maxWidth: 1024,
+                maxHeight: 1024,
+                imageQuality: 85,
+              );
               if (file == null) return;
               final bytes = await file.readAsBytes();
-              if (ctx.mounted) setModalState(() => profileImage = base64Encode(bytes));
+              if (ctx.mounted) {
+                setModalState(() => profileImage = base64Encode(bytes));
+              }
             }
 
             Future<void> pickGalleryImages() async {
-              final files = await picker.pickMultiImage(maxWidth: 1024, maxHeight: 1024, imageQuality: 80);
+              final files = await picker.pickMultiImage(
+                maxWidth: 1024,
+                maxHeight: 1024,
+                imageQuality: 80,
+              );
               if (files.isEmpty) return;
               final encoded = <String>[];
-              for (final f in files) { encoded.add(base64Encode(await f.readAsBytes())); }
-              if (ctx.mounted) setModalState(() => galleryImages.addAll(encoded));
+              for (final f in files) {
+                encoded.add(base64Encode(await f.readAsBytes()));
+              }
+              if (ctx.mounted) {
+                setModalState(() => galleryImages.addAll(encoded));
+              }
             }
 
             Future<void> pickVideo() async {
-              final file = await picker.pickVideo(source: ImageSource.gallery, maxDuration: const Duration(seconds: 60));
+              final file = await picker.pickVideo(
+                source: ImageSource.gallery,
+                maxDuration: const Duration(seconds: 60),
+              );
               if (file == null) return;
               final bytes = await file.readAsBytes();
-              if (ctx.mounted) setModalState(() => videoUrl = base64Encode(bytes));
+              if (ctx.mounted) {
+                setModalState(() => videoUrl = base64Encode(bytes));
+              }
             }
 
             Future<void> pickOperatorPhoto() async {
-              final file = await picker.pickImage(source: ImageSource.gallery, maxWidth: 512, maxHeight: 512, imageQuality: 85);
+              final file = await picker.pickImage(
+                source: ImageSource.gallery,
+                maxWidth: 512,
+                maxHeight: 512,
+                imageQuality: 85,
+              );
               if (file == null) return;
               final bytes = await file.readAsBytes();
-              if (ctx.mounted) setModalState(() => operatorPhoto = base64Encode(bytes));
+              if (ctx.mounted) {
+                setModalState(() => operatorPhoto = base64Encode(bytes));
+              }
             }
 
             Future<void> pickOperatorDocument() async {
               // Allow picking any file (image or PDF)
-              final file = await picker.pickImage(source: ImageSource.gallery, maxWidth: 2048, maxHeight: 2048, imageQuality: 90);
+              final file = await picker.pickImage(
+                source: ImageSource.gallery,
+                maxWidth: 2048,
+                maxHeight: 2048,
+                imageQuality: 90,
+              );
               if (file == null) return;
               final bytes = await file.readAsBytes();
-              if (ctx.mounted) setModalState(() => operatorDocument = base64Encode(bytes));
+              if (ctx.mounted) {
+                setModalState(() => operatorDocument = base64Encode(bytes));
+              }
             }
 
             return Padding(
               padding: EdgeInsets.only(
-                left: 16, right: 16, top: 8,
+                left: 16,
+                right: 16,
+                top: 8,
                 bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
               ),
               child: SingleChildScrollView(
@@ -527,21 +624,32 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Text('Edit Vehicle',
-                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                    const Text(
+                      'Edit Vehicle',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                     const SizedBox(height: 16),
                     TextField(
                       controller: nameCtrl,
                       decoration: const InputDecoration(
-                          labelText: 'Vehicle name', border: OutlineInputBorder()),
+                        labelText: 'Vehicle name',
+                        border: OutlineInputBorder(),
+                      ),
                     ),
                     const SizedBox(height: 12),
                     DropdownButtonFormField<String>(
                       initialValue: selectedType,
                       decoration: const InputDecoration(
-                          labelText: 'Vehicle Type', border: OutlineInputBorder()),
+                        labelText: 'Vehicle Type',
+                        border: OutlineInputBorder(),
+                      ),
                       items: vehicleTypes
-                          .map((t) => DropdownMenuItem(value: t, child: Text(t)))
+                          .map(
+                            (t) => DropdownMenuItem(value: t, child: Text(t)),
+                          )
                           .toList(),
                       onChanged: (v) => setModalState(() => selectedType = v),
                     ),
@@ -550,7 +658,9 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                       TextField(
                         controller: typeCtrl,
                         decoration: const InputDecoration(
-                            labelText: 'Custom type', border: OutlineInputBorder()),
+                          labelText: 'Custom type',
+                          border: OutlineInputBorder(),
+                        ),
                       ),
                     ],
                     const SizedBox(height: 12),
@@ -558,11 +668,16 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                       controller: yearCtrl,
                       keyboardType: TextInputType.number,
                       decoration: const InputDecoration(
-                          labelText: 'Year (optional)', border: OutlineInputBorder()),
+                        labelText: 'Year (optional)',
+                        border: OutlineInputBorder(),
+                      ),
                     ),
                     const SizedBox(height: 16),
                     // --- Media Section ---
-                    const Text('Media', style: TextStyle(fontWeight: FontWeight.w600)),
+                    const Text(
+                      'Media',
+                      style: TextStyle(fontWeight: FontWeight.w600),
+                    ),
                     const SizedBox(height: 8),
                     // Profile image
                     Row(
@@ -570,21 +685,67 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                         ClipRRect(
                           borderRadius: BorderRadius.circular(8),
                           child: profileImage != null
-                              ? Image.memory(base64Decode(profileImage!), width: 72, height: 72, fit: BoxFit.cover)
-                              : Container(width: 72, height: 72, color: Colors.grey[200],
-                                  child: const Icon(Icons.directions_car, color: Colors.grey)),
+                              ? (profileImage!.startsWith('http')
+                                    ? Image.network(
+                                        profileImage!,
+                                        width: 72,
+                                        height: 72,
+                                        fit: BoxFit.cover,
+                                        errorBuilder: (_, _, _) => Container(
+                                          width: 72,
+                                          height: 72,
+                                          color: Colors.grey[200],
+                                          child: const Icon(
+                                            Icons.broken_image,
+                                            color: Colors.grey,
+                                          ),
+                                        ),
+                                      )
+                                    : Image.memory(
+                                        base64Decode(
+                                          profileImage!.contains(',')
+                                              ? profileImage!.split(',').last
+                                              : profileImage!,
+                                        ),
+                                        width: 72,
+                                        height: 72,
+                                        fit: BoxFit.cover,
+                                        errorBuilder: (_, _, _) => Container(
+                                          width: 72,
+                                          height: 72,
+                                          color: Colors.grey[200],
+                                          child: const Icon(
+                                            Icons.broken_image,
+                                            color: Colors.grey,
+                                          ),
+                                        ),
+                                      ))
+                              : Container(
+                                  width: 72,
+                                  height: 72,
+                                  color: Colors.grey[200],
+                                  child: const Icon(
+                                    Icons.directions_car,
+                                    color: Colors.grey,
+                                  ),
+                                ),
                         ),
                         const SizedBox(width: 12),
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text('Profile Image', style: TextStyle(fontWeight: FontWeight.w500)),
+                              const Text(
+                                'Profile Image',
+                                style: TextStyle(fontWeight: FontWeight.w500),
+                              ),
                               const SizedBox(height: 4),
                               OutlinedButton.icon(
                                 onPressed: pickProfileImage,
                                 icon: const Icon(Icons.photo_camera, size: 16),
-                                label: Text(profileImage != null ? 'Change' : 'Add'),
+                                label: Text(
+                                  profileImage != null ? 'Change' : 'Add',
+                                ),
                               ),
                             ],
                           ),
@@ -592,7 +753,8 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                         if (profileImage != null)
                           IconButton(
                             icon: const Icon(Icons.close, color: Colors.red),
-                            onPressed: () => setModalState(() => profileImage = null),
+                            onPressed: () =>
+                                setModalState(() => profileImage = null),
                           ),
                       ],
                     ),
@@ -601,7 +763,10 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text('Gallery (${galleryImages.length})', style: const TextStyle(fontWeight: FontWeight.w500)),
+                        Text(
+                          'Gallery (${galleryImages.length})',
+                          style: const TextStyle(fontWeight: FontWeight.w500),
+                        ),
                         OutlinedButton.icon(
                           onPressed: pickGalleryImages,
                           icon: const Icon(Icons.add_photo_alternate, size: 16),
@@ -617,24 +782,72 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                           scrollDirection: Axis.horizontal,
                           itemCount: galleryImages.length,
                           separatorBuilder: (_, i) => const SizedBox(width: 8),
-                          itemBuilder: (_, i) => Stack(
-                            children: [
-                              ClipRRect(
-                                borderRadius: BorderRadius.circular(8),
-                                child: Image.memory(base64Decode(galleryImages[i]), width: 80, height: 80, fit: BoxFit.cover),
-                              ),
-                              Positioned(
-                                top: 2, right: 2,
-                                child: GestureDetector(
-                                  onTap: () => setModalState(() => galleryImages.removeAt(i)),
-                                  child: Container(
-                                    decoration: const BoxDecoration(color: Colors.black54, shape: BoxShape.circle),
-                                    child: const Icon(Icons.close, color: Colors.white, size: 16),
+                          itemBuilder: (_, i) {
+                            final img = galleryImages[i];
+                            final isUrl = img.startsWith('http');
+                            return Stack(
+                              children: [
+                                ClipRRect(
+                                  borderRadius: BorderRadius.circular(8),
+                                  child: isUrl
+                                      ? Image.network(
+                                          img,
+                                          width: 80,
+                                          height: 80,
+                                          fit: BoxFit.cover,
+                                          errorBuilder: (_, _, _) => Container(
+                                            width: 80,
+                                            height: 80,
+                                            color: Colors.grey[200],
+                                            child: const Icon(
+                                              Icons.broken_image,
+                                              color: Colors.grey,
+                                            ),
+                                          ),
+                                        )
+                                      : Image.memory(
+                                          base64Decode(
+                                            img.contains(',')
+                                                ? img.split(',').last
+                                                : img,
+                                          ),
+                                          width: 80,
+                                          height: 80,
+                                          fit: BoxFit.cover,
+                                          errorBuilder: (_, _, _) => Container(
+                                            width: 80,
+                                            height: 80,
+                                            color: Colors.grey[200],
+                                            child: const Icon(
+                                              Icons.broken_image,
+                                              color: Colors.grey,
+                                            ),
+                                          ),
+                                        ),
+                                ),
+                                Positioned(
+                                  top: 2,
+                                  right: 2,
+                                  child: GestureDetector(
+                                    onTap: () => setModalState(
+                                      () => galleryImages.removeAt(i),
+                                    ),
+                                    child: Container(
+                                      decoration: const BoxDecoration(
+                                        color: Colors.black54,
+                                        shape: BoxShape.circle,
+                                      ),
+                                      child: const Icon(
+                                        Icons.close,
+                                        color: Colors.white,
+                                        size: 16,
+                                      ),
+                                    ),
                                   ),
                                 ),
-                              ),
-                            ],
-                          ),
+                              ],
+                            );
+                          },
                         ),
                       ),
                     ],
@@ -646,12 +859,19 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text('Video', style: TextStyle(fontWeight: FontWeight.w500)),
+                              const Text(
+                                'Video',
+                                style: TextStyle(fontWeight: FontWeight.w500),
+                              ),
                               const SizedBox(height: 4),
                               OutlinedButton.icon(
                                 onPressed: pickVideo,
                                 icon: const Icon(Icons.videocam, size: 16),
-                                label: Text(videoUrl != null ? 'Change video' : 'Add video'),
+                                label: Text(
+                                  videoUrl != null
+                                      ? 'Change video'
+                                      : 'Add video',
+                                ),
                               ),
                             ],
                           ),
@@ -661,7 +881,8 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                           const SizedBox(width: 4),
                           IconButton(
                             icon: const Icon(Icons.close, color: Colors.red),
-                            onPressed: () => setModalState(() => videoUrl = null),
+                            onPressed: () =>
+                                setModalState(() => videoUrl = null),
                           ),
                         ],
                       ],
@@ -672,9 +893,19 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                     const SizedBox(height: 8),
                     Row(
                       children: [
-                        const Icon(Icons.person_outline, size: 20, color: Colors.blue),
+                        const Icon(
+                          Icons.person_outline,
+                          size: 20,
+                          color: Colors.blue,
+                        ),
                         const SizedBox(width: 8),
-                        const Text('Vehicle Operator', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16)),
+                        const Text(
+                          'Vehicle Operator',
+                          style: TextStyle(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 16,
+                          ),
+                        ),
                       ],
                     ),
                     const SizedBox(height: 4),
@@ -683,14 +914,18 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                       style: TextStyle(fontSize: 12, color: Colors.grey),
                     ),
                     const SizedBox(height: 12),
-                    
+
                     // Operator Photo
                     Row(
                       children: [
                         GestureDetector(
                           onTap: () {
                             if (operatorPhoto != null) {
-                              _showFullImageDialog(context, operatorPhoto!, 'Operator Photo');
+                              _showFullImageDialog(
+                                context,
+                                operatorPhoto!,
+                                'Operator Photo',
+                              );
                             }
                           },
                           child: Stack(
@@ -698,12 +933,21 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                               ClipRRect(
                                 borderRadius: BorderRadius.circular(40),
                                 child: operatorPhoto != null
-                                    ? Image.memory(base64Decode(operatorPhoto!), width: 80, height: 80, fit: BoxFit.cover)
+                                    ? Image.memory(
+                                        base64Decode(operatorPhoto!),
+                                        width: 80,
+                                        height: 80,
+                                        fit: BoxFit.cover,
+                                      )
                                     : Container(
                                         width: 80,
                                         height: 80,
                                         color: Colors.grey[200],
-                                        child: const Icon(Icons.person, size: 40, color: Colors.grey),
+                                        child: const Icon(
+                                          Icons.person,
+                                          size: 40,
+                                          color: Colors.grey,
+                                        ),
                                       ),
                               ),
                               if (operatorPhoto != null)
@@ -716,7 +960,11 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                                       shape: BoxShape.circle,
                                     ),
                                     padding: const EdgeInsets.all(4),
-                                    child: const Icon(Icons.zoom_in, size: 16, color: Colors.white),
+                                    child: const Icon(
+                                      Icons.zoom_in,
+                                      size: 16,
+                                      color: Colors.white,
+                                    ),
                                   ),
                                 ),
                             ],
@@ -727,13 +975,25 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text('Profile Photo', style: TextStyle(fontWeight: FontWeight.w500)),
+                              const Text(
+                                'Profile Photo',
+                                style: TextStyle(fontWeight: FontWeight.w500),
+                              ),
                               const SizedBox(height: 4),
                               OutlinedButton.icon(
                                 onPressed: pickOperatorPhoto,
                                 icon: const Icon(Icons.photo_camera, size: 16),
-                                label: Text(operatorPhoto != null ? 'Change' : 'Add Photo'),
-                                style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8)),
+                                label: Text(
+                                  operatorPhoto != null
+                                      ? 'Change'
+                                      : 'Add Photo',
+                                ),
+                                style: OutlinedButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 8,
+                                  ),
+                                ),
                               ),
                             ],
                           ),
@@ -741,12 +1001,13 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                         if (operatorPhoto != null)
                           IconButton(
                             icon: const Icon(Icons.close, color: Colors.red),
-                            onPressed: () => setModalState(() => operatorPhoto = null),
+                            onPressed: () =>
+                                setModalState(() => operatorPhoto = null),
                           ),
                       ],
                     ),
                     const SizedBox(height: 16),
-                    
+
                     TextField(
                       controller: operatorNameCtrl,
                       decoration: const InputDecoration(
@@ -776,14 +1037,20 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                         prefixIcon: Icon(Icons.person),
                       ),
                       items: const [
-                        DropdownMenuItem(value: null, child: Text('Not specified')),
+                        DropdownMenuItem(
+                          value: null,
+                          child: Text('Not specified'),
+                        ),
                         DropdownMenuItem(value: 'male', child: Text('Male')),
-                        DropdownMenuItem(value: 'female', child: Text('Female')),
+                        DropdownMenuItem(
+                          value: 'female',
+                          child: Text('Female'),
+                        ),
                       ],
                       onChanged: (v) => setModalState(() => operatorGender = v),
                     ),
                     const SizedBox(height: 12),
-                    
+
                     // Date of Birth Picker
                     InkWell(
                       onTap: () async {
@@ -809,7 +1076,9 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                               ? '${operatorDob!.day.toString().padLeft(2, '0')}/${operatorDob!.month.toString().padLeft(2, '0')}/${operatorDob!.year}'
                               : 'Not set',
                           style: TextStyle(
-                            color: operatorDob != null ? Colors.black87 : Colors.grey,
+                            color: operatorDob != null
+                                ? Colors.black87
+                                : Colors.grey,
                             fontSize: 16,
                           ),
                         ),
@@ -826,14 +1095,19 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                       ),
                     ),
                     const SizedBox(height: 16),
-                    
+
                     // Operator Document Upload
-                    const Text('Operator Document (Optional)', style: TextStyle(fontWeight: FontWeight.w600)),
+                    const Text(
+                      'Operator Document (Optional)',
+                      style: TextStyle(fontWeight: FontWeight.w600),
+                    ),
                     const SizedBox(height: 4),
-                    const Text('Upload ID, driving license, or any verification document (Image or PDF)', 
-                        style: TextStyle(fontSize: 11, color: Colors.grey)),
+                    const Text(
+                      'Upload ID, driving license, or any verification document (Image or PDF)',
+                      style: TextStyle(fontSize: 11, color: Colors.grey),
+                    ),
                     const SizedBox(height: 12),
-                    
+
                     Container(
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
@@ -845,19 +1119,29 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                         children: [
                           if (operatorDocument != null)
                             GestureDetector(
-                              onTap: () => _showFullImageDialog(context, operatorDocument!, 'Operator Document'),
+                              onTap: () => _showFullImageDialog(
+                                context,
+                                operatorDocument!,
+                                'Operator Document',
+                              ),
                               child: Container(
                                 height: 120,
                                 decoration: BoxDecoration(
                                   borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(color: Colors.blue.shade200, width: 2),
+                                  border: Border.all(
+                                    color: Colors.blue.shade200,
+                                    width: 2,
+                                  ),
                                 ),
                                 child: ClipRRect(
                                   borderRadius: BorderRadius.circular(8),
                                   child: Stack(
                                     fit: StackFit.expand,
                                     children: [
-                                      Image.memory(base64Decode(operatorDocument!), fit: BoxFit.cover),
+                                      Image.memory(
+                                        base64Decode(operatorDocument!),
+                                        fit: BoxFit.cover,
+                                      ),
                                       Positioned(
                                         top: 4,
                                         right: 4,
@@ -867,7 +1151,11 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                                             color: Colors.black54,
                                             shape: BoxShape.circle,
                                           ),
-                                          child: const Icon(Icons.zoom_in, size: 16, color: Colors.white),
+                                          child: const Icon(
+                                            Icons.zoom_in,
+                                            size: 16,
+                                            color: Colors.white,
+                                          ),
                                         ),
                                       ),
                                     ],
@@ -881,14 +1169,27 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                               decoration: BoxDecoration(
                                 color: Colors.grey[200],
                                 borderRadius: BorderRadius.circular(8),
-                                border: Border.all(color: Colors.grey.shade300, style: BorderStyle.solid),
+                                border: Border.all(
+                                  color: Colors.grey.shade300,
+                                  style: BorderStyle.solid,
+                                ),
                               ),
                               child: Column(
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
-                                  Icon(Icons.upload_file, size: 40, color: Colors.grey[400]),
+                                  Icon(
+                                    Icons.upload_file,
+                                    size: 40,
+                                    color: Colors.grey[400],
+                                  ),
                                   const SizedBox(height: 8),
-                                  Text('No document uploaded', style: TextStyle(color: Colors.grey[600], fontSize: 12)),
+                                  Text(
+                                    'No document uploaded',
+                                    style: TextStyle(
+                                      color: Colors.grey[600],
+                                      fontSize: 12,
+                                    ),
+                                  ),
                                 ],
                               ),
                             ),
@@ -899,17 +1200,28 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                                 child: OutlinedButton.icon(
                                   onPressed: pickOperatorDocument,
                                   icon: const Icon(Icons.upload_file, size: 18),
-                                  label: Text(operatorDocument != null ? 'Change Document' : 'Upload Document'),
+                                  label: Text(
+                                    operatorDocument != null
+                                        ? 'Change Document'
+                                        : 'Upload Document',
+                                  ),
                                   style: OutlinedButton.styleFrom(
-                                    padding: const EdgeInsets.symmetric(vertical: 12),
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 12,
+                                    ),
                                   ),
                                 ),
                               ),
                               if (operatorDocument != null) ...[
                                 const SizedBox(width: 8),
                                 IconButton(
-                                  onPressed: () => setModalState(() => operatorDocument = null),
-                                  icon: const Icon(Icons.delete, color: Colors.red),
+                                  onPressed: () => setModalState(
+                                    () => operatorDocument = null,
+                                  ),
+                                  icon: const Icon(
+                                    Icons.delete,
+                                    color: Colors.red,
+                                  ),
                                   tooltip: 'Remove document',
                                 ),
                               ],
@@ -922,14 +1234,27 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                               decoration: BoxDecoration(
                                 color: Colors.green.shade50,
                                 borderRadius: BorderRadius.circular(6),
-                                border: Border.all(color: Colors.green.shade200),
+                                border: Border.all(
+                                  color: Colors.green.shade200,
+                                ),
                               ),
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  Icon(Icons.check_circle, size: 16, color: Colors.green[700]),
+                                  Icon(
+                                    Icons.check_circle,
+                                    size: 16,
+                                    color: Colors.green[700],
+                                  ),
                                   const SizedBox(width: 6),
-                                  Text('Document uploaded ✓', style: TextStyle(fontSize: 12, color: Colors.green[700], fontWeight: FontWeight.w500)),
+                                  Text(
+                                    'Document uploaded ✓',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: Colors.green[700],
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
                                 ],
                               ),
                             ),
@@ -944,7 +1269,10 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                           final name = nameCtrl.text.trim();
                           if (name.isEmpty) {
                             ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('Enter vehicle name')));
+                              const SnackBar(
+                                content: Text('Enter vehicle name'),
+                              ),
+                            );
                             return;
                           }
                           final type = selectedType == 'Other'
@@ -958,23 +1286,34 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                             profileImage: profileImage,
                             galleryImages: galleryImages,
                             videoUrl: videoUrl,
-                            operatorName: operatorNameCtrl.text.trim().isEmpty ? null : operatorNameCtrl.text.trim(),
-                            operatorPhone: operatorPhoneCtrl.text.trim().isEmpty ? null : operatorPhoneCtrl.text.trim(),
+                            operatorName: operatorNameCtrl.text.trim().isEmpty
+                                ? null
+                                : operatorNameCtrl.text.trim(),
+                            operatorPhone: operatorPhoneCtrl.text.trim().isEmpty
+                                ? null
+                                : operatorPhoneCtrl.text.trim(),
                             operatorGender: operatorGender,
                             operatorDob: operatorDob,
-                            operatorLicense: operatorLicenseCtrl.text.trim().isEmpty ? null : operatorLicenseCtrl.text.trim(),
+                            operatorLicense:
+                                operatorLicenseCtrl.text.trim().isEmpty
+                                ? null
+                                : operatorLicenseCtrl.text.trim(),
                             operatorPhoto: operatorPhoto,
                             operatorDocumentUrl: operatorDocument,
                           );
                           if (widget.isUserMode) {
-                            await CustomerVehicleRepository.instance.updateVehicle(updated);
+                            await CustomerVehicleRepository.instance
+                                .updateVehicle(updated);
                           } else {
-                            await widget.vehicleRepository!.updateVehicle(updated);
+                            await widget.vehicleRepository!.updateVehicle(
+                              updated,
+                            );
                           }
                           if (!context.mounted) return;
                           Navigator.pop(ctx);
                           ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Vehicle updated')));
+                            const SnackBar(content: Text('Vehicle updated')),
+                          );
                         },
                         child: const Text('Save Changes'),
                       ),
@@ -1018,7 +1357,10 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                     alignment: Alignment.centerLeft,
                     child: Text(
                       'Add',
-                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
                 ),
@@ -1089,7 +1431,8 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
   }
 
   Widget _buildOperatorSection(Vehicle vehicle) {
-    final hasOperator = vehicle.operatorName != null && vehicle.operatorName!.isNotEmpty;
+    final hasOperator =
+        vehicle.operatorName != null && vehicle.operatorName!.isNotEmpty;
     if (!hasOperator) return const SizedBox.shrink();
 
     return Card(
@@ -1103,7 +1446,10 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
               children: [
                 Icon(Icons.person_outline, size: 18, color: Colors.blue),
                 SizedBox(width: 8),
-                Text('Vehicle Operator', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                Text(
+                  'Vehicle Operator',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                ),
               ],
             ),
             const SizedBox(height: 12),
@@ -1112,23 +1458,41 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                 // Operator photo - tappable to view full size
                 GestureDetector(
                   onTap: () {
-                    if (vehicle.operatorPhoto != null && vehicle.operatorPhoto!.isNotEmpty) {
-                      _showFullImageDialog(context, vehicle.operatorPhoto!, 'Operator Photo');
+                    if (vehicle.operatorPhoto != null &&
+                        vehicle.operatorPhoto!.isNotEmpty) {
+                      _showFullImageDialog(
+                        context,
+                        vehicle.operatorPhoto!,
+                        'Operator Photo',
+                      );
                     }
                   },
                   child: Stack(
                     children: [
-                      if (vehicle.operatorPhoto != null && vehicle.operatorPhoto!.isNotEmpty)
+                      if (vehicle.operatorPhoto != null &&
+                          vehicle.operatorPhoto!.isNotEmpty)
                         ClipRRect(
                           borderRadius: BorderRadius.circular(30),
                           child: vehicle.operatorPhoto!.startsWith('http')
-                              ? Image.network(vehicle.operatorPhoto!, width: 56, height: 56, fit: BoxFit.cover,
-                                  errorBuilder: (_, _, _) => _operatorAvatar(vehicle.operatorName))
-                              : Image.memory(base64Decode(vehicle.operatorPhoto!), width: 56, height: 56, fit: BoxFit.cover),
+                              ? Image.network(
+                                  vehicle.operatorPhoto!,
+                                  width: 56,
+                                  height: 56,
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (_, _, _) =>
+                                      _operatorAvatar(vehicle.operatorName),
+                                )
+                              : Image.memory(
+                                  base64Decode(vehicle.operatorPhoto!),
+                                  width: 56,
+                                  height: 56,
+                                  fit: BoxFit.cover,
+                                ),
                         )
                       else
                         _operatorAvatar(vehicle.operatorName),
-                      if (vehicle.operatorPhoto != null && vehicle.operatorPhoto!.isNotEmpty)
+                      if (vehicle.operatorPhoto != null &&
+                          vehicle.operatorPhoto!.isNotEmpty)
                         Positioned(
                           bottom: 0,
                           right: 0,
@@ -1138,7 +1502,11 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                               shape: BoxShape.circle,
                             ),
                             padding: const EdgeInsets.all(2),
-                            child: const Icon(Icons.zoom_in, size: 14, color: Colors.white),
+                            child: const Icon(
+                              Icons.zoom_in,
+                              size: 14,
+                              color: Colors.white,
+                            ),
                           ),
                         ),
                     ],
@@ -1153,34 +1521,52 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                         children: [
                           Text(
                             vehicle.operatorName ?? '',
-                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 15,
+                            ),
                           ),
                           if (vehicle.operatorGender != null) ...[
                             const SizedBox(width: 8),
                             Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 2,
+                              ),
                               decoration: BoxDecoration(
-                                color: vehicle.operatorGender == 'male' ? Colors.blue.shade50 : Colors.pink.shade50,
+                                color: vehicle.operatorGender == 'male'
+                                    ? Colors.blue.shade50
+                                    : Colors.pink.shade50,
                                 borderRadius: BorderRadius.circular(12),
                                 border: Border.all(
-                                  color: vehicle.operatorGender == 'male' ? Colors.blue.shade200 : Colors.pink.shade200,
+                                  color: vehicle.operatorGender == 'male'
+                                      ? Colors.blue.shade200
+                                      : Colors.pink.shade200,
                                 ),
                               ),
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
                                   Icon(
-                                    vehicle.operatorGender == 'male' ? Icons.male : Icons.female,
+                                    vehicle.operatorGender == 'male'
+                                        ? Icons.male
+                                        : Icons.female,
                                     size: 14,
-                                    color: vehicle.operatorGender == 'male' ? Colors.blue.shade700 : Colors.pink.shade700,
+                                    color: vehicle.operatorGender == 'male'
+                                        ? Colors.blue.shade700
+                                        : Colors.pink.shade700,
                                   ),
                                   const SizedBox(width: 4),
                                   Text(
-                                    vehicle.operatorGender == 'male' ? 'Male' : 'Female',
+                                    vehicle.operatorGender == 'male'
+                                        ? 'Male'
+                                        : 'Female',
                                     style: TextStyle(
                                       fontSize: 11,
                                       fontWeight: FontWeight.w600,
-                                      color: vehicle.operatorGender == 'male' ? Colors.blue.shade700 : Colors.pink.shade700,
+                                      color: vehicle.operatorGender == 'male'
+                                          ? Colors.blue.shade700
+                                          : Colors.pink.shade700,
                                     ),
                                   ),
                                 ],
@@ -1189,13 +1575,24 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                           ],
                         ],
                       ),
-                      if (vehicle.operatorPhone != null && vehicle.operatorPhone!.isNotEmpty) ...[
+                      if (vehicle.operatorPhone != null &&
+                          vehicle.operatorPhone!.isNotEmpty) ...[
                         const SizedBox(height: 4),
                         Row(
                           children: [
-                            const Icon(Icons.phone, size: 14, color: Colors.grey),
+                            const Icon(
+                              Icons.phone,
+                              size: 14,
+                              color: Colors.grey,
+                            ),
                             const SizedBox(width: 4),
-                            Text(vehicle.operatorPhone!, style: const TextStyle(fontSize: 13, color: Colors.grey)),
+                            Text(
+                              vehicle.operatorPhone!,
+                              style: const TextStyle(
+                                fontSize: 13,
+                                color: Colors.grey,
+                              ),
+                            ),
                           ],
                         ),
                       ],
@@ -1203,27 +1600,45 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                         const SizedBox(height: 4),
                         Row(
                           children: [
-                            const Icon(Icons.cake, size: 14, color: Colors.grey),
+                            const Icon(
+                              Icons.cake,
+                              size: 14,
+                              color: Colors.grey,
+                            ),
                             const SizedBox(width: 4),
                             Builder(
                               builder: (context) {
                                 final age = _calculateAge(vehicle.operatorDob!);
                                 return Text(
-                                  'Age: $age years (${vehicle.operatorDob!.day.toString().padLeft(2, '0')}/${vehicle.operatorDob!.month.toString().padLeft(2, '0')}/${vehicle.operatorDob!.year})', 
-                                  style: const TextStyle(fontSize: 13, color: Colors.grey),
+                                  'Age: $age years (${vehicle.operatorDob!.day.toString().padLeft(2, '0')}/${vehicle.operatorDob!.month.toString().padLeft(2, '0')}/${vehicle.operatorDob!.year})',
+                                  style: const TextStyle(
+                                    fontSize: 13,
+                                    color: Colors.grey,
+                                  ),
                                 );
                               },
                             ),
                           ],
                         ),
                       ],
-                      if (vehicle.operatorLicense != null && vehicle.operatorLicense!.isNotEmpty) ...[
+                      if (vehicle.operatorLicense != null &&
+                          vehicle.operatorLicense!.isNotEmpty) ...[
                         const SizedBox(height: 4),
                         Row(
                           children: [
-                            const Icon(Icons.badge, size: 14, color: Colors.grey),
+                            const Icon(
+                              Icons.badge,
+                              size: 14,
+                              color: Colors.grey,
+                            ),
                             const SizedBox(width: 4),
-                            Text('License: ${vehicle.operatorLicense}', style: const TextStyle(fontSize: 13, color: Colors.grey)),
+                            Text(
+                              'License: ${vehicle.operatorLicense}',
+                              style: const TextStyle(
+                                fontSize: 13,
+                                color: Colors.grey,
+                              ),
+                            ),
                           ],
                         ),
                       ],
@@ -1244,7 +1659,11 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
       backgroundColor: Colors.blue.shade100,
       child: Text(
         name != null && name.isNotEmpty ? name[0].toUpperCase() : 'O',
-        style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.blue.shade700),
+        style: TextStyle(
+          fontSize: 22,
+          fontWeight: FontWeight.bold,
+          color: Colors.blue.shade700,
+        ),
       ),
     );
   }
@@ -1253,16 +1672,21 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
   int _calculateAge(DateTime dob) {
     final now = DateTime.now();
     int age = now.year - dob.year;
-    
+
     // Check if birthday hasn't occurred yet this year
-    if (now.month < dob.month || (now.month == dob.month && now.day < dob.day)) {
+    if (now.month < dob.month ||
+        (now.month == dob.month && now.day < dob.day)) {
       age--;
     }
-    
+
     return age;
   }
 
-  void _showFullImageDialog(BuildContext context, String imageData, String title) {
+  void _showFullImageDialog(
+    BuildContext context,
+    String imageData,
+    String title,
+  ) {
     showDialog(
       context: context,
       builder: (context) => Dialog(
@@ -1273,7 +1697,11 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
             Center(
               child: InteractiveViewer(
                 child: imageData.startsWith('http')
-                    ? Image.network(imageData, errorBuilder: (_, __, ___) => const Icon(Icons.error, color: Colors.white))
+                    ? Image.network(
+                        imageData,
+                        errorBuilder: (context, error, stackTrace) =>
+                            const Icon(Icons.error, color: Colors.white),
+                      )
                     : Image.memory(base64Decode(imageData)),
               ),
             ),
@@ -1281,12 +1709,21 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
               top: 10,
               left: 10,
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 6,
+                ),
                 decoration: BoxDecoration(
                   color: Colors.black54,
                   borderRadius: BorderRadius.circular(20),
                 ),
-                child: Text(title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                child: Text(
+                  title,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
               ),
             ),
             Positioned(
@@ -1316,126 +1753,140 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
     return ValueListenableBuilder<SubscriptionPlan>(
       valueListenable: AppPreferences.instance.subscriptionPlan,
       builder: (context, plan, _) {
-        final canVerify = plan == SubscriptionPlan.premium || plan == SubscriptionPlan.expert;
+        final canVerify =
+            plan == SubscriptionPlan.premium || plan == SubscriptionPlan.expert;
         return Card(
           margin: const EdgeInsets.symmetric(horizontal: 4),
-      child: Padding(
-        padding: const EdgeInsets.all(12.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Document Verification',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              'Verify your documents to increase trust and get more bookings',
-              style: TextStyle(fontSize: 12, color: Colors.grey),
-            ),
-            const SizedBox(height: 16),
-            
-            // Mandatory Documents Section
-            Row(
+          child: Padding(
+            padding: const EdgeInsets.all(12.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Icon(Icons.error_outline, size: 16, color: Colors.red),
-                const SizedBox(width: 6),
-                Text(
-                  'MANDATORY (Required by Law)',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.red[700],
-                  ),
+                const Text(
+                  'Document Verification',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
                 ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Verify your documents to increase trust and get more bookings',
+                  style: TextStyle(fontSize: 12, color: Colors.grey),
+                ),
+                const SizedBox(height: 16),
+
+                // Mandatory Documents Section
+                Row(
+                  children: [
+                    const Icon(
+                      Icons.error_outline,
+                      size: 16,
+                      color: Colors.red,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      'MANDATORY (Required by Law)',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.red[700],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                _buildDocumentItem(
+                  'RC Book',
+                  'Registration Certificate - Proves ownership',
+                  verificationStatus['RC Book']!,
+                  DocumentType.rc,
+                  imageBase64: vehicle.rcFrontUrl,
+                  isMandatory: true,
+                  canVerify: canVerify,
+                ),
+                const Divider(height: 1),
+                _buildDocumentItemWithExpiry(
+                  'Insurance',
+                  'Vehicle Insurance - Mandatory by law',
+                  verificationStatus['Insurance']!,
+                  DocumentType.insurance,
+                  imageBase64: vehicle.insuranceDocumentUrl,
+                  expiryDate: vehicle.insuranceExpiry,
+                  isMandatory: true,
+                  canVerify: canVerify,
+                ),
+
+                const SizedBox(height: 16),
+
+                // Optional Documents Section
+                Row(
+                  children: [
+                    const Icon(
+                      Icons.info_outline,
+                      size: 16,
+                      color: Colors.blue,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      'OPTIONAL (Increases Trust)',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.blue[700],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                _buildDocumentItem(
+                  'Driving License',
+                  'Valid driving license',
+                  verificationStatus['Driving License']!,
+                  DocumentType.dl,
+                  imageBase64: vehicle.dlImageBase64,
+                  isMandatory: false,
+                  canVerify: canVerify,
+                ),
+                const Divider(height: 1),
+                _buildDocumentItem(
+                  'National ID',
+                  'Identity verification',
+                  verificationStatus['National ID']!,
+                  DocumentType.aadhaar,
+                  imageBase64: vehicle.aadhaarImageBase64,
+                  isMandatory: false,
+                  canVerify: canVerify,
+                ),
+                const Divider(height: 1),
+                _buildDocumentItem(
+                  'Tax ID',
+                  'Tax identification',
+                  verificationStatus['Tax ID']!,
+                  DocumentType.pan,
+                  imageBase64: vehicle.panImageBase64,
+                  isMandatory: false,
+                  canVerify: canVerify,
+                ),
+                if (!canVerify) ...[
+                  const SizedBox(height: 12),
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(
+                      Icons.lock_outline,
+                      color: Colors.orange,
+                    ),
+                    title: const Text('Verification locked'),
+                    subtitle: const Text(
+                      'Upgrade to Premium or Expert plan to verify documents',
+                    ),
+                    trailing: TextButton(
+                      onPressed: () => Navigator.pushNamed(context, '/plans'),
+                      child: const Text('Upgrade'),
+                    ),
+                  ),
+                ],
               ],
             ),
-            const SizedBox(height: 8),
-            _buildDocumentItem(
-              'RC Book',
-              'Registration Certificate - Proves ownership',
-              verificationStatus['RC Book']!,
-              DocumentType.rc,
-              imageBase64: vehicle.rcFrontUrl,
-              isMandatory: true,
-              canVerify: canVerify,
-            ),
-            const Divider(height: 1),
-            _buildDocumentItemWithExpiry(
-              'Insurance',
-              'Vehicle Insurance - Mandatory by law',
-              verificationStatus['Insurance']!,
-              DocumentType.insurance,
-              imageBase64: vehicle.insuranceDocumentUrl,
-              expiryDate: vehicle.insuranceExpiry,
-              isMandatory: true,
-              canVerify: canVerify,
-            ),
-            
-            const SizedBox(height: 16),
-            
-            // Optional Documents Section
-            Row(
-              children: [
-                const Icon(Icons.info_outline, size: 16, color: Colors.blue),
-                const SizedBox(width: 6),
-                Text(
-                  'OPTIONAL (Increases Trust)',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.blue[700],
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            _buildDocumentItem(
-              'Driving License',
-              'Valid driving license',
-              verificationStatus['Driving License']!,
-              DocumentType.dl,
-              imageBase64: vehicle.dlImageBase64,
-              isMandatory: false,
-              canVerify: canVerify,
-            ),
-            const Divider(height: 1),
-            _buildDocumentItem(
-              'National ID',
-              'Identity verification',
-              verificationStatus['National ID']!,
-              DocumentType.aadhaar,
-              imageBase64: vehicle.aadhaarImageBase64,
-              isMandatory: false,
-              canVerify: canVerify,
-            ),
-            const Divider(height: 1),
-            _buildDocumentItem(
-              'Tax ID',
-              'Tax identification',
-              verificationStatus['Tax ID']!,
-              DocumentType.pan,
-              imageBase64: vehicle.panImageBase64,
-              isMandatory: false,
-              canVerify: canVerify,
-            ),
-            if (!canVerify) ...[
-              const SizedBox(height: 12),
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: const Icon(Icons.lock_outline, color: Colors.orange),
-                title: const Text('Verification locked'),
-                subtitle: const Text('Upgrade to Premium or Expert plan to verify documents'),
-                trailing: TextButton(
-                  onPressed: () => Navigator.pushNamed(context, '/plans'),
-                  child: const Text('Upgrade'),
-                ),
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
+          ),
+        );
       },
     );
   }
@@ -1462,8 +1913,12 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
         ListTile(
           contentPadding: const EdgeInsets.symmetric(vertical: 4),
           leading: Icon(
-            isVerified ? Icons.verified : (isMandatory ? Icons.error : Icons.pending_outlined),
-            color: isVerified ? Colors.green : (isMandatory ? Colors.red : Colors.orange),
+            isVerified
+                ? Icons.verified
+                : (isMandatory ? Icons.error : Icons.pending_outlined),
+            color: isVerified
+                ? Colors.green
+                : (isMandatory ? Colors.red : Colors.orange),
             size: 28,
           ),
           title: Row(
@@ -1472,14 +1927,21 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
               if (isMandatory && !isVerified) ...[
                 const SizedBox(width: 6),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 2,
+                  ),
                   decoration: BoxDecoration(
                     color: Colors.red,
                     borderRadius: BorderRadius.circular(4),
                   ),
                   child: const Text(
                     'REQUIRED',
-                    style: TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold),
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 9,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                 ),
               ],
@@ -1495,16 +1957,21 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
           trailing: isVerified
               ? null
               : canVerify
-                  ? OutlinedButton(
-                      onPressed: () => _startDocumentVerification(documentType),
-                      style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                        foregroundColor: isMandatory ? Colors.red : null,
-                        side: isMandatory ? const BorderSide(color: Colors.red, width: 2) : null,
-                      ),
-                      child: Text(imageBytes != null ? 'Verify' : 'Upload'),
-                    )
-                  : const Icon(Icons.lock_outline, color: Colors.orange),
+              ? OutlinedButton(
+                  onPressed: () => _startDocumentVerification(documentType),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 8,
+                    ),
+                    foregroundColor: isMandatory ? Colors.red : null,
+                    side: isMandatory
+                        ? const BorderSide(color: Colors.red, width: 2)
+                        : null,
+                  ),
+                  child: Text(imageBytes != null ? 'Verify' : 'Upload'),
+                )
+              : const Icon(Icons.lock_outline, color: Colors.orange),
         ),
         if (imageBytes != null)
           _buildDocumentThumbnail(title, imageBytes, isVerified),
@@ -1524,11 +1991,13 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
   }) {
     Uint8List? imageBytes;
     if (imageBase64 != null && imageBase64.isNotEmpty) {
-      try { imageBytes = base64Decode(imageBase64); } catch (_) {}
+      try {
+        imageBytes = base64Decode(imageBase64);
+      } catch (_) {}
     }
     final isExpired = expiryDate != null && expiryDate.isBefore(DateTime.now());
-    final isBlockedForUserMode = widget.isUserMode &&
-        _isVehicleComplianceDoc(documentType);
+    final isBlockedForUserMode =
+        widget.isUserMode && _isVehicleComplianceDoc(documentType);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1538,22 +2007,24 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
           leading: Icon(
             isVerified && !isExpired
                 ? Icons.verified
-                : (isMandatory || isExpired ? Icons.error : Icons.pending_outlined),
+                : (isMandatory || isExpired
+                      ? Icons.error
+                      : Icons.pending_outlined),
             color: isVerified && !isExpired
                 ? Colors.green
                 : (isMandatory || isExpired ? Colors.red : Colors.orange),
             size: 28,
           ),
-              title: Row(
+          title: Row(
             children: [
-              Text(
-                title,
-                style: const TextStyle(fontWeight: FontWeight.w600),
-              ),
+              Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
               if (isMandatory && (!isVerified || isExpired)) ...[
                 const SizedBox(width: 6),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 2,
+                  ),
                   decoration: BoxDecoration(
                     color: Colors.red,
                     borderRadius: BorderRadius.circular(4),
@@ -1585,15 +2056,20 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                 Text(
                   isExpired
                       ? 'Expired on ${_fmtDate(expiryDate)}'
-                      : expiryDate.isBefore(DateTime.now().add(const Duration(days: 30)))
-                          ? 'Expires soon: ${_fmtDate(expiryDate)}'
-                          : 'Valid until ${_fmtDate(expiryDate)}',
+                      : expiryDate.isBefore(
+                          DateTime.now().add(const Duration(days: 30)),
+                        )
+                      ? 'Expires soon: ${_fmtDate(expiryDate)}'
+                      : 'Valid until ${_fmtDate(expiryDate)}',
                   style: TextStyle(
                     fontSize: 11,
-                    color: isExpired ? Colors.red
-                        : expiryDate.isBefore(DateTime.now().add(const Duration(days: 30)))
-                            ? Colors.orange
-                            : Colors.green,
+                    color: isExpired
+                        ? Colors.red
+                        : expiryDate.isBefore(
+                            DateTime.now().add(const Duration(days: 30)),
+                          )
+                        ? Colors.orange
+                        : Colors.green,
                     fontWeight: FontWeight.w600,
                   ),
                 ),
@@ -1603,26 +2079,31 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
           trailing: isVerified && !isExpired
               ? null
               : !canVerify
-                  ? const Icon(Icons.lock_outline, color: Colors.orange)
-                  : OutlinedButton(
-                      onPressed: isBlockedForUserMode
-                          ? null
-                          : () => _startDocumentVerification(documentType),
-                      style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                        foregroundColor: isMandatory || isExpired ? Colors.red : null,
-                        side: isMandatory || isExpired
-                            ? const BorderSide(color: Colors.red, width: 2)
-                            : null,
-                      ),
-                      child: Text(
-                        isBlockedForUserMode
-                            ? 'Not allowed'
-                            : (imageBytes != null && !isVerified
-                                ? 'Verify'
-                                : (isExpired ? 'Renew' : 'Upload')),
-                      ),
+              ? const Icon(Icons.lock_outline, color: Colors.orange)
+              : OutlinedButton(
+                  onPressed: isBlockedForUserMode
+                      ? null
+                      : () => _startDocumentVerification(documentType),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 8,
                     ),
+                    foregroundColor: isMandatory || isExpired
+                        ? Colors.red
+                        : null,
+                    side: isMandatory || isExpired
+                        ? const BorderSide(color: Colors.red, width: 2)
+                        : null,
+                  ),
+                  child: Text(
+                    isBlockedForUserMode
+                        ? 'Not allowed'
+                        : (imageBytes != null && !isVerified
+                              ? 'Verify'
+                              : (isExpired ? 'Renew' : 'Upload')),
+                  ),
+                ),
         ),
         if (imageBytes != null)
           _buildDocumentThumbnail(title, imageBytes, isVerified && !isExpired),
@@ -1630,7 +2111,11 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
     );
   }
 
-  Widget _buildDocumentThumbnail(String title, Uint8List bytes, bool isVerified) {
+  Widget _buildDocumentThumbnail(
+    String title,
+    Uint8List bytes,
+    bool isVerified,
+  ) {
     return GestureDetector(
       onTap: () => _previewDocumentImage(title, bytes),
       child: Container(
@@ -1683,8 +2168,16 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
               padding: const EdgeInsets.all(12),
               child: Row(
                 children: [
-                  Expanded(child: Text(title, style: const TextStyle(fontWeight: FontWeight.w700))),
-                  IconButton(onPressed: () => Navigator.pop(ctx), icon: const Icon(Icons.close)),
+                  Expanded(
+                    child: Text(
+                      title,
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    icon: const Icon(Icons.close),
+                  ),
                 ],
               ),
             ),
@@ -1873,7 +2366,9 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
               contentPadding: EdgeInsets.zero,
               leading: const Icon(Icons.verified_user, color: Colors.green),
               title: const Text('Save & Verify'),
-              subtitle: const Text('Live camera verification (adds verified badge)'),
+              subtitle: const Text(
+                'Live camera verification (adds verified badge)',
+              ),
               onTap: () => Navigator.pop(context, 'verify'),
             ),
           ],
@@ -1896,45 +2391,73 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
       switch (documentType) {
         case DocumentType.rc:
           docUrl = await _uploadVehicleSensitiveDoc(
-            vehicleId: vehicle.id, docType: 'rc', bytes: documentBytes, extension: ext);
+            vehicleId: vehicle.id,
+            docType: 'rc',
+            bytes: documentBytes,
+            extension: ext,
+          );
           if (docUrl != null) {
             final updatedVehicle = vehicle.copyWith(rcFrontUrl: docUrl);
             widget.isUserMode
-                ? CustomerVehicleRepository.instance.updateVehicle(updatedVehicle)
+                ? CustomerVehicleRepository.instance.updateVehicle(
+                    updatedVehicle,
+                  )
                 : await widget.vehicleRepository!.updateVehicle(updatedVehicle);
           }
           break;
         case DocumentType.insurance:
           docUrl = await _uploadVehicleSensitiveDoc(
-            vehicleId: vehicle.id, docType: 'insurance', bytes: documentBytes, extension: ext);
+            vehicleId: vehicle.id,
+            docType: 'insurance',
+            bytes: documentBytes,
+            extension: ext,
+          );
           if (docUrl != null) {
             final updatedVehicle = vehicle.copyWith(
               insuranceDocumentUrl: docUrl,
               insuranceExpiryDate: expiryDate,
             );
             widget.isUserMode
-                ? CustomerVehicleRepository.instance.updateVehicle(updatedVehicle)
+                ? CustomerVehicleRepository.instance.updateVehicle(
+                    updatedVehicle,
+                  )
                 : await widget.vehicleRepository!.updateVehicle(updatedVehicle);
           }
           break;
         case DocumentType.dl:
           docUrl = await _uploadVehicleSensitiveDoc(
-            vehicleId: vehicle.id, docType: 'dl', bytes: documentBytes, extension: ext);
+            vehicleId: vehicle.id,
+            docType: 'dl',
+            bytes: documentBytes,
+            extension: ext,
+          );
           break;
         case DocumentType.aadhaar:
           docUrl = await _uploadVehicleSensitiveDoc(
-            vehicleId: vehicle.id, docType: 'aadhaar', bytes: documentBytes, extension: ext);
+            vehicleId: vehicle.id,
+            docType: 'aadhaar',
+            bytes: documentBytes,
+            extension: ext,
+          );
           break;
         case DocumentType.pan:
           docUrl = await _uploadVehicleSensitiveDoc(
-            vehicleId: vehicle.id, docType: 'pan', bytes: documentBytes, extension: ext);
+            vehicleId: vehicle.id,
+            docType: 'pan',
+            bytes: documentBytes,
+            extension: ext,
+          );
           break;
       }
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(docUrl != null
-            ? '${_getDocumentName(documentType)} saved (unverified)'
-            : '${_getDocumentName(documentType)} upload failed')),
+        SnackBar(
+          content: Text(
+            docUrl != null
+                ? '${_getDocumentName(documentType)} saved (unverified)'
+                : '${_getDocumentName(documentType)} upload failed',
+          ),
+        ),
       );
       return;
     }
@@ -1994,28 +2517,38 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
       switch (documentType) {
         case DocumentType.rc:
           updatedVehicle = vehicle.copyWith(
-            rcVerified: true, rcVerifiedAt: now, rcImageBase64: base64Doc,
+            rcVerified: true,
+            rcVerifiedAt: now,
+            rcImageBase64: base64Doc,
           );
           break;
         case DocumentType.insurance:
           updatedVehicle = vehicle.copyWith(
-            insuranceVerified: true, insuranceVerifiedAt: now,
-            insuranceExpiryDate: expiryDate, insuranceImageBase64: base64Doc,
+            insuranceVerified: true,
+            insuranceVerifiedAt: now,
+            insuranceExpiryDate: expiryDate,
+            insuranceImageBase64: base64Doc,
           );
           break;
         case DocumentType.dl:
           updatedVehicle = vehicle.copyWith(
-            dlVerified: true, dlVerifiedAt: now, dlImageBase64: base64Doc,
+            dlVerified: true,
+            dlVerifiedAt: now,
+            dlImageBase64: base64Doc,
           );
           break;
         case DocumentType.aadhaar:
           updatedVehicle = vehicle.copyWith(
-            aadhaarVerified: true, aadhaarVerifiedAt: now, aadhaarImageBase64: base64Doc,
+            aadhaarVerified: true,
+            aadhaarVerifiedAt: now,
+            aadhaarImageBase64: base64Doc,
           );
           break;
         case DocumentType.pan:
           updatedVehicle = vehicle.copyWith(
-            panVerified: true, panVerifiedAt: now, panImageBase64: base64Doc,
+            panVerified: true,
+            panVerifiedAt: now,
+            panImageBase64: base64Doc,
           );
           break;
       }
@@ -2035,8 +2568,8 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
             updatedVehicle.isFullyVerified
                 ? '$docType verified! All documents complete — Verified badge granted ✓'
                 : faceMatched
-                    ? '$docType verified! ${matchScore.toStringAsFixed(1)}% match ✓'
-                    : '$docType verified with liveness ✓',
+                ? '$docType verified! ${matchScore.toStringAsFixed(1)}% match ✓'
+                : '$docType verified with liveness ✓',
           ),
           backgroundColor: Colors.green,
         ),
@@ -2079,18 +2612,20 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
               valueListenable: BookingRepository.instance.bookings,
               builder: (context, allBookings, _) {
                 // Get all slots for this vehicle
-                final vehicleSlotIds = (widget.isUserMode
-                        ? CustomerSlotRepository.instance.allSlots
-                        : SlotRepository.instance.allSlots)
-                    .where((e) => e.slot.vehicleId == vehicle.id)
-                    .map((e) => e.slot.id)
-                    .toSet();
+                final vehicleSlotIds =
+                    (widget.isUserMode
+                            ? CustomerSlotRepository.instance.allSlots
+                            : SlotRepository.instance.allSlots)
+                        .where((e) => e.slot.vehicleId == vehicle.id)
+                        .map((e) => e.slot.id)
+                        .toSet();
 
                 // Filter bookings for this vehicle's slots
-                final vehicleBookings = allBookings
-                    .where((b) => vehicleSlotIds.contains(b.slotId))
-                    .toList()
-                  ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+                final vehicleBookings =
+                    allBookings
+                        .where((b) => vehicleSlotIds.contains(b.slotId))
+                        .toList()
+                      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
 
                 if (vehicleBookings.isEmpty) {
                   return const Padding(
@@ -2197,10 +2732,7 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
               color: color,
             ),
           ),
-          Text(
-            label,
-            style: const TextStyle(fontSize: 10, color: Colors.grey),
-          ),
+          Text(label, style: const TextStyle(fontSize: 10, color: Colors.grey)),
         ],
       ),
     );
@@ -2227,7 +2759,10 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
               children: [
                 Text(
                   booking.userName ?? 'User',
-                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12),
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 12,
+                  ),
                 ),
                 Text(
                   _fmtDate(booking.createdAt),
@@ -2238,7 +2773,11 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
           ),
           Text(
             '₹${booking.price.toStringAsFixed(0)}',
-            style: TextStyle(fontWeight: FontWeight.bold, color: statusColor, fontSize: 13),
+            style: TextStyle(
+              fontWeight: FontWeight.bold,
+              color: statusColor,
+              fontSize: 13,
+            ),
           ),
         ],
       ),
@@ -2301,7 +2840,10 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                   Expanded(
                     child: TextField(
                       controller: _manualLatController,
-                      keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                        signed: true,
+                      ),
                       decoration: const InputDecoration(
                         labelText: 'Latitude',
                         hintText: 'e.g., 12.9716',
@@ -2314,7 +2856,10 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                   Expanded(
                     child: TextField(
                       controller: _manualLngController,
-                      keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                        signed: true,
+                      ),
                       decoration: const InputDecoration(
                         labelText: 'Longitude',
                         hintText: 'e.g., 77.5946',
@@ -2337,10 +2882,7 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
               const SizedBox(height: 8),
               Text(
                 '💡 Tip: Use "Get Current Location" for accurate GPS coordinates, or enter manually if you know the exact location.',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: Colors.grey[600],
-                ),
+                style: TextStyle(fontSize: 12, color: Colors.grey[600]),
               ),
               const SizedBox(height: 12),
             ],
@@ -2367,7 +2909,10 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
               SizedBox(
                 width: 20,
                 height: 20,
-                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Colors.white,
+                ),
               ),
               SizedBox(width: 16),
               Text('Getting current location...'),
@@ -2442,9 +2987,9 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
 
     if (_gpsMode == VehicleGpsMode.externalLink &&
         (gpsLink == null || gpsLink.isEmpty)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Enter tracking link')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Enter tracking link')));
       return;
     }
 
@@ -2455,22 +3000,25 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
         ? double.tryParse(_manualLngController.text.trim())
         : null;
 
-    if (_gpsMode == VehicleGpsMode.manual && (manualLat == null || manualLng == null)) {
+    if (_gpsMode == VehicleGpsMode.manual &&
+        (manualLat == null || manualLng == null)) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Enter valid manual coordinates')),
       );
       return;
     }
-    if (_gpsMode == VehicleGpsMode.manual && (manualLat! < -90 || manualLat > 90)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Invalid latitude')),
-      );
+    if (_gpsMode == VehicleGpsMode.manual &&
+        (manualLat! < -90 || manualLat > 90)) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Invalid latitude')));
       return;
     }
-    if (_gpsMode == VehicleGpsMode.manual && (manualLng! < -180 || manualLng > 180)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Invalid longitude')),
-      );
+    if (_gpsMode == VehicleGpsMode.manual &&
+        (manualLng! < -180 || manualLng > 180)) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Invalid longitude')));
       return;
     }
 
@@ -2490,8 +3038,12 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
       gpsExternalLink: gpsLink,
       manualLat: manualLat,
       manualLng: manualLng,
-      lastKnownLat: _gpsMode == VehicleGpsMode.manual ? manualLat : vehicle.lastKnownLat,
-      lastKnownLng: _gpsMode == VehicleGpsMode.manual ? manualLng : vehicle.lastKnownLng,
+      lastKnownLat: _gpsMode == VehicleGpsMode.manual
+          ? manualLat
+          : vehicle.lastKnownLat,
+      lastKnownLng: _gpsMode == VehicleGpsMode.manual
+          ? manualLng
+          : vehicle.lastKnownLng,
       averageRating: vehicle.averageRating,
       totalRatings: vehicle.totalRatings,
       totalBookings: vehicle.totalBookings,
@@ -2503,9 +3055,9 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
     } else {
       widget.vehicleRepository!.updateVehicle(updated);
     }
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('GPS settings saved')),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('GPS settings saved')));
   }
 
   Widget _buildReviewsSection(BuildContext context, Vehicle vehicle) {
@@ -2561,10 +3113,12 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                 }
 
                 // Calculate average rating
-                final avgRating = providerReviews.fold<double>(
-                  0,
-                  (sum, r) => sum + r.rating,
-                ) / providerReviews.length;
+                final avgRating =
+                    providerReviews.fold<double>(
+                      0,
+                      (sum, r) => sum + r.rating,
+                    ) /
+                    providerReviews.length;
 
                 return Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -2866,12 +3420,16 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                     runSpacing: 4,
                     children: [
                       if (district != null) _geoChip(Icons.map, district),
-                      if (geo.state != null) _geoChip(Icons.account_balance, geo.state!),
-                      if (postcode != null) _geoChip(Icons.markunread_mailbox, postcode),
+                      if (geo.state != null)
+                        _geoChip(Icons.account_balance, geo.state!),
+                      if (postcode != null)
+                        _geoChip(Icons.markunread_mailbox, postcode),
                       if (country != null)
                         _geoChip(
                           Icons.public,
-                          countryCode != null ? '$country ($countryCode)' : country,
+                          countryCode != null
+                              ? '$country ($countryCode)'
+                              : country,
                         ),
                     ],
                   ),
@@ -2898,7 +3456,9 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
   Widget _buildVehicleStatsCard(Vehicle vehicle, int activePostsCount) {
     // Get slot IDs that belong to this specific vehicle
     final vehicleSlotIds = {
-      ...SlotRepository.instance.getSlotsByVehicleId(vehicle.id).map((s) => s.id),
+      ...SlotRepository.instance
+          .getSlotsByVehicleId(vehicle.id)
+          .map((s) => s.id),
       ...CustomerSlotRepository.instance.allSlotsRaw
           .where((s) => s.vehicleId == vehicle.id)
           .map((s) => s.id),
@@ -2920,7 +3480,7 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                 final avgRating = vehicleReviews.isEmpty
                     ? 0.0
                     : vehicleReviews.fold<double>(0, (s, r) => s + r.rating) /
-                        vehicleReviews.length;
+                          vehicleReviews.length;
                 return Column(
                   children: [
                     Row(
@@ -2931,7 +3491,9 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                         Text(
                           avgRating.toStringAsFixed(1),
                           style: const TextStyle(
-                              fontSize: 18, fontWeight: FontWeight.bold),
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
                       ],
                     ),
@@ -2949,9 +3511,11 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
               builder: (context, allBookings, _) {
                 // Only completed bookings for this vehicle's slots
                 final totalTrips = allBookings
-                    .where((b) =>
-                        vehicleSlotIds.contains(b.slotId) &&
-                        b.status == BookingStatus.completed)
+                    .where(
+                      (b) =>
+                          vehicleSlotIds.contains(b.slotId) &&
+                          b.status == BookingStatus.completed,
+                    )
                     .length;
                 return Column(
                   children: [
@@ -2963,7 +3527,9 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                         Text(
                           '$totalTrips',
                           style: const TextStyle(
-                              fontSize: 18, fontWeight: FontWeight.bold),
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
                       ],
                     ),
@@ -2985,7 +3551,10 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                     const SizedBox(width: 4),
                     Text(
                       '$activePostsCount',
-                      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ],
                 ),
@@ -3001,6 +3570,7 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
       ),
     );
   }
+
   String _formatReviewDate(DateTime date) {
     final now = DateTime.now();
     final difference = now.difference(date);
@@ -3055,7 +3625,9 @@ class _SlotHistoryTileState extends State<_SlotHistoryTile> {
   Widget build(BuildContext context) {
     final slot = widget.slot;
     final bookings = widget.bookings;
-    final completed = bookings.where((b) => b.status == BookingStatus.completed).length;
+    final completed = bookings
+        .where((b) => b.status == BookingStatus.completed)
+        .length;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -3068,12 +3640,17 @@ class _SlotHistoryTileState extends State<_SlotHistoryTile> {
             child: Row(
               children: [
                 Container(
-                  width: 36, height: 36,
+                  width: 36,
+                  height: 36,
                   decoration: BoxDecoration(
                     color: Colors.blue.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(8),
                   ),
-                  child: const Icon(Icons.event_note, size: 18, color: Colors.blue),
+                  child: const Icon(
+                    Icons.event_note,
+                    size: 18,
+                    color: Colors.blue,
+                  ),
                 ),
                 const SizedBox(width: 10),
                 Expanded(
@@ -3082,7 +3659,10 @@ class _SlotHistoryTileState extends State<_SlotHistoryTile> {
                     children: [
                       Text(
                         '${slot.serviceType?.name ?? 'Slot'} · ${_fmtTime(slot.startTime)}',
-                        style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w600,
+                          fontSize: 13,
+                        ),
                       ),
                       Text(
                         '${bookings.length} booking${bookings.length == 1 ? '' : 's'}'
@@ -3104,8 +3684,10 @@ class _SlotHistoryTileState extends State<_SlotHistoryTile> {
           if (bookings.isEmpty)
             Padding(
               padding: const EdgeInsets.only(left: 46, bottom: 8),
-              child: Text('No bookings for this slot',
-                  style: TextStyle(fontSize: 12, color: Colors.grey[500])),
+              child: Text(
+                'No bookings for this slot',
+                style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+              ),
             )
           else
             ...bookings.map((b) {
@@ -3113,7 +3695,10 @@ class _SlotHistoryTileState extends State<_SlotHistoryTile> {
               return Padding(
                 padding: const EdgeInsets.only(left: 46, bottom: 6),
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 8,
+                  ),
                   decoration: BoxDecoration(
                     color: color.withValues(alpha: 0.06),
                     borderRadius: BorderRadius.circular(8),
@@ -3127,25 +3712,38 @@ class _SlotHistoryTileState extends State<_SlotHistoryTile> {
                           children: [
                             Text(
                               b.userName ?? 'Booking #${b.id}',
-                              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w600,
+                                fontSize: 13,
+                              ),
                             ),
                             const SizedBox(height: 2),
                             Text(
                               _fmtTime(b.createdAt),
-                              style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: Colors.grey[600],
+                              ),
                             ),
                           ],
                         ),
                       ),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 3,
+                        ),
                         decoration: BoxDecoration(
                           color: color.withValues(alpha: 0.12),
                           borderRadius: BorderRadius.circular(999),
                         ),
                         child: Text(
                           widget.statusLabel(b),
-                          style: TextStyle(fontSize: 11, color: color, fontWeight: FontWeight.w600),
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: color,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
                       ),
                     ],
@@ -3159,6 +3757,3 @@ class _SlotHistoryTileState extends State<_SlotHistoryTile> {
     );
   }
 }
-
-
-

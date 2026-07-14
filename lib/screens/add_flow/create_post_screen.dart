@@ -1,15 +1,15 @@
 import 'dart:convert';
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:image_picker/image_picker.dart';
 import '../vehicle/vehicle_list_screen.dart';
 import '../../models/service_type.dart';
 import '../../models/slot_type.dart';
 import '../../models/post_mode.dart';
+import '../../models/demand_plan.dart';
 import '../../services/app_preferences.dart';
 import '../../services/auth_repository.dart';
+import '../../services/profile_repository.dart';
+import '../../services/payment_service.dart';
 import '../../models/vehicle.dart';
 import '../../models/slot.dart';
 import '../../models/pickup_mode.dart';
@@ -77,7 +77,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   String _fuelPolicy = 'Full-to-Full';
   bool _insuranceIncluded = false;
   final _leaseTermsController = TextEditingController();
-  
+
   // Operator availability
   bool _withOperator = false;
 
@@ -86,7 +86,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
 
   // Post mode: instant, wait_for_full, full_vehicle
   PostMode _postMode = PostMode.instant;
-  
+
   // Wait for full deadline (manual input)
   final _deadlineHoursController = TextEditingController(text: '2');
   final _deadlineMinutesController = TextEditingController(text: '0');
@@ -97,9 +97,10 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   // Notes
   final _notesController = TextEditingController();
 
-  // Images
-  final List<String> _selectedImages = [];
-  final ImagePicker _imagePicker = ImagePicker();
+  // Demand plan and rating requirements
+  DemandPlan _demandPlan = DemandPlan.basic;
+  double? _minRatings;
+  int? _minNoRatings;
 
   // Working mode (only for working service)
   String _workingMode = 'On-site';
@@ -110,12 +111,18 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   SimpleSeatLayout? _builtSeatLayout; // Store the actual layout structure
 
   bool get _hasSeatLayoutSeats {
+    // Check in-memory SeatLayoutRepository first
     final ownerId = _seatLayoutOwnerId;
-    if (ownerId == null) return false;
-    final layout = SeatLayoutRepository.instance.getLayout(ownerId);
-    final seatCount =
-        layout?.cells.values.where((c) => c.type == CellType.seat).length ?? 0;
-    return seatCount > 0;
+    if (ownerId != null) {
+      final layout = SeatLayoutRepository.instance.getLayout(ownerId);
+      final seatCount =
+          layout?.cells.values.where((c) => c.type == CellType.seat).length ??
+          0;
+      if (seatCount > 0) return true;
+    }
+    // Fallback: check _builtSeatLayout JSON (persists across hot reloads on web)
+    return (_builtSeatLayout?.layout.where((item) => !item.isGap).isNotEmpty) ??
+        false;
   }
 
   @override
@@ -149,8 +156,11 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
 
   void _setDefaultTimes() {
     final now = DateTime.now();
-    _startTime = DateTime(now.year, now.month, now.day, now.hour + 1, 0);
-    _endTime = DateTime(now.year, now.month, now.day, now.hour + 9, 0);
+    // Use Duration addition to handle day overflow correctly
+    final start = now.add(const Duration(hours: 1));
+    _startTime = DateTime(start.year, start.month, start.day, start.hour, 0);
+    final end = _startTime!.add(const Duration(hours: 8));
+    _endTime = DateTime(end.year, end.month, end.day, end.hour, 0);
   }
 
   @override
@@ -178,9 +188,14 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
 
     // Get timezone for the relevant location
     String tzLabel = TimezoneUtils.getTimezoneAbbreviation();
-    final suggestion = isStart ? _fromSuggestion : (_toSuggestion ?? _fromSuggestion ?? _baseSuggestion);
+    final suggestion = isStart
+        ? _fromSuggestion
+        : (_toSuggestion ?? _fromSuggestion ?? _baseSuggestion);
     if (suggestion != null && (suggestion.lat != 0 || suggestion.lon != 0)) {
-      tzLabel = await TimezoneUtils.getTimezoneFromCoords(suggestion.lat, suggestion.lon);
+      tzLabel = await TimezoneUtils.getTimezoneFromCoords(
+        suggestion.lat,
+        suggestion.lon,
+      );
     }
 
     // Show timezone hint to user before picking
@@ -290,14 +305,41 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     return parts[0].trim();
   }
 
+  /// Determine currency type based on user's connected bank account
+  /// Uses the bankCurrency field from user profile
+  String _determineCurrencyType() {
+    final currentUser = ProfileRepository.instance.profile.value;
+
+    // Use the currency of the connected bank account
+    final bankCurrency = currentUser.bankCurrency;
+
+    if (bankCurrency != null && bankCurrency.isNotEmpty) {
+      // Return the currency from the user's bank account
+      return bankCurrency.toUpperCase();
+    }
+
+    // Fallback: check payment provider
+    final paymentProvider = currentUser.paymentProvider;
+
+    if (paymentProvider == 'razorpay') {
+      // Razorpay only supports INR
+      return 'INR';
+    } else if (paymentProvider == 'stripe') {
+      // Stripe default to USD
+      return 'USD';
+    }
+
+    // Default to INR if no bank currency or payment provider
+    return 'INR';
+  }
+
   Future<LocationSuggestion?> _maybeGeocode(String text) async {
     if (text.isEmpty) return null;
     if (text.length < 3) return null;
 
     try {
-      final results = await LocationAutocompleteService.instance.searchLocations(
-        text,
-      );
+      final results = await LocationAutocompleteService.instance
+          .searchLocations(text);
       if (results.isNotEmpty) return results.first;
     } catch (_) {}
     return null;
@@ -308,7 +350,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     double toRad(double deg) => deg * (3.141592653589793 / 180.0);
     final dLat = toRad(lat2 - lat1);
     final dLon = toRad(lon2 - lon1);
-    final a = (dLat / 2) * (dLat / 2) +
+    final a =
+        (dLat / 2) * (dLat / 2) +
         toRad(lat1).abs() * toRad(lat2).abs() * (dLon / 2) * (dLon / 2);
     return r * 2 * (a < 1 ? a : 1);
   }
@@ -358,10 +401,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       return;
     }
 
-    final opened = await launchUrl(
-      uri,
-      mode: LaunchMode.externalApplication,
-    );
+    final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
     if (!opened && mounted) {
       _showError('Unable to open maps');
     }
@@ -391,7 +431,17 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       return false;
     }
 
-    if (_useSimpleSeating) {
+    // If _builtSeatLayout has items, we are in layout mode regardless of the toggle state
+    final effectivelyLayoutMode =
+        !_useSimpleSeating ||
+        (_builtSeatLayout?.layout.where((item) => !item.isGap).isNotEmpty ??
+            false);
+
+    debugPrint(
+      '🔍 Validate: _useSimpleSeating=$_useSimpleSeating, effectivelyLayoutMode=$effectivelyLayoutMode, builtSeats=${_builtSeatLayout?.layout.length}',
+    );
+
+    if (!effectivelyLayoutMode) {
       if (_priceController.text.trim().isEmpty) {
         _showError('Please enter price');
         return false;
@@ -401,12 +451,89 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       final layout = ownerId == null
           ? null
           : SeatLayoutRepository.instance.getLayout(ownerId);
-      final seatCount =
-          layout?.cells.values.where((c) => c.type == CellType.seat).length ??
-          0;
+      final seats =
+          layout?.cells.values.where((c) => c.type == CellType.seat).toList() ??
+          [];
 
-      if (layout == null || seatCount <= 0) {
+      // Fallback: check _builtSeatLayout JSON (handles hot reload / web refresh
+      // where SeatLayoutRepository in-memory cache is cleared)
+      final builtSeats =
+          _builtSeatLayout?.layout.where((item) => !item.isGap).toList() ?? [];
+
+      if (seats.isEmpty && builtSeats.isEmpty) {
         _showError('Please add a seat layout with at least 1 seat');
+        return false;
+      }
+
+      // Validate price from JSON (builtSeats) — covers all service types in layout mode
+      for (final item in builtSeats) {
+        if (item.price <= 0) {
+          _showError(
+            'All seats/compartments must have a price set in the layout',
+          );
+          return false;
+        }
+      }
+      // Also check in-memory seats if JSON not available
+      if (builtSeats.isEmpty) {
+        for (final seat in seats) {
+          if (seat.price == null || seat.price! <= 0) {
+            _showError('All seats must have a price set');
+            return false;
+          }
+        }
+      }
+
+      // For parcel layout: also check dimensions
+      if (widget.serviceType == ServiceType.parcel) {
+        for (final seat in seats) {
+          final name = seat.seatName ?? '';
+          if (!name.contains('L:') ||
+              !name.contains('B:') ||
+              !name.contains('H:') ||
+              !name.contains('W:')) {
+            _showError(
+              'All compartments must have dimensions filled (Length, Breadth, Height, Weight)',
+            );
+            return false;
+          }
+        }
+      }
+    }
+
+    // Parcel: max dimensions are mandatory so customers know what fits.
+    // In layout mode, dimensions are stored per-compartment — skip top-level check.
+    if (widget.serviceType == ServiceType.parcel && _useSimpleSeating) {
+      final weight = double.tryParse(_maxWeightController.text.trim());
+      final length = double.tryParse(_maxLengthController.text.trim());
+      final width = double.tryParse(_maxWidthController.text.trim());
+      final height = double.tryParse(_maxHeightController.text.trim());
+
+      if (weight == null || weight <= 0) {
+        _showError('Please enter max parcel weight (kg)');
+        return false;
+      }
+      if (length == null || length <= 0) {
+        _showError('Please enter max parcel length (cm)');
+        return false;
+      }
+      if (width == null || width <= 0) {
+        _showError('Please enter max parcel width (cm)');
+        return false;
+      }
+      if (height == null || height <= 0) {
+        _showError('Please enter max parcel height (cm)');
+        return false;
+      }
+    }
+
+    // Security deposit is optional for all service types
+    // If entered, must be > 0
+    final depositText = _securityDepositController.text.trim();
+    if (depositText.isNotEmpty) {
+      final deposit = double.tryParse(depositText);
+      if (deposit == null || deposit <= 0) {
+        _showError('Security deposit must be a positive number');
         return false;
       }
     }
@@ -427,51 +554,18 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   int? _calculateDeadlineHours() {
     final hours = int.tryParse(_deadlineHoursController.text) ?? 0;
     final minutes = int.tryParse(_deadlineMinutesController.text) ?? 0;
-    
+
     // Convert to total hours (rounded up if there are minutes)
     if (hours == 0 && minutes == 0) return null;
-    
+
     // If there are minutes, round up to next hour
     // e.g., 2 hours 30 minutes = 3 hours
     return minutes > 0 ? hours + 1 : hours;
   }
 
-  Future<void> _pickImage() async {
-    if (_selectedImages.length >= 4) {
-      _showError('Maximum 4 images allowed');
-      return;
-    }
-
-    try {
-      final XFile? image = await _imagePicker.pickImage(
-        source: ImageSource.gallery,
-        maxWidth: 1024,
-        maxHeight: 1024,
-        imageQuality: 80,
-      );
-
-      if (image != null) {
-        final bytes = await File(image.path).readAsBytes();
-        final base64Image = base64Encode(bytes);
-        
-        setState(() {
-          _selectedImages.add(base64Image);
-        });
-      }
-    } catch (e) {
-      _showError('Failed to pick image: ${e.toString()}');
-    }
-  }
-
-  void _removeImage(int index) {
-    setState(() {
-      _selectedImages.removeAt(index);
-    });
-  }
-
   Future<void> _postSlot() async {
     if (!_validateForm()) return;
-    
+
     // Validate notes content for prohibited contact info
     final notes = _notesController.text.trim();
     if (notes.isNotEmpty) {
@@ -482,20 +576,299 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       }
     }
 
+    // ══════════════════════════════════════════════════════════
+    // 💳 PAYMENT PROVIDER VALIDATION (Provider Posts Only)
+    // ══════════════════════════════════════════════════════════
+    // For provider posts (not customer posts), validate that user has
+    // connected their payment account before allowing post creation
+    if (!widget.isUserMode) {
+      final currentUser = ProfileRepository.instance.profile.value;
+
+      // Check if user has any payment provider connected
+      final hasPaymentProvider =
+          currentUser.paymentProvider != null &&
+          currentUser.paymentProvider!.isNotEmpty;
+
+      // Validation: Must have selected a payment provider (Stripe or Razorpay)
+      // Bank details can be added later when withdrawing money
+      if (!hasPaymentProvider) {
+        // Show error dialog with guidance
+        final shouldNavigate = await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: Row(
+              children: [
+                Icon(Icons.payment, color: Colors.orange.shade700),
+                const SizedBox(width: 8),
+                const Text('Choose Payment Provider'),
+              ],
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Select Razorpay (India) or Stripe (International) to start creating posts.\n\n'
+                  'You can add bank details later when you want to withdraw earnings.',
+                  style: TextStyle(fontSize: 14),
+                ),
+                const SizedBox(height: 16),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.blue.shade200),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.info,
+                            size: 16,
+                            color: Colors.blue.shade700,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            'Why is this required?',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: Colors.blue.shade900,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      const Text(
+                        '• Just click Razorpay or Stripe to activate\n'
+                        '• Start creating posts immediately\n'
+                        '• Add bank details when withdrawing',
+                        style: TextStyle(fontSize: 13),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+                const Text(
+                  'Choose your payment provider in Profile Settings to start posting.',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton.icon(
+                onPressed: () => Navigator.pop(context, true),
+                icon: const Icon(Icons.settings, size: 18),
+                label: const Text('Go to Settings'),
+              ),
+            ],
+          ),
+        );
+
+        if (shouldNavigate == true && mounted) {
+          // Navigate to profile settings (payment section)
+          Navigator.pushNamed(context, '/profile');
+        }
+        return; // Block post creation
+      }
+
+      // Validation passed: User has selected payment provider
+      debugPrint(
+        '✅ Payment provider selected: ${currentUser.paymentProvider} '
+        '(Bank details optional until withdrawal)',
+      );
+    }
+
+    // CUSTOMER MODE: Process escrow payment before creating post
+    // When isUserMode=true, customer must pay the post price as escrow
+    // This money is held until service completion, then released to provider
+    String? escrowPaymentId;
+    if (widget.isUserMode) {
+      // In layout mode, derive price from the total of all seat prices in the layout
+      double? price;
+      if (!_useSimpleSeating ||
+          (_builtSeatLayout?.layout.isNotEmpty ?? false)) {
+        final builtSeats =
+            _builtSeatLayout?.layout
+                .where((item) => !item.isGap && item.price > 0)
+                .toList() ??
+            [];
+        if (builtSeats.isNotEmpty) {
+          price = builtSeats
+              .map((s) => s.price.toDouble())
+              .fold<double>(0.0, (sum, p) => sum + p);
+        }
+      }
+      price ??= double.tryParse(_priceController.text.trim());
+      if (price == null || price <= 0) {
+        _showError('Please enter a valid price');
+        return;
+      }
+
+      // Calculate platform fee (5%)
+      const double platformFeePercent = 5.0;
+      final servicePrice = price;
+      final platformFee = servicePrice * platformFeePercent / 100;
+      final totalEscrow = servicePrice + platformFee;
+
+      // Show payment confirmation dialog
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Escrow Payment Required'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Price breakdown
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text('Service price:'),
+                  Text(
+                    '${_getProviderCurrencySymbol()}${servicePrice.toStringAsFixed(2)}',
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text('Platform fee (${platformFeePercent.toInt()}%):'),
+                  Text(
+                    '${_getProviderCurrencySymbol()}${platformFee.toStringAsFixed(2)}',
+                  ),
+                ],
+              ),
+              const Divider(height: 16),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    'Total escrow:',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  Text(
+                    '${_getProviderCurrencySymbol()}${totalEscrow.toStringAsFixed(2)}',
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'This amount will be:',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 8),
+              const Text('• Held securely until service completion'),
+              const Text('• Released to provider after successful service'),
+              const Text('• Refunded to you if post is cancelled'),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Pay & Post'),
+            ),
+          ],
+        ),
+      );
+
+      if (confirmed != true || !mounted) return;
+
+      // Show loading
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Processing payment...'),
+            duration: Duration(seconds: 30),
+          ),
+        );
+      }
+
+      // Process escrow payment
+      try {
+        final currentUser = AuthRepository.instance.currentUser;
+        if (currentUser == null) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).clearSnackBars();
+          _showError('User not authenticated');
+          return;
+        }
+
+        // Import required services
+        final prefs = AppPreferences.instance;
+        final currency = prefs.currencyCode.value;
+        final countryCode = currency == 'INR' ? 'IN' : 'US';
+
+        // Get PaymentService - need to import it
+        final paymentService = PaymentService.instance;
+        final paymentResult = await paymentService.processPayment(
+          amountInPaise: (totalEscrow * 100).toInt(),
+          currency: currency,
+          countryCode: countryCode,
+          providerId: 'escrow',
+          slotId: 'customer_post_${DateTime.now().microsecondsSinceEpoch}',
+          userName: currentUser.email,
+          userEmail: currentUser.email,
+          userPhone: '',
+          description: 'Escrow for ${widget.serviceType.displayName} post',
+          commissionAmount: (platformFee * 100).toInt(),
+        );
+
+        if (paymentResult == null || paymentResult['error'] != null) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).clearSnackBars();
+          final errorMsg =
+              paymentResult?['error']?.toString() ?? 'Unknown error';
+          _showError('Payment cancelled or failed: $errorMsg');
+          return;
+        }
+
+        escrowPaymentId = paymentResult['payment_id'] as String?;
+        if (escrowPaymentId == null) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).clearSnackBars();
+          _showError('Payment ID not received');
+          return;
+        }
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).clearSnackBars();
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('✅ Payment successful, creating post...'),
+              backgroundColor: Colors.green,
+              duration: Duration(seconds: 2),
+            ),
+          );
+        }
+      } catch (e) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).clearSnackBars();
+        _showError('Payment failed: $e');
+        return;
+      }
+    }
+
     setState(() => _isPosting = true);
 
     try {
       if (_slotType == SlotType.fromTo) {
-        _fromSuggestion ??= await _maybeGeocode(
-          _fromController.text.trim(),
-        );
-        _toSuggestion ??= await _maybeGeocode(
-          _toController.text.trim(),
-        );
+        _fromSuggestion ??= await _maybeGeocode(_fromController.text.trim());
+        _toSuggestion ??= await _maybeGeocode(_toController.text.trim());
       } else {
-        _baseSuggestion ??= await _maybeGeocode(
-          _baseController.text.trim(),
-        );
+        _baseSuggestion ??= await _maybeGeocode(_baseController.text.trim());
       }
 
       final slotId = DateTime.now().millisecondsSinceEpoch.toString();
@@ -518,16 +891,32 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
               .toList(growable: false) ??
           const <LayoutCell>[];
 
-      final int derivedCapacity = useLayout ? seatCells.length : _capacity;
+      final int derivedCapacity = useLayout
+          ? (seatCells.isNotEmpty
+                ? seatCells.length
+                : (_builtSeatLayout?.layout.where((i) => !i.isGap).length ??
+                      _capacity))
+          : _capacity;
+
+      // Get min seat price — try in-memory layout first, fall back to JSON
       final int minSeatPrice = useLayout
-          ? (seatCells
-                    .map((c) => c.price)
-                    .whereType<int>()
-                    .fold<int?>(
-                      null,
-                      (min, p) => min == null ? p : (p < min ? p : min),
-                    ) ??
-                0)
+          ? (seatCells.isNotEmpty
+                ? (seatCells
+                          .map((c) => c.price)
+                          .whereType<int>()
+                          .fold<int?>(
+                            null,
+                            (min, p) => min == null ? p : (p < min ? p : min),
+                          ) ??
+                      0)
+                : (_builtSeatLayout?.layout
+                          .where((i) => !i.isGap && i.price > 0)
+                          .map((i) => i.price)
+                          .fold<int?>(
+                            null,
+                            (min, p) => min == null ? p : (p < min ? p : min),
+                          ) ??
+                      0))
           : 0;
 
       final double derivedPrice = useLayout
@@ -535,10 +924,11 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
           : (double.tryParse(_priceController.text) ?? 0);
 
       // Determine actual service type based on operator toggle for Lease
-      final ServiceType actualServiceType = widget.serviceType == ServiceType.lease
+      final ServiceType actualServiceType =
+          widget.serviceType == ServiceType.lease
           ? (_withOperator ? ServiceType.working : ServiceType.lease)
           : widget.serviceType;
-      
+
       // Set withOperator based on service type
       final bool operatorValue = widget.serviceType == ServiceType.lease
           ? _withOperator
@@ -565,7 +955,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         serviceType: actualServiceType,
         slotType: _slotType,
         seatLayoutOwnerId: layoutOwnerId,
-        seatLayoutStructure: _builtSeatLayout, // Add the actual layout structure
+        seatLayoutStructure:
+            _builtSeatLayout, // Add the actual layout structure
         requiresApproval: false,
         fromLocation: _slotType == SlotType.fromTo
             ? _formatLocationValue(
@@ -595,7 +986,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         notes: _notesController.text.trim().isEmpty
             ? null
             : _notesController.text.trim(),
-        images: List<String>.from(_selectedImages),
+        images: const [], // Posts use vehicle images instead
         createdAt: DateTime.now(),
         pickupOption: _pickupMode,
         maxWeight: widget.serviceType == ServiceType.parcel
@@ -610,25 +1001,38 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         maxHeight: widget.serviceType == ServiceType.parcel
             ? double.tryParse(_maxHeightController.text)
             : null,
-        leaseDuration: null, // No duration selection - just time frame and total price
-        securityDeposit: widget.serviceType == ServiceType.lease
-            ? double.tryParse(_securityDepositController.text)
-            : null,
+        leaseDuration:
+            null, // No duration selection - just time frame and total price
+        securityDeposit: double.tryParse(_securityDepositController.text),
         fuelPolicy: widget.serviceType == ServiceType.lease
             ? _fuelPolicy
             : null,
         insuranceIncluded: widget.serviceType == ServiceType.lease
             ? _insuranceIncluded
             : null,
-        leaseTerms: widget.serviceType == ServiceType.lease &&
+        leaseTerms:
+            widget.serviceType == ServiceType.lease &&
                 _leaseTermsController.text.trim().isNotEmpty
             ? _leaseTermsController.text.trim()
             : null,
         withOperator: operatorValue,
+        bookingMode: widget.serviceType == ServiceType.lease
+            ? BookingMode
+                  .full // Lease is always full vehicle
+            : (_postMode == PostMode.waitForFull
+                  ? BookingMode.full
+                  : BookingMode.shared),
         postMode: _postMode, // Add post mode
-        waitForFullDeadlineHours: _postMode == PostMode.waitForFull 
-            ? _calculateDeadlineHours() 
+        waitForFullDeadlineHours: _postMode == PostMode.waitForFull
+            ? _calculateDeadlineHours()
             : null,
+        demandPlan: _demandPlan.dbValue, // Add demand plan
+        minRatings: _minRatings, // Add rating requirements
+        minNoRatings: _minNoRatings,
+        escrowPaymentId:
+            escrowPaymentId, // Add escrow payment ID for customer posts
+        currencyType:
+            _determineCurrencyType(), // Auto-detect currency from location
       );
 
       // Debug: Verify seat layout structure before saving
@@ -646,15 +1050,22 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
 
       // Refresh posts from Supabase to show the newly created post
       if (widget.isUserMode) {
-        // CustomerSlotRepository doesn't have a refresh method, but it auto-updates via ValueNotifier
+        await CustomerSlotRepository.instance.loadSlots();
       } else {
         await SlotRepository.instance.loadSlots();
       }
 
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Posted live ✅')));
+        final snackBarMessage = widget.isUserMode
+            ? 'Posted live ✅ Find it in Posts > User Requests tab'
+            : 'Posted live ✅';
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(snackBarMessage),
+            duration: const Duration(seconds: 4),
+          ),
+        );
         Navigator.of(context).popUntil((route) => route.isFirst);
       }
     } catch (e) {
@@ -666,6 +1077,47 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         setState(() => _isPosting = false);
       }
     }
+  }
+
+  /// Get currency symbol from provider's connected payment account
+  String _getProviderCurrencySymbol() {
+    final profile = ProfileRepository.instance.profile.value;
+    final currency = profile.bankCurrency;
+
+    if (currency != null && currency.isNotEmpty) {
+      // Use the profile's bank currency
+      final currencySymbols = {
+        'INR': '₹',
+        'USD': '\$',
+        'GBP': '£',
+        'EUR': '€',
+        'AED': 'د.إ',
+        'SGD': 'S\$',
+        'AUD': 'A\$',
+        'CAD': 'C\$',
+        'JPY': '¥',
+        'CNY': '¥',
+        'HKD': 'HK\$',
+        'KRW': '₩',
+        'THB': '฿',
+        'MYR': 'RM',
+        'IDR': 'Rp',
+        'PHP': '₱',
+        'SAR': '﷼',
+        'QAR': 'ر.ق',
+        'KWD': 'د.ك',
+        'PKR': '₨',
+        'BDT': '৳',
+        'LKR': 'Rs',
+        'NPR': 'रू',
+        'ZAR': 'R',
+        'NGN': '₦',
+      };
+      return currencySymbols[currency] ?? currency;
+    }
+
+    // Fallback to app preference if no payment provider connected yet
+    return AppPreferences.instance.currencySymbol;
   }
 
   @override
@@ -707,12 +1159,19 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
             ],
 
             // Parcel Dimensions (only for parcel service in simple mode)
-            if (widget.serviceType == ServiceType.parcel && _useSimpleSeating) ...[
+            if (widget.serviceType == ServiceType.parcel &&
+                _useSimpleSeating) ...[
               _buildParcelDimensionsSection(),
               const SizedBox(height: 20),
             ],
 
-            // Lease Details (only for lease service)
+            // Security Deposit (only shown in simple mode - layout mode has per-compartment deposits)
+            if (_useSimpleSeating) ...[
+              _buildSecurityDepositSection(),
+              const SizedBox(height: 20),
+            ],
+
+            // Lease Details (only for lease service - fuel, insurance, terms)
             if (widget.serviceType == ServiceType.lease) ...[
               _buildLeaseDetailsSection(),
               const SizedBox(height: 20),
@@ -721,11 +1180,13 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
             // Pickup Mode
             _buildPickupModeSection(),
             const SizedBox(height: 20),
-            
-            // Post Mode (Booking Strategy)
-            _buildPostModeSection(),
-            const SizedBox(height: 20),
-            
+
+            // Post Mode (Booking Strategy) - Not applicable for Lease
+            if (widget.serviceType != ServiceType.lease) ...[
+              _buildPostModeSection(),
+              const SizedBox(height: 20),
+            ],
+
             // Operator Availability (only for Lease service)
             if (widget.serviceType == ServiceType.lease) ...[
               _buildOperatorSection(),
@@ -733,7 +1194,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
             ],
 
             // Seating Setup (only for Passenger/Parcel, not for Lease/Working)
-            if (!_useSimpleSeating && 
+            if (!_useSimpleSeating &&
                 widget.serviceType != ServiceType.lease &&
                 widget.serviceType != ServiceType.working) ...[
               _buildSeatingSetupSection(),
@@ -742,6 +1203,10 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
 
             // Notes
             _buildNotesSection(),
+            const SizedBox(height: 20),
+
+            // Demand Plan and Rating Requirements
+            _buildDemandPlanSection(),
             const SizedBox(height: 100), // Space for floating button
           ],
         ),
@@ -783,7 +1248,10 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
           onTap: () async {
             final result = await Navigator.push<Vehicle>(
               context,
-              MaterialPageRoute(builder: (context) => VehicleListScreen(isUserMode: widget.isUserMode)),
+              MaterialPageRoute(
+                builder: (context) =>
+                    VehicleListScreen(isUserMode: widget.isUserMode),
+              ),
             );
             if (result != null) {
               setState(() => _selectedVehicle = result);
@@ -812,18 +1280,21 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                                       width: 32,
                                       height: 32,
                                       fit: BoxFit.cover,
-                                      errorBuilder: (context, error, stackTrace) {
-                                        return Container(
-                                          width: 32,
-                                          height: 32,
-                                          color: Colors.blue.withValues(alpha: 0.12),
-                                          child: Icon(
-                                            Icons.directions_car,
-                                            color: Colors.blue.shade700,
-                                            size: 18,
-                                          ),
-                                        );
-                                      },
+                                      errorBuilder:
+                                          (context, error, stackTrace) {
+                                            return Container(
+                                              width: 32,
+                                              height: 32,
+                                              color: Colors.blue.withValues(
+                                                alpha: 0.12,
+                                              ),
+                                              child: Icon(
+                                                Icons.directions_car,
+                                                color: Colors.blue.shade700,
+                                                size: 18,
+                                              ),
+                                            );
+                                          },
                                     );
                                   }
 
@@ -834,24 +1305,29 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                                       width: 32,
                                       height: 32,
                                       fit: BoxFit.cover,
-                                      errorBuilder: (context, error, stackTrace) {
-                                        return Container(
-                                          width: 32,
-                                          height: 32,
-                                          color: Colors.blue.withValues(alpha: 0.12),
-                                          child: Icon(
-                                            Icons.directions_car,
-                                            color: Colors.blue.shade700,
-                                            size: 18,
-                                          ),
-                                        );
-                                      },
+                                      errorBuilder:
+                                          (context, error, stackTrace) {
+                                            return Container(
+                                              width: 32,
+                                              height: 32,
+                                              color: Colors.blue.withValues(
+                                                alpha: 0.12,
+                                              ),
+                                              child: Icon(
+                                                Icons.directions_car,
+                                                color: Colors.blue.shade700,
+                                                size: 18,
+                                              ),
+                                            );
+                                          },
                                     );
                                   } catch (_) {
                                     return Container(
                                       width: 32,
                                       height: 32,
-                                      color: Colors.blue.withValues(alpha: 0.12),
+                                      color: Colors.blue.withValues(
+                                        alpha: 0.12,
+                                      ),
                                       child: Icon(
                                         Icons.directions_car,
                                         color: Colors.blue.shade700,
@@ -1045,11 +1521,18 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                   padding: const EdgeInsets.only(left: 12),
                   child: Row(
                     children: [
-                      const Icon(Icons.gps_fixed, size: 12, color: Colors.green),
+                      const Icon(
+                        Icons.gps_fixed,
+                        size: 12,
+                        color: Colors.green,
+                      ),
                       const SizedBox(width: 4),
                       Text(
                         'Lat: ${_fromSuggestion!.lat.toStringAsFixed(6)}, Lon: ${_fromSuggestion!.lon.toStringAsFixed(6)}',
-                        style: const TextStyle(fontSize: 11, color: Colors.green),
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: Colors.green,
+                        ),
                       ),
                     ],
                   ),
@@ -1074,11 +1557,18 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                   padding: const EdgeInsets.only(left: 12),
                   child: Row(
                     children: [
-                      const Icon(Icons.gps_fixed, size: 12, color: Colors.green),
+                      const Icon(
+                        Icons.gps_fixed,
+                        size: 12,
+                        color: Colors.green,
+                      ),
                       const SizedBox(width: 4),
                       Text(
                         'Lat: ${_toSuggestion!.lat.toStringAsFixed(6)}, Lon: ${_toSuggestion!.lon.toStringAsFixed(6)}',
-                        style: const TextStyle(fontSize: 11, color: Colors.green),
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: Colors.green,
+                        ),
                       ),
                     ],
                   ),
@@ -1095,7 +1585,10 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                   suggestion: _fromSuggestion,
                 ),
                 icon: const Icon(Icons.open_in_new, size: 14),
-                label: const Text('From in Maps', style: TextStyle(fontSize: 12)),
+                label: const Text(
+                  'From in Maps',
+                  style: TextStyle(fontSize: 12),
+                ),
               ),
               TextButton.icon(
                 onPressed: () => _openInMaps(
@@ -1109,22 +1602,26 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
           ),
           if (_fromSuggestion != null && _toSuggestion != null) ...[
             const SizedBox(height: 4),
-            Builder(builder: (context) {
-              final dist = _haversineKm(
-                _fromSuggestion!.lat, _fromSuggestion!.lon,
-                _toSuggestion!.lat, _toSuggestion!.lon,
-              );
-              return Row(
-                children: [
-                  const Icon(Icons.straighten, size: 14, color: Colors.blue),
-                  const SizedBox(width: 6),
-                  Text(
-                    '~${dist.toStringAsFixed(1)} km between locations',
-                    style: const TextStyle(fontSize: 12, color: Colors.blue),
-                  ),
-                ],
-              );
-            }),
+            Builder(
+              builder: (context) {
+                final dist = _haversineKm(
+                  _fromSuggestion!.lat,
+                  _fromSuggestion!.lon,
+                  _toSuggestion!.lat,
+                  _toSuggestion!.lon,
+                );
+                return Row(
+                  children: [
+                    const Icon(Icons.straighten, size: 14, color: Colors.blue),
+                    const SizedBox(width: 6),
+                    Text(
+                      '~${dist.toStringAsFixed(1)} km between locations',
+                      style: const TextStyle(fontSize: 12, color: Colors.blue),
+                    ),
+                  ],
+                );
+              },
+            ),
           ],
         ] else ...[
           LocationAutocompleteField(
@@ -1202,10 +1699,14 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                 children: [
                   FutureBuilder<String>(
                     future: _fromSuggestion != null
-                        ? TimezoneUtils.getTimezoneFromCoords(_fromSuggestion!.lat, _fromSuggestion!.lon)
+                        ? TimezoneUtils.getTimezoneFromCoords(
+                            _fromSuggestion!.lat,
+                            _fromSuggestion!.lon,
+                          )
                         : Future.value(TimezoneUtils.getTimezoneAbbreviation()),
                     builder: (context, snap) {
-                      final tz = snap.data ?? TimezoneUtils.getTimezoneAbbreviation();
+                      final tz =
+                          snap.data ?? TimezoneUtils.getTimezoneAbbreviation();
                       return Text(
                         'Start Time ($tz)',
                         style: const TextStyle(fontWeight: FontWeight.w500),
@@ -1246,10 +1747,12 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                     future: (_toSuggestion ?? _baseSuggestion) != null
                         ? TimezoneUtils.getTimezoneFromCoords(
                             (_toSuggestion ?? _baseSuggestion)!.lat,
-                            (_toSuggestion ?? _baseSuggestion)!.lon)
+                            (_toSuggestion ?? _baseSuggestion)!.lon,
+                          )
                         : Future.value(TimezoneUtils.getTimezoneAbbreviation()),
                     builder: (context, snap) {
-                      final tz = snap.data ?? TimezoneUtils.getTimezoneAbbreviation();
+                      final tz =
+                          snap.data ?? TimezoneUtils.getTimezoneAbbreviation();
                       return Text(
                         'End Time ($tz)',
                         style: const TextStyle(fontWeight: FontWeight.w500),
@@ -1285,31 +1788,33 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         ),
         if (_startTime != null && _endTime != null) ...[
           const SizedBox(height: 8),
-          Builder(builder: (context) {
-            final diff = _endTime!.difference(_startTime!);
-            final hours = diff.inHours;
-            final minutes = diff.inMinutes % 60;
-            final isNegative = diff.isNegative;
-            return Row(
-              children: [
-                Icon(
-                  isNegative ? Icons.warning_amber : Icons.timer_outlined,
-                  size: 14,
-                  color: isNegative ? Colors.red : Colors.green,
-                ),
-                const SizedBox(width: 6),
-                Text(
-                  isNegative
-                      ? 'End time is before start time'
-                      : 'Duration: ${hours > 0 ? '${hours}h ' : ''}${minutes}m',
-                  style: TextStyle(
-                    fontSize: 12,
+          Builder(
+            builder: (context) {
+              final diff = _endTime!.difference(_startTime!);
+              final hours = diff.inHours;
+              final minutes = diff.inMinutes % 60;
+              final isNegative = diff.isNegative;
+              return Row(
+                children: [
+                  Icon(
+                    isNegative ? Icons.warning_amber : Icons.timer_outlined,
+                    size: 14,
                     color: isNegative ? Colors.red : Colors.green,
                   ),
-                ),
-              ],
-            );
-          }),
+                  const SizedBox(width: 6),
+                  Text(
+                    isNegative
+                        ? 'End time is before start time'
+                        : 'Duration: ${hours > 0 ? '${hours}h ' : ''}${minutes}m',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: isNegative ? Colors.red : Colors.green,
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
         ],
       ],
     );
@@ -1317,9 +1822,10 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
 
   Widget _buildPriceCapacitySection() {
     final hasLayoutSeats = _hasSeatLayoutSeats;
-    final isLeaseOrWorking = widget.serviceType == ServiceType.lease || 
-                             widget.serviceType == ServiceType.working;
-    
+    final isLeaseOrWorking =
+        widget.serviceType == ServiceType.lease ||
+        widget.serviceType == ServiceType.working;
+
     if (hasLayoutSeats && _useSimpleSeating) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
@@ -1344,7 +1850,10 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                   onTap: () => setState(() => _useSimpleSeating = true),
                   child: Container(
                     constraints: const BoxConstraints(minHeight: 64),
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 10,
+                    ),
                     decoration: BoxDecoration(
                       color: _useSimpleSeating
                           ? Colors.green.withValues(alpha: 0.1)
@@ -1362,8 +1871,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                           _useSimpleSeating
                               ? Icons.radio_button_checked
                               : Icons.radio_button_unchecked,
-                          color:
-                              _useSimpleSeating ? Colors.green : Colors.grey,
+                          color: _useSimpleSeating ? Colors.green : Colors.grey,
                         ),
                         const SizedBox(width: 8),
                         const Expanded(
@@ -1389,7 +1897,10 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                   onTap: () => setState(() => _useSimpleSeating = false),
                   child: Container(
                     constraints: const BoxConstraints(minHeight: 64),
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 10,
+                    ),
                     decoration: BoxDecoration(
                       color: !_useSimpleSeating
                           ? Colors.blue.withValues(alpha: 0.1)
@@ -1464,12 +1975,12 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
               labelText: widget.serviceType == ServiceType.lease
                   ? 'Total Lease Price'
                   : 'Price per ${widget.serviceType == ServiceType.working
-                      ? 'job'
-                      : widget.serviceType == ServiceType.parcel
-                      ? 'parcel'
-                      : 'seat'}',
+                        ? 'job'
+                        : widget.serviceType == ServiceType.parcel
+                        ? 'parcel'
+                        : 'seat'}',
               hintText: 'Enter amount',
-              prefixText: AppPreferences.instance.currencySymbol,
+              prefixText: _getProviderCurrencySymbol(),
               border: const OutlineInputBorder(),
             ),
           ),
@@ -1534,7 +2045,10 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                 onTap: () => setState(() => _workingMode = 'On-site'),
                 child: Container(
                   constraints: const BoxConstraints(minHeight: 68),
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
                   decoration: BoxDecoration(
                     color: _workingMode == 'On-site'
                         ? Colors.purple.withValues(alpha: 0.1)
@@ -1663,30 +2177,45 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     );
   }
 
+  Widget _buildSecurityDepositSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          '🔒 Security Deposit',
+          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 12),
+        TextFormField(
+          controller: _securityDepositController,
+          decoration: InputDecoration(
+            labelText: 'Security Deposit Amount (optional)',
+            border: const OutlineInputBorder(),
+            prefixText: '${_getProviderCurrencySymbol()} ',
+            helperText: 'Refundable deposit held until service completion',
+            hintText: 'Enter amount or leave empty for no deposit',
+          ),
+          keyboardType: TextInputType.number,
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'Security deposit protects against no-shows and damages. Leave empty if not required.',
+          style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
+        ),
+      ],
+    );
+  }
+
   Widget _buildLeaseDetailsSection() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const Text(
-          '🚗 Lease Details',
+          '🚗 Lease Specific Details',
           style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
         ),
         const SizedBox(height: 12),
-        
-        // Security Deposit (only for self-drive / without operator)
-        if (!_withOperator)
-          TextFormField(
-            controller: _securityDepositController,
-            decoration: InputDecoration(
-                  labelText: 'Security Deposit (${AppPreferences.instance.currencySymbol})',
-              border: OutlineInputBorder(),
-              prefixIcon: Icon(Icons.security),
-              helperText: 'Refundable deposit for self-drive',
-            ),
-            keyboardType: TextInputType.number,
-          ),
-        if (!_withOperator) const SizedBox(height: 12),
-        
+
         // Fuel Policy
         DropdownButtonFormField<String>(
           initialValue: _fuelPolicy,
@@ -1695,16 +2224,15 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
             border: OutlineInputBorder(),
             prefixIcon: Icon(Icons.local_gas_station),
           ),
-          items: ['Full-to-Full', 'Fuel Included', 'Pay as You Go'].map((policy) {
-            return DropdownMenuItem(
-              value: policy,
-              child: Text(policy),
-            );
+          items: ['Full-to-Full', 'Fuel Included', 'Pay as You Go'].map((
+            policy,
+          ) {
+            return DropdownMenuItem(value: policy, child: Text(policy));
           }).toList(),
           onChanged: (value) => setState(() => _fuelPolicy = value!),
         ),
         const SizedBox(height: 12),
-        
+
         // Insurance Included
         SwitchListTile(
           title: const Text('Insurance Included'),
@@ -1780,7 +2308,10 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                     setState(() => _pickupMode = PickupMode.providerPickup),
                 child: Container(
                   constraints: const BoxConstraints(minHeight: 68),
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
                   decoration: BoxDecoration(
                     color: _pickupMode == PickupMode.providerPickup
                         ? Colors.blue.withValues(alpha: 0.1)
@@ -1843,7 +2374,9 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
           padding: const EdgeInsets.all(12),
           child: RadioGroup<PostMode>(
             groupValue: _postMode,
-            onChanged: (v) { if (v != null) setState(() => _postMode = v); },
+            onChanged: (v) {
+              if (v != null) setState(() => _postMode = v);
+            },
             child: Column(
               children: [
                 // Instant Booking
@@ -1860,8 +2393,20 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text('Instant Booking', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
-                              Text('Customers can book immediately', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                              Text(
+                                'Instant Booking',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              Text(
+                                'Customers can book immediately',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.grey,
+                                ),
+                              ),
                             ],
                           ),
                         ),
@@ -1884,8 +2429,20 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text('Wait for Full', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
-                              Text('Wait until all seats are filled', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                              Text(
+                                'Wait for Full',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              Text(
+                                'Wait until all seats are filled',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.grey,
+                                ),
+                              ),
                             ],
                           ),
                         ),
@@ -1908,7 +2465,10 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                               labelText: 'Hours',
                               hintText: '0-48',
                               border: OutlineInputBorder(),
-                              contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                              contentPadding: EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 8,
+                              ),
                             ),
                           ),
                         ),
@@ -1921,7 +2481,10 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                               labelText: 'Minutes',
                               hintText: '0-59',
                               border: OutlineInputBorder(),
-                              contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                              contentPadding: EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 8,
+                              ),
                             ),
                           ),
                         ),
@@ -1931,7 +2494,10 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                   const SizedBox(height: 4),
                   Padding(
                     padding: const EdgeInsets.only(left: 48),
-                    child: Text('Deadline before start time', style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+                    child: Text(
+                      'Deadline before start time',
+                      style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                    ),
                   ),
                 ],
                 const Divider(),
@@ -1949,8 +2515,20 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text('Full Post Mode', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
-                              Text('Customer must book all remaining slots', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                              Text(
+                                'Full Post Mode',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              Text(
+                                'Customer must book all remaining slots',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.grey,
+                                ),
+                              ),
                             ],
                           ),
                         ),
@@ -1975,12 +2553,13 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
           style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
         ),
         const SizedBox(height: 12),
-        Container(
-          decoration: BoxDecoration(
-            border: Border.all(color: Colors.grey.shade300),
-            borderRadius: BorderRadius.circular(8),
-          ),
+        Material(
+          borderRadius: BorderRadius.circular(8),
           child: SwitchListTile(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+              side: BorderSide(color: Colors.grey.shade300),
+            ),
             title: const Text('With Operator'),
             subtitle: Text(
               _withOperator
@@ -2069,11 +2648,11 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
 
     if (saved == null) return;
     SeatLayoutRepository.instance.upsert(ownerId: ownerId, layout: saved);
-    
+
     // Convert SeatLayout to SimpleSeatLayout for database storage
     _builtSeatLayout = _convertToSimpleSeatLayout(saved);
     debugPrint('📦 Seat Layout Structure: ${_builtSeatLayout?.toJson()}');
-    
+
     if (!mounted) return;
     setState(() {
       _useSimpleSeating = false;
@@ -2083,7 +2662,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   /// Convert SeatLayout (UI model) to SimpleSeatLayout (DB model)
   SimpleSeatLayout _convertToSimpleSeatLayout(SeatLayout layout) {
     final items = <LayoutItem>[];
-    
+
     // Convert each cell to a LayoutItem
     layout.cells.forEach((key, cell) {
       if (cell.type == CellType.seat) {
@@ -2094,30 +2673,36 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         } else if (cell.gender == SeatGender.female) {
           genderStr = 'Female';
         }
-        
-        items.add(PassengerSeat(
-          key: cell.seatName ?? key,
-          matrix: '${cell.row}x${cell.col}',
-          allowedGender: genderStr,
-          price: cell.price ?? 0,
-          status: cell.isLocked ? SlotStatus.locked : SlotStatus.available,
-          bookingId: null,
-        ));
+
+        items.add(
+          PassengerSeat(
+            key: cell.seatName ?? key,
+            matrix: '${cell.row}x${cell.col}',
+            allowedGender: genderStr,
+            price: cell.price ?? 0,
+            status: cell.isLocked ? SlotStatus.locked : SlotStatus.available,
+            bookingId: null,
+          ),
+        );
       } else if (cell.type == CellType.space) {
         // Space cells are gaps in the layout
-        items.add(PassengerSeat(
-          key: 'gap_${cell.row}x${cell.col}',
-          matrix: '${cell.row}x${cell.col}',
-          allowedGender: 'Any',
-          price: 0,
-          status: SlotStatus.gap,
-          bookingId: null,
-        ));
+        items.add(
+          PassengerSeat(
+            key: 'gap_${cell.row}x${cell.col}',
+            matrix: '${cell.row}x${cell.col}',
+            allowedGender: 'Any',
+            price: 0,
+            status: SlotStatus.gap,
+            bookingId: null,
+          ),
+        );
       }
     });
-    
+
     return SimpleSeatLayout(
-      type: widget.serviceType == ServiceType.passenger ? 'passenger' : 'parcel',
+      type: widget.serviceType == ServiceType.passenger
+          ? 'passenger'
+          : 'parcel',
       layout: items,
     );
   }
@@ -2140,116 +2725,87 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
           ),
         ),
         const SizedBox(height: 20),
-        
-        // Images Section
+      ],
+    );
+  }
+
+  Widget _buildDemandPlanSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
         const Text(
-          '📷 Images (Optional)',
+          '👥 Customer Requirements (Optional)',
           style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
         ),
         const SizedBox(height: 8),
-        
-        // Image Grid
-        if (_selectedImages.isNotEmpty) ...[
-          GridView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 2,
-              crossAxisSpacing: 8,
-              mainAxisSpacing: 8,
-              childAspectRatio: 1,
+        const Text(
+          'Who can book this service - defaults to everyone',
+          style: TextStyle(fontSize: 14, color: Colors.grey),
+        ),
+        const SizedBox(height: 12),
+
+        // ignore: deprecated_member_use
+        ...DemandPlan.values.map(
+          (plan) => RadioListTile<DemandPlan>(
+            contentPadding: EdgeInsets.zero,
+            title: Text(plan.displayName),
+            subtitle: Text(
+              plan.description,
+              style: const TextStyle(fontSize: 12),
             ),
-            itemCount: _selectedImages.length,
-            itemBuilder: (context, index) {
-              return Stack(
-                children: [
-                  Container(
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: Colors.grey.shade300),
-                    ),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(8),
-                      child: Image.memory(
-                        base64Decode(_selectedImages[index]),
-                        width: double.infinity,
-                        height: double.infinity,
-                        fit: BoxFit.cover,
-                      ),
-                    ),
-                  ),
-                  Positioned(
-                    top: 4,
-                    right: 4,
-                    child: GestureDetector(
-                      onTap: () => _removeImage(index),
-                      child: Container(
-                        padding: const EdgeInsets.all(4),
-                        decoration: const BoxDecoration(
-                          color: Colors.red,
-                          shape: BoxShape.circle,
-                        ),
-                        child: const Icon(
-                          Icons.close,
-                          color: Colors.white,
-                          size: 16,
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              );
+            value: plan,
+            groupValue: _demandPlan, // ignore: deprecated_member_use
+            // ignore: deprecated_member_use
+            onChanged: (value) {
+              // ignore: deprecated_member_use
+              setState(() => _demandPlan = value!);
             },
           ),
-          const SizedBox(height: 12),
-        ],
-        
-        // Add Image Button
-        if (_selectedImages.length < 4)
-          GestureDetector(
-            onTap: _pickImage,
-            child: Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                border: Border.all(
-                  color: Colors.grey.shade300,
-                  style: BorderStyle.solid,
+        ),
+
+        const SizedBox(height: 16),
+        const Text(
+          '⭐ Rating Requirements (Optional)',
+          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 8),
+
+        Row(
+          children: [
+            Expanded(
+              child: TextField(
+                decoration: const InputDecoration(
+                  labelText: 'Min Customer Rating',
+                  hintText: '4.0',
+                  helperText: 'Minimum rating',
+                  border: OutlineInputBorder(),
                 ),
-                borderRadius: BorderRadius.circular(8),
-                color: Colors.grey.shade50,
-              ),
-              child: Column(
-                children: [
-                  Icon(
-                    Icons.add_photo_alternate_outlined,
-                    size: 32,
-                    color: Colors.grey.shade600,
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Add Images (${_selectedImages.length}/4)',
-                    style: TextStyle(
-                      color: Colors.grey.shade600,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    'Tap to select from gallery',
-                    style: TextStyle(
-                      color: Colors.grey.shade500,
-                      fontSize: 12,
-                    ),
-                  ),
-                ],
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+                onChanged: (v) {
+                  setState(() => _minRatings = double.tryParse(v));
+                },
               ),
             ),
-          ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: TextField(
+                decoration: const InputDecoration(
+                  labelText: 'Min Number of Ratings',
+                  hintText: '10',
+                  helperText: 'Reviews received',
+                  border: OutlineInputBorder(),
+                ),
+                keyboardType: TextInputType.number,
+                onChanged: (v) {
+                  setState(() => _minNoRatings = int.tryParse(v));
+                },
+              ),
+            ),
+          ],
+        ),
       ],
     );
   }
 }
-
-
-

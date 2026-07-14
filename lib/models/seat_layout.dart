@@ -10,10 +10,11 @@ class LayoutCell {
   final CellType type;
   final String? seatName;
   final int? price;
+  final int? securityDeposit; // Security deposit for this seat/compartment
   final SeatKind seatKind;
   final SeatGender gender;
   final bool isLocked;
-  
+
   // Parcel-specific fields (for parcel service layout)
   final double? maxWeight; // kg
   final double? maxLength; // cm
@@ -26,6 +27,7 @@ class LayoutCell {
     required this.type,
     this.seatName,
     this.price,
+    this.securityDeposit,
     this.seatKind = SeatKind.seat,
     this.gender = SeatGender.any,
     this.isLocked = false,
@@ -41,6 +43,7 @@ class LayoutCell {
     CellType? type,
     String? seatName,
     int? price,
+    int? securityDeposit,
     SeatKind? seatKind,
     SeatGender? gender,
     bool? isLocked,
@@ -55,6 +58,7 @@ class LayoutCell {
       type: type ?? this.type,
       seatName: seatName,
       price: price,
+      securityDeposit: securityDeposit ?? this.securityDeposit,
       seatKind: seatKind ?? this.seatKind,
       gender: gender ?? this.gender,
       isLocked: isLocked ?? this.isLocked,
@@ -72,6 +76,7 @@ class LayoutCell {
       'type': type.name,
       'seatName': seatName,
       'price': price,
+      'securityDeposit': securityDeposit,
       'seatKind': seatKind.name,
       'gender': gender.name,
       'isLocked': isLocked,
@@ -96,6 +101,7 @@ class LayoutCell {
       ),
       seatName: json['seatName'],
       price: json['price'],
+      securityDeposit: json['securityDeposit'],
       seatKind: SeatKind.values.firstWhere(
         (e) => e.name == kindName,
         orElse: () => SeatKind.seat,
@@ -173,6 +179,3 @@ class SeatLayout {
     );
   }
 }
-
-
-

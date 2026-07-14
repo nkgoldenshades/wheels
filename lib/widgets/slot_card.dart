@@ -11,7 +11,6 @@ import '../models/pickup_mode.dart';
 import '../utils/timezone_utils.dart';
 import '../models/post_mode.dart';
 import '../services/booking_repository.dart';
-import '../services/app_preferences.dart';
 import '../services/review_repository.dart';
 import '../services/location_autocomplete_service.dart';
 
@@ -21,8 +20,10 @@ class SlotCard extends StatelessWidget {
   final String providerName;
   final String providerAvatar;
   final double providerRating;
-  final bool isOffer; // true = Offer (User books), false = Request (Provider accepts)
-  final bool isUserPost; // true = user post (looking for service), false = provider post (offering service)
+  final bool
+  isOffer; // true = Offer (User books), false = Request (Provider accepts)
+  final bool
+  isUserPost; // true = user post (looking for service), false = provider post (offering service)
   final VoidCallback onTap;
   final VoidCallback onAction;
   final VoidCallback? onRatingTap;
@@ -58,7 +59,7 @@ class SlotCard extends StatelessWidget {
               // TOP ROW - WHO + WHAT
               _buildTopRow(),
               const SizedBox(height: 12),
-              
+
               // MIDDLE - LOCATION
               _buildLocationRow(),
               if (distanceKm != null) ...[
@@ -79,11 +80,11 @@ class SlotCard extends StatelessWidget {
                 ),
               ],
               const SizedBox(height: 4),
-              
+
               // PICKUP MODE
               _buildPickupModeRow(),
               const SizedBox(height: 12),
-              
+
               // TIME
               _buildTimeRow(),
               const SizedBox(height: 8),
@@ -91,21 +92,23 @@ class SlotCard extends StatelessWidget {
               // GPS MODE INDICATOR
               _buildGpsModeRow(),
               const SizedBox(height: 12),
-              
+
               // PRICE + CAPACITY
               _buildPriceCapacityRow(),
               const SizedBox(height: 12),
-              
+
               // PARCEL DIMENSIONS (only for parcel slots with dimensions set)
               if (slot.serviceType == ServiceType.parcel &&
-                  (slot.maxWeight != null || slot.maxLength != null ||
-                   slot.maxWidth != null || slot.maxHeight != null)) ...[
+                  (slot.maxWeight != null ||
+                      slot.maxLength != null ||
+                      slot.maxWidth != null ||
+                      slot.maxHeight != null)) ...[
                 _buildParcelDimensionsRow(),
                 const SizedBox(height: 12),
               ],
-              
+
               // TERMS ICON (shown in action row, not here)
-              
+
               // BOTTOM - ACTION
               _buildActionRow(),
             ],
@@ -131,7 +134,9 @@ class SlotCard extends StatelessWidget {
   }
 
   bool _shouldShowGoldenTick() {
-    return isUserPost ? _isVerifiedOptionBUser() : _isVerifiedOptionAProviderVehicle();
+    return isUserPost
+        ? _isVerifiedOptionBUser()
+        : _isVerifiedOptionAProviderVehicle();
   }
 
   Uint8List? _tryDecodePhoto(String? photo) {
@@ -156,12 +161,7 @@ class SlotCard extends StatelessWidget {
     final target = _tryResolveLocation(targetText);
     if (target == null) return null;
 
-    return _haversineKm(
-      vehiclePos.$1,
-      vehiclePos.$2,
-      target.$1,
-      target.$2,
-    );
+    return _haversineKm(vehiclePos.$1, vehiclePos.$2, target.$1, target.$2);
   }
 
   (double, double)? _vehicleResolvedLatLng() {
@@ -171,7 +171,9 @@ class SlotCard extends StatelessWidget {
         return (vehicle.manualLat!, vehicle.manualLng!);
       case VehicleGpsMode.externalLink:
       case VehicleGpsMode.deviceLive:
-        if (vehicle.lastKnownLat == null || vehicle.lastKnownLng == null) return null;
+        if (vehicle.lastKnownLat == null || vehicle.lastKnownLng == null) {
+          return null;
+        }
         return (vehicle.lastKnownLat!, vehicle.lastKnownLng!);
     }
   }
@@ -226,29 +228,35 @@ class SlotCard extends StatelessWidget {
     final dLat = toRad(lat2 - lat1);
     final dLon = toRad(lon2 - lon1);
 
-    final a = math.pow(math.sin(dLat / 2), 2) +
-        math.cos(toRad(lat1)) * math.cos(toRad(lat2)) * math.pow(math.sin(dLon / 2), 2);
-    final c = 2 * math.atan2(math.sqrt(a.toDouble()), math.sqrt((1 - a).toDouble()));
+    final a =
+        math.pow(math.sin(dLat / 2), 2) +
+        math.cos(toRad(lat1)) *
+            math.cos(toRad(lat2)) *
+            math.pow(math.sin(dLon / 2), 2);
+    final c =
+        2 * math.atan2(math.sqrt(a.toDouble()), math.sqrt((1 - a).toDouble()));
     return r * c;
   }
 
   Widget _buildTopRow() {
     // Use profile image if available, otherwise first gallery image
-    final imageToShow = vehicle.profileImage ?? 
+    final imageToShow =
+        vehicle.profileImage ??
         (vehicle.galleryImages.isNotEmpty ? vehicle.galleryImages.first : null);
-    
-    final Uint8List? bytes = imageToShow != null 
+
+    final Uint8List? bytes = imageToShow != null
         ? _tryDecodePhoto(imageToShow)
         : null;
 
     return Row(
       children: [
+        // Vehicle image (first)
         if (bytes != null) ...[
           ClipRRect(
-            borderRadius: BorderRadius.circular(10),
+            borderRadius: BorderRadius.circular(6),
             child: SizedBox(
-              width: 44,
-              height: 44,
+              width: 40,
+              height: 40,
               child: Image.memory(
                 bytes,
                 fit: BoxFit.cover,
@@ -256,23 +264,30 @@ class SlotCard extends StatelessWidget {
                   return Container(
                     color: Colors.black12,
                     child: const Center(
-                      child: Icon(Icons.broken_image_outlined, size: 18),
+                      child: Icon(
+                        Icons.directions_car,
+                        size: 18,
+                        color: Colors.grey,
+                      ),
                     ),
                   );
                 },
               ),
             ),
           ),
-          const SizedBox(width: 10),
+          const SizedBox(width: 8),
         ],
-        // Provider avatar
+
+        // Provider avatar (second)
         CircleAvatar(
           radius: 20,
-          backgroundImage: providerAvatar.isNotEmpty ? NetworkImage(providerAvatar) : null,
+          backgroundImage: providerAvatar.isNotEmpty
+              ? NetworkImage(providerAvatar)
+              : null,
           child: providerAvatar.isEmpty ? const Icon(Icons.person) : null,
         ),
         const SizedBox(width: 12),
-        
+
         // Provider name + rating
         Expanded(
           child: Column(
@@ -309,7 +324,7 @@ class SlotCard extends StatelessWidget {
                   final avg = userReviews.isEmpty
                       ? 0.0
                       : userReviews.fold<double>(0, (s, r) => s + r.rating) /
-                          userReviews.length;
+                            userReviews.length;
                   return GestureDetector(
                     onTap: onRatingTap,
                     child: Row(
@@ -331,9 +346,11 @@ class SlotCard extends StatelessWidget {
                         if (userReviews.isNotEmpty) ...[
                           const SizedBox(width: 4),
                           Text(
-                            '(${userReviews.length})',
+                            '(${userReviews.length} ${userReviews.length == 1 ? 'rating' : 'ratings'})',
                             style: const TextStyle(
-                                fontSize: 12, color: Colors.grey),
+                              fontSize: 12,
+                              color: Colors.grey,
+                            ),
                           ),
                         ],
                       ],
@@ -351,11 +368,16 @@ class SlotCard extends StatelessWidget {
                 style: TextStyle(fontSize: 14, color: Colors.grey[700]),
               ),
               // Operator info
-              if (vehicle.operatorName != null && vehicle.operatorName!.isNotEmpty) ...[
+              if (vehicle.operatorName != null &&
+                  vehicle.operatorName!.isNotEmpty) ...[
                 const SizedBox(height: 4),
                 Row(
                   children: [
-                    Icon(Icons.person_outline, size: 12, color: Colors.blue[700]),
+                    Icon(
+                      Icons.person_outline,
+                      size: 12,
+                      color: Colors.blue[700],
+                    ),
                     const SizedBox(width: 4),
                     Text(
                       vehicle.operatorName!,
@@ -368,9 +390,13 @@ class SlotCard extends StatelessWidget {
                     if (vehicle.operatorGender != null) ...[
                       const SizedBox(width: 4),
                       Icon(
-                        vehicle.operatorGender == 'male' ? Icons.male : Icons.female,
+                        vehicle.operatorGender == 'male'
+                            ? Icons.male
+                            : Icons.female,
                         size: 12,
-                        color: vehicle.operatorGender == 'male' ? Colors.blue[700] : Colors.pink[700],
+                        color: vehicle.operatorGender == 'male'
+                            ? Colors.blue[700]
+                            : Colors.pink[700],
                       ),
                     ],
                   ],
@@ -379,9 +405,9 @@ class SlotCard extends StatelessWidget {
             ],
           ),
         ),
-        
+
         const SizedBox(width: 8),
-        
+
         // Post mode badges (stacked vertically)
         Column(
           crossAxisAlignment: CrossAxisAlignment.end,
@@ -392,7 +418,10 @@ class SlotCard extends StatelessWidget {
                 builder: (ctx) => GestureDetector(
                   onTap: () => _showEditHistoryDialog(ctx),
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
                     decoration: BoxDecoration(
                       color: Colors.grey.shade200,
                       borderRadius: BorderRadius.circular(12),
@@ -539,7 +568,11 @@ class SlotCard extends StatelessWidget {
                 _locationLine(from, fromGeo, coords: fromCoords),
                 const Padding(
                   padding: EdgeInsets.symmetric(vertical: 2),
-                  child: Icon(Icons.arrow_downward, size: 14, color: Colors.grey),
+                  child: Icon(
+                    Icons.arrow_downward,
+                    size: 14,
+                    color: Colors.grey,
+                  ),
                 ),
                 _locationLine(to, toGeo, coords: toCoords),
               ],
@@ -575,7 +608,11 @@ class SlotCard extends StatelessWidget {
     );
   }
 
-  Widget _locationLine(String label, String geoKeywords, {(double, double)? coords}) {
+  Widget _locationLine(
+    String label,
+    String geoKeywords, {
+    (double, double)? coords,
+  }) {
     final flag = geoKeywords.isNotEmpty ? _flagFromKeywords(geoKeywords) : '';
     final parts = geoKeywords.isNotEmpty ? geoKeywords.split(',') : <String>[];
     String geoLine = '';
@@ -594,7 +631,11 @@ class SlotCard extends StatelessWidget {
         children: [
           Text(
             flag.isNotEmpty ? '$flag  $label' : label,
-            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.black87),
+            style: const TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.bold,
+              color: Colors.black87,
+            ),
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
           ),
@@ -625,8 +666,10 @@ class SlotCard extends StatelessWidget {
     // Fallback: resolve from coords via reverse geocode (old slots without keywords)
     if (coords != null) {
       return FutureBuilder<GeoLocation?>(
-        future: LocationAutocompleteService.instance
-            .reverseGeocode(coords.$1, coords.$2),
+        future: LocationAutocompleteService.instance.reverseGeocode(
+          coords.$1,
+          coords.$2,
+        ),
         builder: (context, snap) {
           final geo = snap.data;
           final resolvedFlag = _flagFromCode(geo?.countryCode);
@@ -646,7 +689,11 @@ class SlotCard extends StatelessWidget {
             children: [
               Text(
                 resolvedFlag.isNotEmpty ? '$resolvedFlag  $label' : label,
-                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.black87),
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.black87,
+                ),
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
               ),
@@ -678,7 +725,11 @@ class SlotCard extends StatelessWidget {
 
     return Text(
       label,
-      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.black87),
+      style: const TextStyle(
+        fontSize: 14,
+        fontWeight: FontWeight.bold,
+        color: Colors.black87,
+      ),
       maxLines: 2,
       overflow: TextOverflow.ellipsis,
     );
@@ -695,10 +746,7 @@ class SlotCard extends StatelessWidget {
   Widget _buildPickupModeRow() {
     return Row(
       children: [
-        Text(
-          slot.pickupOption.icon,
-          style: const TextStyle(fontSize: 14),
-        ),
+        Text(slot.pickupOption.icon, style: const TextStyle(fontSize: 14)),
         const SizedBox(width: 6),
         Text(
           slot.pickupOption.shortLabel,
@@ -741,7 +789,11 @@ class SlotCard extends StatelessWidget {
         const SizedBox(width: 5),
         Text(
           label,
-          style: TextStyle(fontSize: 12, color: color, fontWeight: FontWeight.w500),
+          style: TextStyle(
+            fontSize: 12,
+            color: color,
+            fontWeight: FontWeight.w500,
+          ),
         ),
       ],
     );
@@ -752,7 +804,7 @@ class SlotCard extends StatelessWidget {
     final days = duration.inDays;
     final hours = duration.inHours % 24;
     final minutes = duration.inMinutes % 60;
-    
+
     String durationText;
     if (days > 0 && hours > 0) {
       durationText = '${days}d ${hours}h';
@@ -763,7 +815,7 @@ class SlotCard extends StatelessWidget {
     } else {
       durationText = '${minutes}m';
     }
-    
+
     final isValid = slot.endTime.isAfter(slot.startTime);
 
     // Extract coordinates from location strings for timezone lookup
@@ -795,7 +847,8 @@ class SlotCard extends StatelessWidget {
         toLng: toLng,
       ),
       builder: (context, snapshot) {
-        final timeText = snapshot.data ??
+        final timeText =
+            snapshot.data ??
             '${_formatTime(slot.startTime)} – ${_formatTime(slot.endTime)}';
         return Row(
           children: [
@@ -825,24 +878,22 @@ class SlotCard extends StatelessWidget {
     return ValueListenableBuilder<Map<String, int>>(
       valueListenable: BookingRepository.instance.remainingCapacityBySlotId,
       builder: (context, _, _) {
-        final remaining =
-            BookingRepository.instance.getRemainingCapacity(slot.id, slot.capacity);
+        final remaining = BookingRepository.instance.getRemainingCapacity(
+          slot.id,
+          slot.capacity,
+        );
 
         return Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            ValueListenableBuilder<String>(
-              valueListenable: AppPreferences.instance.currencyCode,
-              builder: (context, _, _) {
-                return Text(
-                  AppPreferences.instance.formatMoney(slot.price.toInt()),
-                  style: const TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.green,
-                  ),
-                );
-              },
+            // Use post-specific currency symbol instead of global currency
+            Text(
+              '${slot.currencySymbol}${slot.price.toStringAsFixed(0)}',
+              style: const TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+                color: Colors.green,
+              ),
             ),
             Row(
               children: [
@@ -850,10 +901,7 @@ class SlotCard extends StatelessWidget {
                 const SizedBox(width: 4),
                 Text(
                   _getCapacityText(remaining),
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: Colors.grey[600],
-                  ),
+                  style: TextStyle(fontSize: 14, color: Colors.grey[600]),
                 ),
               ],
             ),
@@ -913,10 +961,7 @@ class SlotCard extends StatelessWidget {
             ),
             child: Text(
               isOffer ? '👉 Book' : '👉 Accept',
-              style: const TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.bold,
-              ),
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
             ),
           ),
         ),
@@ -1036,7 +1081,7 @@ class SlotCard extends StatelessWidget {
     // Sort entries by timestamp - most recent first
     final sortedEntries = [...slot.editHistory.entries]
       ..sort((a, b) => b.timestamp.compareTo(a.timestamp));
-    
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -1089,6 +1134,3 @@ class SlotCard extends StatelessWidget {
     );
   }
 }
-
-
-

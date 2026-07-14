@@ -1,4 +1,3 @@
-
 import 'dart:async';
 import 'dart:math' as math;
 import 'dart:convert';
@@ -24,10 +23,12 @@ import 'models/slot_type.dart';
 import 'models/vehicle.dart';
 import 'models/pickup_mode.dart';
 import 'models/post_mode.dart';
-import 'models/booking.dart';
+import 'models/booking.dart' show Booking, BookingStatus, BookingStatusX;
+import 'models/booking.dart' as booking_types show BookingMode;
 import 'models/exceptions.dart';
 import 'models/review.dart';
 import 'config/supabase_config.dart';
+import 'widgets/payment_method_info.dart';
 import 'screens/slot_detail_screen.dart';
 import 'screens/vehicle/vehicle_list_screen.dart';
 import 'services/booking_repository.dart';
@@ -48,7 +49,6 @@ import 'widgets/review_dialog.dart';
 import 'services/profile_repository.dart';
 import 'services/profile_name_registry.dart';
 import 'services/app_preferences.dart';
-import 'services/dispute_service.dart';
 
 import 'services/passenger_repository.dart';
 import 'services/stripe_service.dart';
@@ -83,13 +83,13 @@ Map<String, double>? _extractLatLng(String? raw) {
   if (raw == null || raw.isEmpty) return null;
   final parts = raw.split('|');
   if (parts.length < 2) return null;
-  
+
   final coords = parts[1].split(',');
   if (coords.length != 2) return null;
-  
+
   final lat = double.tryParse(coords[0].trim());
   final lng = double.tryParse(coords[1].trim());
-  
+
   if (lat == null || lng == null) return null;
   return {'lat': lat, 'lng': lng};
 }
@@ -131,7 +131,7 @@ void main() async {
       if (kDebugMode) print('⚠️ Firebase unavailable: $e');
     }
   }
-  
+
   // Initialize AuthRepository immediately (splash screen needs it)
   if (kDebugMode) print('🔐 Initializing AuthRepository...');
   try {
@@ -140,11 +140,11 @@ void main() async {
   } catch (e) {
     if (kDebugMode) print('⚠️ AuthRepository init failed: $e');
   }
-  
+
   // Now start app - Firebase and Auth are ready
   if (kDebugMode) print('?? Starting app...');
   runApp(const MyApp());
-  
+
   // Initialize other services in background (non-blocking)
   _initializeServicesInBackground();
 }
@@ -153,7 +153,7 @@ void main() async {
 Future<void> _initializeServicesInBackground() async {
   try {
     if (kDebugMode) print('?? Starting background initialization...');
-    
+
     // Helper function to wrap repository inits with timeout
     Future<void> initWithTimeout(Future<void> future, String name) async {
       try {
@@ -161,7 +161,10 @@ Future<void> _initializeServicesInBackground() async {
         await future.timeout(
           const Duration(seconds: 30),
           onTimeout: () {
-            throw TimeoutException('$name initialization timed out', const Duration(seconds: 30));
+            throw TimeoutException(
+              '$name initialization timed out',
+              const Duration(seconds: 30),
+            );
           },
         );
         if (kDebugMode) print('? $name initialized');
@@ -170,9 +173,9 @@ Future<void> _initializeServicesInBackground() async {
         // Don't rethrow ? let app continue
       }
     }
-    
+
     // Firebase and AuthRepository are already initialized in main(), skip them here
-    
+
     // Check if running on web and warn about CORS
     if (kIsWeb) {
       if (kDebugMode) {
@@ -185,23 +188,27 @@ Future<void> _initializeServicesInBackground() async {
         print('?? -------------------------------------------------------');
       }
     }
-    
+
     // Initialize Supabase with Firebase JWT
     if (kDebugMode) print('? Starting Supabase...');
     try {
       await Supabase.initialize(
         url: SupabaseConfig.url,
-        anonKey: SupabaseConfig.anonKey,
+        publishableKey: SupabaseConfig.anonKey,
         accessToken: () async {
           final user = firebase_auth.FirebaseAuth.instance.currentUser;
           if (user == null) {
-            if (kDebugMode) print('?? No Firebase user - guest mode (using anon key)');
+            if (kDebugMode) {
+              print('?? No Firebase user - guest mode (using anon key)');
+            }
             return null; // Supabase will use anon key automatically
           }
           try {
             final token = await user.getIdToken(true);
             if (token == null || token.isEmpty) {
-              if (kDebugMode) print('?? Firebase token is empty - falling back to anon');
+              if (kDebugMode) {
+                print('?? Firebase token is empty - falling back to anon');
+              }
               return null;
             }
             if (kDebugMode) {
@@ -217,7 +224,10 @@ Future<void> _initializeServicesInBackground() async {
       ).timeout(
         const Duration(seconds: 10),
         onTimeout: () {
-          throw TimeoutException('Supabase initialization timed out', const Duration(seconds: 10));
+          throw TimeoutException(
+            'Supabase initialization timed out',
+            const Duration(seconds: 10),
+          );
         },
       );
       if (kDebugMode) print('? Supabase initialized');
@@ -228,7 +238,7 @@ Future<void> _initializeServicesInBackground() async {
 
     // Initialize core services with timeout protection (AuthRepository already done)
     await initWithTimeout(AppPreferences.instance.init(), 'AppPreferences');
-    
+
     // Initialize ProfileRepository with timeout protection (already had timeout)
     if (kDebugMode) print('? Starting ProfileRepository...');
     try {
@@ -236,35 +246,64 @@ Future<void> _initializeServicesInBackground() async {
         const Duration(seconds: 10), // Reduced from 30 to 10 seconds
         onTimeout: () {
           if (kDebugMode) print('? ProfileRepository init timed out');
-          throw TimeoutException('ProfileRepository initialization timed out', const Duration(seconds: 10));
-        },  
+          throw TimeoutException(
+            'ProfileRepository initialization timed out',
+            const Duration(seconds: 10),
+          );
+        },
       );
       if (kDebugMode) print('? ProfileRepository initialized');
     } catch (e) {
       if (kDebugMode) print('? ProfileRepository init failed: $e');
       // Continue with app initialization even if profile fails
     }
-    
+
     // Initialize all other repositories with timeout protection
     // CRITICAL: Load vehicles FIRST, then slots (slots need vehicles to build entries)
-    await initWithTimeout(VehicleRepository.instance.init(), 'VehicleRepository');
-    await initWithTimeout(CustomerVehicleRepository.instance.init(), 'CustomerVehicleRepository');
-    
+    await initWithTimeout(
+      VehicleRepository.instance.init(),
+      'VehicleRepository',
+    );
+    await initWithTimeout(
+      CustomerVehicleRepository.instance.init(),
+      'CustomerVehicleRepository',
+    );
+
     // Now load slots (they can find vehicles now)
     await initWithTimeout(SlotRepository.instance.init(), 'SlotRepository');
-    await initWithTimeout(CustomerSlotRepository.instance.init(), 'CustomerSlotRepository');
-    
+    await initWithTimeout(
+      CustomerSlotRepository.instance.init(),
+      'CustomerSlotRepository',
+    );
+
     // Load other repositories
-    await initWithTimeout(UserPostRepository.instance.init(), 'UserPostRepository');
-    await initWithTimeout(UserPostAcceptanceRepository.instance.init(), 'UserPostAcceptanceRepository');
-    await initWithTimeout(SeatLayoutRepository.instance.init(), 'SeatLayoutRepository');
-    await initWithTimeout(BookingRepository.instance.init(), 'BookingRepository');
-    await initWithTimeout(PassengerRepository.instance.init(), 'PassengerRepository');
+    await initWithTimeout(
+      UserPostRepository.instance.init(),
+      'UserPostRepository',
+    );
+    await initWithTimeout(
+      UserPostAcceptanceRepository.instance.init(),
+      'UserPostAcceptanceRepository',
+    );
+    await initWithTimeout(
+      SeatLayoutRepository.instance.init(),
+      'SeatLayoutRepository',
+    );
+    await initWithTimeout(
+      BookingRepository.instance.init(),
+      'BookingRepository',
+    );
+    await initWithTimeout(
+      PassengerRepository.instance.init(),
+      'PassengerRepository',
+    );
     await initWithTimeout(ReviewRepository.instance.init(), 'ReviewRepository');
-    
+
     // Force refresh slot entries after all data is loaded
     // This ensures slots find their vehicles even if there was a timing issue
-    if (kDebugMode) print('?? Refreshing slot entries after all data loaded...');
+    if (kDebugMode) {
+      print('?? Refreshing slot entries after all data loaded...');
+    }
     try {
       await SlotRepository.instance.loadSlots();
       await CustomerSlotRepository.instance.init(); // Reload to rebuild entries
@@ -278,19 +317,18 @@ Future<void> _initializeServicesInBackground() async {
       debugPrint('?? Supabase connection configured');
       debugPrint('?? URL: ${SupabaseConfig.url}');
       debugPrint('?? Auth: Firebase JWT ? Supabase RLS');
-      
+
       // Run backend connection tests
       await BackendConnectionTest.runAllTests();
     }
 
     // Initialize Stripe for payments with timeout
     await initWithTimeout(StripeService.instance.init(), 'StripeService');
-    
+
     // Initialize Voice AI service with timeout (this was the last call - likely culprit!)
     await initWithTimeout(VoiceAIService().initialize(), 'VoiceAIService');
-    
+
     if (kDebugMode) print('?? All services initialized successfully!');
-    
   } catch (e, stackTrace) {
     if (kDebugMode) {
       print('? Background initialization error: $e');
@@ -406,7 +444,6 @@ class _EditUserPostPageState extends State<EditUserPostPage> {
 
   Future<void> _save() async {
     if (_slotType == SlotType.fromTo) {
-
       if (_fromController.text.trim().isEmpty ||
           _toController.text.trim().isEmpty) {
         _showError('Please enter both from and to locations');
@@ -456,9 +493,9 @@ class _EditUserPostPageState extends State<EditUserPostPage> {
     try {
       await UserPostRepository.instance.update(updated);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Post updated')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Post updated')));
       Navigator.pop(context);
     } catch (e) {
       if (!mounted) return;
@@ -500,7 +537,9 @@ class _EditUserPostPageState extends State<EditUserPostPage> {
               border: OutlineInputBorder(),
             ),
             items: SlotType.values
-                .map((t) => DropdownMenuItem(value: t, child: Text(t.displayName)))
+                .map(
+                  (t) => DropdownMenuItem(value: t, child: Text(t.displayName)),
+                )
                 .toList(growable: false),
             onChanged: (v) {
               if (v == null) return;
@@ -974,11 +1013,7 @@ Future<void> _uploadDocument(
         .getPublicUrl(storagePath);
 
     // Save URL to profile
-    await ProfileRepository.instance.saveDocument(
-      documentType,
-      side,
-      url,
-    );
+    await ProfileRepository.instance.saveDocument(documentType, side, url);
 
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -999,6 +1034,37 @@ Future<void> _uploadDocument(
       );
     }
   }
+}
+
+// Helper function to get currency display based on connected payment provider
+String _getCurrencyDisplay(ProfileInfo profile) {
+  final provider = profile.paymentProvider;
+  final currency = profile.bankCurrency;
+
+  if (provider == 'razorpay') {
+    return '🇮🇳 INR - Indian Rupee';
+  } else if (provider == 'stripe') {
+    if (currency != null && currency.isNotEmpty) {
+      // Map currency codes to flag + name
+      final currencyMap = {
+        'INR': '🇮🇳 INR - Indian Rupee',
+        'USD': '🇺🇸 USD - US Dollar',
+        'GBP': '🇬🇧 GBP - British Pound',
+        'EUR': '🇪🇺 EUR - Euro',
+        'AED': '🇦🇪 AED - UAE Dirham',
+        'SGD': '🇸🇬 SGD - Singapore Dollar',
+        'AUD': '🇦🇺 AUD - Australian Dollar',
+        'CAD': '🇨🇦 CAD - Canadian Dollar',
+        'JPY': '🇯🇵 JPY - Japanese Yen',
+        'CNY': '🇨🇳 CNY - Chinese Yuan',
+        'HKD': '🇭🇰 HKD - Hong Kong Dollar',
+      };
+      return currencyMap[currency] ?? currency;
+    }
+    return 'Connect Stripe account to see currency';
+  }
+
+  return 'Not connected';
 }
 
 class MyApp extends StatelessWidget {
@@ -1110,7 +1176,9 @@ class PlansScreen extends StatelessWidget {
       // Try to fetch from database first
       return await PricingService.instance.getPricing(currency);
     } catch (e) {
-      debugPrint('[PlansScreen] Database fetch failed, using hardcoded fallback: $e');
+      debugPrint(
+        '[PlansScreen] Database fetch failed, using hardcoded fallback: $e',
+      );
       // Fallback to hardcoded pricing if database fails
       return _getHardcodedPricing(currency);
     }
@@ -1118,197 +1186,198 @@ class PlansScreen extends StatelessWidget {
 
   // Hardcoded pricing as fallback when database is unavailable
   // This ensures the app works even if Supabase is down
-  // 
+  //
   // IMPORTANT: Continents are for CODE ORGANIZATION only!
   // Actual pricing is determined by COUNTRY TIER (1, 2, or 3) based on:
   // - GDP per capita (purchasing power)
   // - Average income levels
   // - Digital service affordability
-  // 
+  //
   // TIER SYSTEM:
   // Tier 1 (High-income): Premium $12.99/month, Expert $59.99/month + $599 deposit
   //   - GDP per capita: $40,000+ USD
   //   - Examples: USA, UK, Japan, UAE, Australia (23 countries)
   //   - Affordability: 0.2%-0.5% of monthly income
-  // 
+  //
   // Tier 2 (Middle-income): Premium ₹999/month, Expert ₹4,999/month + ₹50,000 deposit
   //   - GDP per capita: $5,000-$20,000 USD
   //   - Reference: India pricing (₹999 = ~$12 equivalent purchasing power)
   //   - Examples: India, Brazil, Mexico, Poland, Thailand (29 countries)
   //   - Affordability: 2%-5% of monthly income
-  // 
+  //
   // Tier 3 (Lower-income): Premium ₹499/month, Expert ₹2,499/month + ₹25,000 deposit
   //   - GDP per capita: $1,000-$5,000 USD
   //   - 50% discount from Tier 2 for affordability
   //   - Examples: Pakistan, Bangladesh, Nigeria, Vietnam (50+ countries)
   //   - Affordability: 3%-8% of monthly income
-  // 
+  //
   // NOTE: Same continent can have different tiers!
   // Example: Europe has Tier 1 (Switzerland) and Tier 2 (Poland)
   // Example: Asia has Tier 1 (Japan), Tier 2 (India), Tier 3 (Pakistan)
   Map<String, dynamic> _getHardcodedPricing(String currency) {
     final curr = currency.toUpperCase();
-    
+
     // NORTH AMERICA
     final northAmerica = {
-      'USD': ['\$', 12.99, 59.99, 599, 1],        // United States - Tier 1
-      'CAD': ['C\$', 17.99, 83.99, 839, 1],       // Canada - Tier 1
-      'MXN': ['MX\$', 219, 1069, 10690, 2],       // Mexico - Tier 2
+      'USD': ['\$', 12.99, 59.99, 599, 1], // United States - Tier 1
+      'CAD': ['C\$', 17.99, 83.99, 839, 1], // Canada - Tier 1
+      'MXN': ['MX\$', 219, 1069, 10690, 2], // Mexico - Tier 2
     };
-    
+
     // SOUTH AMERICA
     final southAmerica = {
-      'BRL': ['R\$', 65, 319, 3190, 2],           // Brazil - Tier 2
-      'ARS': ['AR\$', 12000, 58800, 588000, 2],   // Argentina - Tier 2
-      'CLP': ['CLP\$', 11690, 57290, 572900, 2],  // Chile - Tier 2
+      'BRL': ['R\$', 65, 319, 3190, 2], // Brazil - Tier 2
+      'ARS': ['AR\$', 12000, 58800, 588000, 2], // Argentina - Tier 2
+      'CLP': ['CLP\$', 11690, 57290, 572900, 2], // Chile - Tier 2
       'COP': ['COL\$', 50400, 246900, 2469000, 2], // Colombia - Tier 2
-      'PEN': ['S/', 45, 220, 2200, 2],            // Peru - Tier 2
-      'UYU': ['UY\$', 504, 2469, 24690, 2],       // Uruguay - Tier 2
-      'BOB': ['Bs', 41, 205, 2050, 3],            // Bolivia - Tier 3
-      'PYG': ['₲', 44000, 220000, 2200000, 3],    // Paraguay - Tier 3
+      'PEN': ['S/', 45, 220, 2200, 2], // Peru - Tier 2
+      'UYU': ['UY\$', 504, 2469, 24690, 2], // Uruguay - Tier 2
+      'BOB': ['Bs', 41, 205, 2050, 3], // Bolivia - Tier 3
+      'PYG': ['₲', 44000, 220000, 2200000, 3], // Paraguay - Tier 3
     };
-    
+
     // EUROPE
     final europe = {
-      'EUR': ['€', 11.99, 54.99, 549, 1],         // Eurozone (27 countries) - Tier 1
-      'GBP': ['£', 10.99, 49.99, 499, 1],         // United Kingdom - Tier 1
-      'CHF': ['CHF ', 11.49, 52.99, 529, 1],      // Switzerland - Tier 1
-      'SEK': ['kr', 139, 644, 6440, 1],           // Sweden - Tier 1
-      'NOK': ['kr', 139, 644, 6440, 1],           // Norway - Tier 1
-      'DKK': ['kr', 89, 412, 4120, 1],            // Denmark - Tier 1
-      'ISK': ['kr', 1799, 8329, 83290, 1],        // Iceland - Tier 1
-      'PLN': ['zł', 49, 239, 2390, 2],            // Poland - Tier 2
-      'CZK': ['Kč', 279, 1369, 13690, 2],         // Czech Republic - Tier 2
-      'HUF': ['Ft', 4390, 21490, 214900, 2],      // Hungary - Tier 2
-      'RON': ['lei', 55, 269, 2690, 2],           // Romania - Tier 2
-      'BGN': ['лв', 21.99, 107.69, 1076, 2],      // Bulgaria - Tier 2
-      'HRK': ['kn', 82, 402, 4020, 2],            // Croatia - Tier 2
-      'RSD': ['дин', 1290, 6318, 63180, 2],       // Serbia - Tier 2
-      'UAH': ['₴', 494, 2419, 24190, 2],          // Ukraine - Tier 2
-      'RUB': ['₽', 1109, 5429, 54290, 2],         // Russia - Tier 2
+      'EUR': ['€', 11.99, 54.99, 549, 1], // Eurozone (27 countries) - Tier 1
+      'GBP': ['£', 10.99, 49.99, 499, 1], // United Kingdom - Tier 1
+      'CHF': ['CHF ', 11.49, 52.99, 529, 1], // Switzerland - Tier 1
+      'SEK': ['kr', 139, 644, 6440, 1], // Sweden - Tier 1
+      'NOK': ['kr', 139, 644, 6440, 1], // Norway - Tier 1
+      'DKK': ['kr', 89, 412, 4120, 1], // Denmark - Tier 1
+      'ISK': ['kr', 1799, 8329, 83290, 1], // Iceland - Tier 1
+      'PLN': ['zł', 49, 239, 2390, 2], // Poland - Tier 2
+      'CZK': ['Kč', 279, 1369, 13690, 2], // Czech Republic - Tier 2
+      'HUF': ['Ft', 4390, 21490, 214900, 2], // Hungary - Tier 2
+      'RON': ['lei', 55, 269, 2690, 2], // Romania - Tier 2
+      'BGN': ['лв', 21.99, 107.69, 1076, 2], // Bulgaria - Tier 2
+      'HRK': ['kn', 82, 402, 4020, 2], // Croatia - Tier 2
+      'RSD': ['дин', 1290, 6318, 63180, 2], // Serbia - Tier 2
+      'UAH': ['₴', 494, 2419, 24190, 2], // Ukraine - Tier 2
+      'RUB': ['₽', 1109, 5429, 54290, 2], // Russia - Tier 2
     };
-    
+
     // ASIA
     final asia = {
       // East Asia - Tier 1
-      'JPY': ['¥', 1899, 8799, 87990, 1],         // Japan
-      'KRW': ['₩', 17299, 80199, 801990, 1],      // South Korea
-      'TWD': ['NT\$', 412, 1908, 19080, 1],       // Taiwan
-      'HKD': ['HK\$', 101, 468, 4680, 1],         // Hong Kong
-      'SGD': ['S\$', 17.49, 80.99, 809, 1],       // Singapore
-      
+      'JPY': ['¥', 1899, 8799, 87990, 1], // Japan
+      'KRW': ['₩', 17299, 80199, 801990, 1], // South Korea
+      'TWD': ['NT\$', 412, 1908, 19080, 1], // Taiwan
+      'HKD': ['HK\$', 101, 468, 4680, 1], // Hong Kong
+      'SGD': ['S\$', 17.49, 80.99, 809, 1], // Singapore
       // South & Southeast Asia - Tier 2
-      'INR': ['₹', 999, 4999, 50000, 2],          // India
-      'CNY': ['¥', 87, 426, 4260, 2],             // China
-      'THB': ['฿', 429, 2099, 20990, 2],          // Thailand
-      'MYR': ['RM', 56, 274, 2740, 2],            // Malaysia
-      'IDR': ['Rp', 189000, 926000, 9260000, 2],  // Indonesia
-      'TRY': ['₺', 409, 2004, 20040, 2],          // Turkey
-      
+      'INR': ['₹', 999, 4999, 50000, 2], // India
+      'CNY': ['¥', 87, 426, 4260, 2], // China
+      'THB': ['฿', 429, 2099, 20990, 2], // Thailand
+      'MYR': ['RM', 56, 274, 2740, 2], // Malaysia
+      'IDR': ['Rp', 189000, 926000, 9260000, 2], // Indonesia
+      'TRY': ['₺', 409, 2004, 20040, 2], // Turkey
       // South & Southeast Asia - Tier 3
-      'PKR': ['Rs', 1665, 8325, 83250, 3],        // Pakistan
-      'BDT': ['৳', 660, 3300, 33000, 3],          // Bangladesh
-      'VND': ['₫', 149000, 745000, 7450000, 3],   // Vietnam
-      'PHP': ['₱', 335, 1675, 16750, 3],          // Philippines
-      'LKR': ['Rs', 1950, 9750, 97500, 3],        // Sri Lanka
-      'NPR': ['Rs', 795, 3975, 39750, 3],         // Nepal
-      'MMK': ['K', 12575, 62875, 628750, 3],      // Myanmar
-      'KHR': ['៛', 24500, 122500, 1225000, 3],    // Cambodia
-      'LAK': ['₭', 131000, 655000, 6550000, 3],   // Laos
-      
+      'PKR': ['Rs', 1665, 8325, 83250, 3], // Pakistan
+      'BDT': ['৳', 660, 3300, 33000, 3], // Bangladesh
+      'VND': ['₫', 149000, 745000, 7450000, 3], // Vietnam
+      'PHP': ['₱', 335, 1675, 16750, 3], // Philippines
+      'LKR': ['Rs', 1950, 9750, 97500, 3], // Sri Lanka
+      'NPR': ['Rs', 795, 3975, 39750, 3], // Nepal
+      'MMK': ['K', 12575, 62875, 628750, 3], // Myanmar
+      'KHR': ['៛', 24500, 122500, 1225000, 3], // Cambodia
+      'LAK': ['₭', 131000, 655000, 6550000, 3], // Laos
       // Central Asia - Tier 2 & 3
-      'KZT': ['₸', 5490, 26890, 268900, 2],       // Kazakhstan - Tier 2
-      'GEL': ['₾', 33, 161, 1610, 2],             // Georgia - Tier 2
-      'AMD': ['֏', 4640, 22740, 227400, 2],       // Armenia - Tier 2
-      'AZN': ['₼', 20.39, 99.89, 998, 2],         // Azerbaijan - Tier 2
+      'KZT': ['₸', 5490, 26890, 268900, 2], // Kazakhstan - Tier 2
+      'GEL': ['₾', 33, 161, 1610, 2], // Georgia - Tier 2
+      'AMD': ['֏', 4640, 22740, 227400, 2], // Armenia - Tier 2
+      'AZN': ['₼', 20.39, 99.89, 998, 2], // Azerbaijan - Tier 2
       'UZS': ['soʻm', 76000, 380000, 3800000, 3], // Uzbekistan - Tier 3
-      'TJS': ['ЅМ', 65, 325, 3250, 3],            // Tajikistan - Tier 3
-      'KGS': ['с', 520, 2600, 26000, 3],          // Kyrgyzstan - Tier 3
-      'AFN': ['؋', 425, 2125, 21250, 3],          // Afghanistan - Tier 3
+      'TJS': ['ЅМ', 65, 325, 3250, 3], // Tajikistan - Tier 3
+      'KGS': ['с', 520, 2600, 26000, 3], // Kyrgyzstan - Tier 3
+      'AFN': ['؋', 425, 2125, 21250, 3], // Afghanistan - Tier 3
     };
-    
+
     // MIDDLE EAST
     final middleEast = {
       // Gulf States - Tier 1
-      'AED': ['AED ', 47.69, 220.49, 2204, 1],    // UAE
-      'SAR': ['SAR ', 48.69, 224.99, 2249, 1],    // Saudi Arabia
-      'QAR': ['QAR ', 47.29, 218.49, 2184, 1],    // Qatar
-      'KWD': ['KWD ', 3.99, 18.49, 184, 1],       // Kuwait
-      'BHD': ['BHD ', 4.89, 22.59, 225, 1],       // Bahrain
-      'OMR': ['OMR ', 4.99, 23.09, 230, 1],       // Oman
-      'ILS': ['₪', 47.99, 221.99, 2219, 1],       // Israel
-      
+      'AED': ['AED ', 47.69, 220.49, 2204, 1], // UAE
+      'SAR': ['SAR ', 48.69, 224.99, 2249, 1], // Saudi Arabia
+      'QAR': ['QAR ', 47.29, 218.49, 2184, 1], // Qatar
+      'KWD': ['KWD ', 3.99, 18.49, 184, 1], // Kuwait
+      'BHD': ['BHD ', 4.89, 22.59, 225, 1], // Bahrain
+      'OMR': ['OMR ', 4.99, 23.09, 230, 1], // Oman
+      'ILS': ['₪', 47.99, 221.99, 2219, 1], // Israel
       // Other Middle East - Tier 2 & 3
-      'EGP': ['E£', 370, 1814, 18140, 2],         // Egypt - Tier 2
+      'EGP': ['E£', 370, 1814, 18140, 2], // Egypt - Tier 2
       'LBP': ['ل.ل', 535000, 2675000, 26750000, 3], // Lebanon - Tier 3
-      'IQD': ['ع.د', 7840, 39200, 392000, 3],     // Iraq - Tier 3
-      'JOD': ['د.ا', 4.25, 21.25, 212, 3],        // Jordan - Tier 3
-      'SYP': ['£S', 75500, 377500, 3775000, 3],   // Syria - Tier 3
-      'YER': ['﷼', 1500, 7500, 75000, 3],         // Yemen - Tier 3
+      'IQD': ['ع.د', 7840, 39200, 392000, 3], // Iraq - Tier 3
+      'JOD': ['د.ا', 4.25, 21.25, 212, 3], // Jordan - Tier 3
+      'SYP': ['£S', 75500, 377500, 3775000, 3], // Syria - Tier 3
+      'YER': ['﷼', 1500, 7500, 75000, 3], // Yemen - Tier 3
       'IRR': ['﷼', 252000, 1260000, 12600000, 3], // Iran - Tier 3
     };
-    
+
     // AFRICA
     final africa = {
       // North Africa
-      'ZAR': ['R', 219, 1074, 10740, 2],          // South Africa - Tier 2
-      'MAD': ['د.م.', 59, 295, 2950, 3],          // Morocco - Tier 3
-      'TND': ['د.ت', 18.50, 92.50, 925, 3],       // Tunisia - Tier 3
-      'DZD': ['د.ج', 805, 4025, 40250, 3],        // Algeria - Tier 3
-      'EGP': ['E£', 370, 1814, 18140, 2],         // Egypt - Tier 2
-      
+      'ZAR': ['R', 219, 1074, 10740, 2], // South Africa - Tier 2
+      'MAD': ['د.م.', 59, 295, 2950, 3], // Morocco - Tier 3
+      'TND': ['د.ت', 18.50, 92.50, 925, 3], // Tunisia - Tier 3
+      'DZD': ['د.ج', 805, 4025, 40250, 3], // Algeria - Tier 3
+      'EGP': ['E£', 370, 1814, 18140, 2], // Egypt - Tier 2
       // Sub-Saharan Africa
-      'NGN': ['₦', 9500, 47500, 475000, 3],       // Nigeria
-      'KES': ['KSh', 775, 3875, 38750, 3],        // Kenya
-      'GHS': ['GH₵', 95, 475, 4750, 3],           // Ghana
-      'TZS': ['TSh', 15000, 75000, 750000, 3],    // Tanzania
-      'UGX': ['USh', 22000, 110000, 1100000, 3],  // Uganda
-      'ETB': ['Br', 330, 1650, 16500, 3],         // Ethiopia
-      'RWF': ['FRw', 8200, 41000, 410000, 3],     // Rwanda
-      'MWK': ['MK', 10400, 52000, 520000, 3],     // Malawi
-      'ZMW': ['ZK', 165, 825, 8250, 3],           // Zambia
-      'AOA': ['Kz', 4950, 24750, 247500, 3],      // Angola
-      'MZN': ['MT', 382, 1910, 19100, 3],         // Mozambique
-      'SDG': ['ج.س.', 3600, 18000, 180000, 3],    // Sudan
-      'SSP': ['£', 7800, 39000, 390000, 3],       // South Sudan
-      'SOS': ['Sh', 3415, 17075, 170750, 3],      // Somalia
-      'DJF': ['Fdj', 1065, 5325, 53250, 3],       // Djibouti
-      'SLL': ['Le', 125000, 625000, 6250000, 3],  // Sierra Leone
-      'LRD': ['L\$', 1150, 5750, 57500, 3],       // Liberia
-      'GNF': ['FG', 51500, 257500, 2575000, 3],   // Guinea
-      'BIF': ['FBu', 17000, 85000, 850000, 3],    // Burundi
-      'MGA': ['Ar', 27000, 135000, 1350000, 3],   // Madagascar
-      'CDF': ['FC', 16500, 82500, 825000, 3],     // DR Congo
-      'XOF': ['CFA', 3600, 18000, 180000, 3],     // West African CFA (8 countries)
-      'XAF': ['FCFA', 3600, 18000, 180000, 3],    // Central African CFA (6 countries)
-      'MRU': ['UM', 238, 1190, 11900, 3],         // Mauritania
-      'GMD': ['D', 405, 2025, 20250, 3],          // Gambia
-      'CVE': ['Esc', 605, 3025, 30250, 3],        // Cape Verde
-      'STN': ['Db', 135, 675, 6750, 3],           // São Tomé and Príncipe
-      'MUR': ['₨', 275, 1375, 13750, 3],          // Mauritius
-      'SCR': ['₨', 81, 405, 4050, 3],             // Seychelles
-      'BWP': ['P', 82, 410, 4100, 3],             // Botswana
-      'SZL': ['L', 109, 545, 5450, 3],            // Eswatini
-      'LSL': ['L', 109, 545, 5450, 3],            // Lesotho
-      'NAD': ['N\$', 109, 545, 5450, 3],          // Namibia
+      'NGN': ['₦', 9500, 47500, 475000, 3], // Nigeria
+      'KES': ['KSh', 775, 3875, 38750, 3], // Kenya
+      'GHS': ['GH₵', 95, 475, 4750, 3], // Ghana
+      'TZS': ['TSh', 15000, 75000, 750000, 3], // Tanzania
+      'UGX': ['USh', 22000, 110000, 1100000, 3], // Uganda
+      'ETB': ['Br', 330, 1650, 16500, 3], // Ethiopia
+      'RWF': ['FRw', 8200, 41000, 410000, 3], // Rwanda
+      'MWK': ['MK', 10400, 52000, 520000, 3], // Malawi
+      'ZMW': ['ZK', 165, 825, 8250, 3], // Zambia
+      'AOA': ['Kz', 4950, 24750, 247500, 3], // Angola
+      'MZN': ['MT', 382, 1910, 19100, 3], // Mozambique
+      'SDG': ['ج.س.', 3600, 18000, 180000, 3], // Sudan
+      'SSP': ['£', 7800, 39000, 390000, 3], // South Sudan
+      'SOS': ['Sh', 3415, 17075, 170750, 3], // Somalia
+      'DJF': ['Fdj', 1065, 5325, 53250, 3], // Djibouti
+      'SLL': ['Le', 125000, 625000, 6250000, 3], // Sierra Leone
+      'LRD': ['L\$', 1150, 5750, 57500, 3], // Liberia
+      'GNF': ['FG', 51500, 257500, 2575000, 3], // Guinea
+      'BIF': ['FBu', 17000, 85000, 850000, 3], // Burundi
+      'MGA': ['Ar', 27000, 135000, 1350000, 3], // Madagascar
+      'CDF': ['FC', 16500, 82500, 825000, 3], // DR Congo
+      'XOF': ['CFA', 3600, 18000, 180000, 3], // West African CFA (8 countries)
+      'XAF': [
+        'FCFA',
+        3600,
+        18000,
+        180000,
+        3,
+      ], // Central African CFA (6 countries)
+      'MRU': ['UM', 238, 1190, 11900, 3], // Mauritania
+      'GMD': ['D', 405, 2025, 20250, 3], // Gambia
+      'CVE': ['Esc', 605, 3025, 30250, 3], // Cape Verde
+      'STN': ['Db', 135, 675, 6750, 3], // São Tomé and Príncipe
+      'MUR': ['₨', 275, 1375, 13750, 3], // Mauritius
+      'SCR': ['₨', 81, 405, 4050, 3], // Seychelles
+      'BWP': ['P', 82, 410, 4100, 3], // Botswana
+      'SZL': ['L', 109, 545, 5450, 3], // Eswatini
+      'LSL': ['L', 109, 545, 5450, 3], // Lesotho
+      'NAD': ['N\$', 109, 545, 5450, 3], // Namibia
     };
-    
+
     // OCEANIA
     final oceania = {
-      'AUD': ['A\$', 19.99, 92.99, 929, 1],       // Australia - Tier 1
-      'NZD': ['NZ\$', 21.99, 101.99, 1019, 1],    // New Zealand - Tier 1
+      'AUD': ['A\$', 19.99, 92.99, 929, 1], // Australia - Tier 1
+      'NZD': ['NZ\$', 21.99, 101.99, 1019, 1], // New Zealand - Tier 1
     };
-    
+
     // CENTRAL AMERICA & CARIBBEAN
     final centralAmericaCaribbean = {
-      'CRC': ['₡', 6120, 29988, 299880, 2],       // Costa Rica - Tier 2
-      'DOP': ['RD\$', 720, 3528, 35280, 2],       // Dominican Republic - Tier 2
-      'HTG': ['G', 790, 3950, 39500, 3],          // Haiti - Tier 3
-      'NIO': ['C\$', 220, 1100, 11000, 3],        // Nicaragua - Tier 3
-      'HNL': ['L', 150, 750, 7500, 3],            // Honduras - Tier 3
-      'GTQ': ['Q', 46, 230, 2300, 3],             // Guatemala - Tier 3
+      'CRC': ['₡', 6120, 29988, 299880, 2], // Costa Rica - Tier 2
+      'DOP': ['RD\$', 720, 3528, 35280, 2], // Dominican Republic - Tier 2
+      'HTG': ['G', 790, 3950, 39500, 3], // Haiti - Tier 3
+      'NIO': ['C\$', 220, 1100, 11000, 3], // Nicaragua - Tier 3
+      'HNL': ['L', 150, 750, 7500, 3], // Honduras - Tier 3
+      'GTQ': ['Q', 46, 230, 2300, 3], // Guatemala - Tier 3
     };
-    
+
     // Combine all continents
     final allPricing = {
       ...northAmerica,
@@ -1320,7 +1389,7 @@ class PlansScreen extends StatelessWidget {
       ...oceania,
       ...centralAmericaCaribbean,
     };
-    
+
     // Look up currency
     if (allPricing.containsKey(curr)) {
       final pricing = allPricing[curr]!;
@@ -1343,7 +1412,11 @@ class PlansScreen extends StatelessWidget {
     }
   }
 
-  Future<void> _purchasePlan(BuildContext context, SubscriptionPlan plan, double price) async {
+  Future<void> _purchasePlan(
+    BuildContext context,
+    SubscriptionPlan plan,
+    double price,
+  ) async {
     try {
       final currentUser = AuthRepository.instance.currentUser;
       if (currentUser == null) {
@@ -1361,17 +1434,50 @@ class PlansScreen extends StatelessWidget {
       showDialog(
         context: context,
         barrierDismissible: false,
-        builder: (context) => const Center(
-          child: CircularProgressIndicator(),
-        ),
+        builder: (context) => const Center(child: CircularProgressIndicator()),
       );
 
       // Get user details
       final profile = ProfileRepository.instance.profile.value;
-      final userName = profile.profileName.isEmpty ? 'User' : profile.profileName;
+      final userName = profile.profileName.isEmpty
+          ? 'User'
+          : profile.profileName;
       final userEmail = currentUser.email;
       final userPhone = profile.phone ?? '0000000000';
-      final currency = AppPreferences.instance.currencyCode.value;
+
+      // ✅ Determine currency based on selected payment gateway
+      // Razorpay only supports INR, Stripe supports multiple currencies
+      final paymentProvider = profile.paymentProvider;
+      final userCurrency = AppPreferences.instance.currencyCode.value;
+
+      // Check if user is trying to pay with Razorpay but currency is not INR
+      if (paymentProvider == 'razorpay' && userCurrency != 'INR') {
+        Navigator.pop(context); // Close loading dialog
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text(
+              'Razorpay only supports INR (₹). Please switch to Stripe payment gateway in Profile Settings for USD/other currencies, or change currency to INR in app settings.',
+            ),
+            backgroundColor: Colors.orange,
+            duration: const Duration(seconds: 6),
+            action: SnackBarAction(
+              label: 'Settings',
+              textColor: Colors.white,
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const ProfilePage()),
+                );
+              },
+            ),
+          ),
+        );
+        return;
+      }
+
+      final currency = paymentProvider == 'razorpay'
+          ? 'INR' // Force INR for Razorpay
+          : userCurrency; // Use preference for Stripe
 
       // Process payment via PaymentService
       final result = await PaymentService.instance.processSubscriptionPayment(
@@ -1447,173 +1553,259 @@ class PlansScreen extends StatelessWidget {
             builder: (context, snapshot) {
               // Show loading indicator while fetching
               if (snapshot.connectionState == ConnectionState.waiting) {
-                return const Center(
-                  child: CircularProgressIndicator(),
-                );
+                return const Center(child: CircularProgressIndicator());
               }
 
               // Use fetched pricing or fallback to default
-              final pricing = snapshot.data ?? {
-                'symbol': '\$',
-                'premium': 12.99,
-                'expert': 59.99,
-                'deposit': 599.0,
-                'tier': 1,
-              };
+              final pricing =
+                  snapshot.data ??
+                  {
+                    'symbol': '\$',
+                    'premium': 12.99,
+                    'expert': 59.99,
+                    'deposit': 599.0,
+                    'tier': 1,
+                  };
 
               final symbol = pricing['symbol'] as String;
               final premiumPrice = pricing['premium'] as double;
               final expertPrice = pricing['expert'] as double;
 
-          return ListView(
-            padding: const EdgeInsets.all(16),
-            children: [
-              ValueListenableBuilder<SubscriptionPlan>(
-                valueListenable: AppPreferences.instance.subscriptionPlan,
-                builder: (context, plan, _) {
-                  return Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        colors: [Colors.blue.shade400, Colors.blue.shade600],
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                      ),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Current Plan',
-                          style: TextStyle(
-                            color: Colors.white70,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          plan.name.toUpperCase(),
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 24,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ],
-                    ),
-                  );
-                },
-              ),
-              const SizedBox(height: 24),
-              Row(
+              return ListView(
+                padding: const EdgeInsets.all(16),
                 children: [
-                  const Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Upgrade Your Experience',
-                          style: TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        SizedBox(height: 4),
-                        Text(
-                          'Choose a plan that fits your needs',
-                          style: TextStyle(
-                            color: Colors.grey,
-                            fontSize: 14,
-                          ),
-                        ),
-                      ],
-                    ),
+                  ValueListenableBuilder<SubscriptionPlan>(
+                    valueListenable: AppPreferences.instance.subscriptionPlan,
+                    builder: (context, plan, _) {
+                      return ValueListenableBuilder<DateTime?>(
+                        valueListenable:
+                            AppPreferences.instance.subscriptionExpiry,
+                        builder: (context, expiry, _) {
+                          // Calculate remaining time
+                          Duration? remaining;
+                          String? countdownText;
+                          if (expiry != null &&
+                              plan != SubscriptionPlan.basic) {
+                            remaining = expiry.difference(DateTime.now());
+                            if (remaining.isNegative) {
+                              countdownText = 'Expired';
+                            } else {
+                              final days = remaining.inDays;
+                              final hours = remaining.inHours % 24;
+                              if (days > 0) {
+                                countdownText = '$days days, $hours hours';
+                              } else {
+                                final minutes = remaining.inMinutes % 60;
+                                countdownText =
+                                    '$hours hours, $minutes minutes';
+                              }
+                            }
+                          }
+
+                          return Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.all(16),
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                colors: [
+                                  Colors.blue.shade400,
+                                  Colors.blue.shade600,
+                                ],
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                              ),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text(
+                                  'Current Plan',
+                                  style: TextStyle(
+                                    color: Colors.white70,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  plan.name.toUpperCase(),
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 24,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                if (countdownText != null) ...[
+                                  const SizedBox(height: 8),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 12,
+                                      vertical: 6,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: remaining!.isNegative
+                                          ? Colors.red.withValues(alpha: 0.3)
+                                          : Colors.white.withValues(alpha: 0.2),
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(
+                                          remaining.isNegative
+                                              ? Icons.error_outline
+                                              : Icons.access_time,
+                                          color: Colors.white,
+                                          size: 16,
+                                        ),
+                                        const SizedBox(width: 6),
+                                        Text(
+                                          remaining.isNegative
+                                              ? 'Plan Expired'
+                                              : 'Expires in: $countdownText',
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 13,
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          );
+                        },
+                      );
+                    },
                   ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: Colors.blue.withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: Colors.blue, width: 1),
-                    ),
-                    child: Text(
-                      'Currency: $currency',
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.blue.shade700,
+                  const SizedBox(height: 24),
+                  Row(
+                    children: [
+                      const Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Upgrade Your Experience',
+                              style: TextStyle(
+                                fontSize: 20,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            SizedBox(height: 4),
+                            Text(
+                              'Choose a plan that fits your needs',
+                              style: TextStyle(
+                                color: Colors.grey,
+                                fontSize: 14,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 6,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.blue.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.blue, width: 1),
+                        ),
+                        child: Text(
+                          'Currency: $currency',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.blue.shade700,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Payment Method Guide - Show before plan selection
+                  PaymentMethodInfo(
+                    currency: currency,
+                    amount: premiumPrice, // Use Premium plan price as reference
+                    showDetailed: true,
+                  ),
+                  const SizedBox(height: 16),
+
+                  _PlanCard(
+                    title: 'Basic',
+                    priceLabel: 'FREE',
+                    price: 0,
+                    currencySymbol: symbol,
+                    bullets: const [
+                      'Add images to vehicle',
+                      'Post requests & book trips',
+                      'Standard support',
+                      'Basic features access',
+                    ],
+                    isRecommended: false,
+                    onSelect: () async {
+                      await AppPreferences.instance.setSubscriptionPlan(
+                        SubscriptionPlan.basic,
+                      );
+                      if (!context.mounted) return;
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Basic plan selected'),
+                          backgroundColor: Colors.green,
+                        ),
+                      );
+                      Navigator.pop(context);
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                  _PlanCard(
+                    title: 'Premium',
+                    priceLabel:
+                        '$symbol${premiumPrice.toStringAsFixed(2)}/month',
+                    price: premiumPrice,
+                    currencySymbol: symbol,
+                    bullets: const [
+                      'Everything in Basic',
+                      'Verify PAN / Aadhaar',
+                      'Verify RC / Driving License',
+                      'Priority listing',
+                      'Advanced analytics',
+                    ],
+                    isRecommended: true,
+                    onSelect: () => _purchasePlan(
+                      context,
+                      SubscriptionPlan.premium,
+                      premiumPrice,
                     ),
                   ),
+                  const SizedBox(height: 12),
+                  _PlanCard(
+                    title: 'Expert',
+                    priceLabel:
+                        '$symbol${expertPrice.toStringAsFixed(2)}/month',
+                    price: expertPrice,
+                    currencySymbol: symbol,
+                    depositAmount: pricing['deposit'] as double,
+                    bullets: const [
+                      'Everything in Premium',
+                      'Expert connection badge',
+                      'Priority customer support',
+                      'Featured listings',
+                      'Dedicated account manager',
+                      'Refundable deposit (returned after 12 months)',
+                    ],
+                    isRecommended: false,
+                    isComingSoon: true,
+                    onSelect: null,
+                  ),
                 ],
-              ),
-              const SizedBox(height: 16),
-              _PlanCard(
-                title: 'Basic',
-                priceLabel: 'FREE',
-                price: 0,
-                currencySymbol: symbol,
-                bullets: const [
-                  'Add images to vehicle',
-                  'Post requests & book trips',
-                  'Standard support',
-                  'Basic features access',
-                ],
-                isRecommended: false,
-                onSelect: () async {
-                  await AppPreferences.instance.setSubscriptionPlan(
-                    SubscriptionPlan.basic,
-                  );
-                  if (!context.mounted) return;
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Basic plan selected'),
-                      backgroundColor: Colors.green,
-                    ),
-                  );
-                  Navigator.pop(context);
-                },
-              ),
-            const SizedBox(height: 12),
-            _PlanCard(
-              title: 'Premium',
-              priceLabel: '$symbol${premiumPrice.toStringAsFixed(2)}/month',
-              price: premiumPrice,
-              currencySymbol: symbol,
-              bullets: const [
-                'Everything in Basic',
-                'Verify PAN / Aadhaar',
-                'Verify RC / Driving License',
-                'Priority listing',
-                'Advanced analytics',
-              ],
-              isRecommended: true,
-              onSelect: () => _purchasePlan(context, SubscriptionPlan.premium, premiumPrice),
-            ),
-            const SizedBox(height: 12),
-            _PlanCard(
-              title: 'Expert',
-              priceLabel: '$symbol${expertPrice.toStringAsFixed(2)}/month',
-              price: expertPrice,
-              currencySymbol: symbol,
-              depositAmount: pricing['deposit'] as double,
-              bullets: const [
-                'Everything in Premium',
-                'Expert connection badge',
-                'Priority customer support',
-                'Featured listings',
-                'Dedicated account manager',
-                'Refundable deposit (returned after 12 months)',
-              ],
-              isRecommended: false,
-              isComingSoon: true,
-              onSelect: null,
-            ),
-          ],
-        );
+              );
             }, // End of FutureBuilder builder
           ); // End of FutureBuilder
         },
@@ -1667,15 +1859,15 @@ class _PlanCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = isComingSoon 
-        ? Colors.orange 
+    final color = isComingSoon
+        ? Colors.orange
         : (isRecommended ? Colors.blue : Colors.grey);
-    
+
     return Card(
       elevation: isRecommended ? 8 : 2,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
-        side: isRecommended 
+        side: isRecommended
             ? BorderSide(color: Colors.blue, width: 2)
             : BorderSide.none,
       ),
@@ -1809,19 +2001,12 @@ class _PlanCard extends StatelessWidget {
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Icon(
-                        Icons.check_circle,
-                        size: 20,
-                        color: color,
-                      ),
+                      Icon(Icons.check_circle, size: 20, color: color),
                       const SizedBox(width: 12),
                       Expanded(
                         child: Text(
                           b,
-                          style: const TextStyle(
-                            fontSize: 14,
-                            height: 1.4,
-                          ),
+                          style: const TextStyle(fontSize: 14, height: 1.4),
                         ),
                       ),
                     ],
@@ -1836,10 +2021,10 @@ class _PlanCard extends StatelessWidget {
                 child: FilledButton(
                   onPressed: isComingSoon ? null : onSelect,
                   style: FilledButton.styleFrom(
-                    backgroundColor: isComingSoon 
+                    backgroundColor: isComingSoon
                         ? Colors.grey[300]
                         : (isRecommended ? Colors.blue : null),
-                    foregroundColor: isComingSoon 
+                    foregroundColor: isComingSoon
                         ? Colors.grey[600]
                         : Colors.white,
                     shape: RoundedRectangleBorder(
@@ -1847,8 +2032,8 @@ class _PlanCard extends StatelessWidget {
                     ),
                   ),
                   child: Text(
-                    isComingSoon 
-                        ? 'Coming Soon' 
+                    isComingSoon
+                        ? 'Coming Soon'
                         : (price == 0 ? 'Select Free Plan' : 'Upgrade Now'),
                     style: const TextStyle(
                       fontSize: 16,
@@ -1862,10 +2047,7 @@ class _PlanCard extends StatelessWidget {
                 Center(
                   child: Text(
                     'Secure payment via Razorpay/Stripe',
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: Colors.grey[600],
-                    ),
+                    style: TextStyle(fontSize: 11, color: Colors.grey[600]),
                   ),
                 ),
               ],
@@ -1891,7 +2073,9 @@ String? _extractCoordsFromLocation(String? raw) {
   return null;
 }
 
-Future<void> _openExternalMapForSlot(BuildContext context, Slot slot, {
+Future<void> _openExternalMapForSlot(
+  BuildContext context,
+  Slot slot, {
   double? vehicleLat,
   double? vehicleLng,
   double? userLat,
@@ -1924,30 +2108,42 @@ Future<void> _openExternalMapForSlot(BuildContext context, Slot slot, {
     return;
   }
 
-  // Build multi-stop URL: google.com/maps/dir/lat,lng/lat,lng/lat,lng/
-  final segments = <String>[];
-  if (originCoords != null) segments.add(originCoords);
-  if (vehicleLat != null && vehicleLng != null) segments.add('$vehicleLat,$vehicleLng');
-  if (userLat != null && userLng != null) segments.add('$userLat,$userLng');
-  if (destCoords != null) segments.add(destCoords);
+  // Build multi-stop URL using OpenStreetMap (free, no API key needed)
+  // OpenStreetMap directions: https://www.openstreetmap.org/directions?route=lat1,lng1;lat2,lng2
+  final waypoints = <String>[];
+  if (originCoords != null) {
+    final parts = originCoords.split(',');
+    if (parts.length == 2) waypoints.add('${parts[0]},${parts[1]}');
+  }
+  if (vehicleLat != null && vehicleLng != null) {
+    waypoints.add('$vehicleLat,$vehicleLng');
+  }
+  if (userLat != null && userLng != null) waypoints.add('$userLat,$userLng');
+  if (destCoords != null) {
+    final parts = destCoords.split(',');
+    if (parts.length == 2) waypoints.add('${parts[0]},${parts[1]}');
+  }
 
-  final uri = Uri.parse('https://www.google.com/maps/dir/${segments.join('/')}');
+  final uri = Uri.parse(
+    'https://www.openstreetmap.org/directions?route=${waypoints.join(';')}',
+  );
   final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
   if (!ok && context.mounted) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Could not open maps')),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Could not open maps')));
   }
 }
 
-// Open Google Maps with lat/lng coordinates
+// Open OpenStreetMap with lat/lng coordinates (free, no API key needed)
 Future<void> _openGoogleMapsLatLng(
   BuildContext context,
   double lat,
   double lng,
 ) async {
+  // OpenStreetMap viewer: zoom level 17 is good for local area
   final uri = Uri.parse(
-    'https://www.google.com/maps/search/?api=1&query=$lat,$lng',
+    'https://www.openstreetmap.org/?mlat=$lat&mlon=$lng#map=17/$lat/$lng',
   );
 
   final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
@@ -2083,6 +2279,101 @@ class _CreateUserPostPageState extends State<CreateUserPostPage> {
       return;
     }
 
+    // Show payment confirmation dialog
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Escrow Payment Required'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'To create this post, you need to pay ${AppPreferences.instance.currencySymbol}${budget.toStringAsFixed(2)} as escrow.',
+              style: const TextStyle(fontSize: 16),
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              'This amount will be:',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            const Text('• Held securely until service completion'),
+            const Text('• Released to provider after successful service'),
+            const Text('• Refunded to you if post is cancelled'),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Pay & Post'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    // Show loading
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Processing payment...'),
+          duration: Duration(seconds: 30),
+        ),
+      );
+    }
+
+    // Process escrow payment
+    String? paymentId;
+    try {
+      final profile = ProfileRepository.instance.profile.value;
+      final prefs = AppPreferences.instance;
+      final currency = prefs.currencyCode.value;
+      final countryCode = currency == 'INR'
+          ? 'IN'
+          : 'US'; // Derive country from currency
+
+      final paymentResult = await PaymentService.instance.processPayment(
+        amountInPaise: (budget * 100).toInt(),
+        currency: currency,
+        countryCode: countryCode,
+        providerId: 'escrow',
+        slotId: 'user_post_${DateTime.now().microsecondsSinceEpoch}',
+        userName: profile.profileName.isNotEmpty ? profile.profileName : 'User',
+        userEmail: currentUser.email,
+        userPhone: profile.phone ?? '',
+        description: 'Escrow for ${_serviceType.displayName} post',
+        commissionAmount: 0,
+      );
+
+      if (paymentResult == null || paymentResult['error'] != null) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).clearSnackBars();
+        _showError(
+          'Payment cancelled or failed: ${paymentResult?['error'] ?? 'Unknown error'}',
+        );
+        return;
+      }
+
+      paymentId = paymentResult['payment_id'] as String?;
+      if (paymentId == null) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).clearSnackBars();
+        _showError('Payment ID not received');
+        return;
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).clearSnackBars();
+      _showError('Payment failed: $e');
+      return;
+    }
+
     final post = UserPost(
       id: DateTime.now().microsecondsSinceEpoch.toString(),
       userId: currentUser.id,
@@ -2124,18 +2415,26 @@ class _CreateUserPostPageState extends State<CreateUserPostPage> {
       parcelHeight: _serviceType == ServiceType.parcel
           ? double.tryParse(_parcelHeightController.text.trim())
           : null,
+      escrowPaymentId: paymentId,
     );
 
     try {
       await UserPostRepository.instance.add(post);
       if (!mounted) return;
+      ScaffoldMessenger.of(context).clearSnackBars();
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Posted ')),
+        const SnackBar(
+          content: Text('✅ Post created with escrow payment'),
+          backgroundColor: Colors.green,
+        ),
       );
       Navigator.pop(context);
     } catch (e) {
       if (!mounted) return;
-      _showError('Failed to post: $e');
+      ScaffoldMessenger.of(context).clearSnackBars();
+      _showError(
+        'Failed to create post: $e\n\nPayment was processed. Contact support with payment ID: $paymentId',
+      );
     }
   }
 
@@ -2173,7 +2472,9 @@ class _CreateUserPostPageState extends State<CreateUserPostPage> {
               border: OutlineInputBorder(),
             ),
             items: SlotType.values
-                .map((t) => DropdownMenuItem(value: t, child: Text(t.displayName)))
+                .map(
+                  (t) => DropdownMenuItem(value: t, child: Text(t.displayName)),
+                )
                 .toList(growable: false),
             onChanged: (v) {
               if (v == null) return;
@@ -2289,7 +2590,9 @@ class _CreateUserPostPageState extends State<CreateUserPostPage> {
                 Expanded(
                   child: TextField(
                     controller: _parcelWeightController,
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
                     decoration: const InputDecoration(
                       labelText: 'Weight (kg)',
                       border: OutlineInputBorder(),
@@ -2300,7 +2603,9 @@ class _CreateUserPostPageState extends State<CreateUserPostPage> {
                 Expanded(
                   child: TextField(
                     controller: _parcelLengthController,
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
                     decoration: const InputDecoration(
                       labelText: 'Length (cm)',
                       border: OutlineInputBorder(),
@@ -2315,7 +2620,9 @@ class _CreateUserPostPageState extends State<CreateUserPostPage> {
                 Expanded(
                   child: TextField(
                     controller: _parcelWidthController,
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
                     decoration: const InputDecoration(
                       labelText: 'Width (cm)',
                       border: OutlineInputBorder(),
@@ -2326,7 +2633,9 @@ class _CreateUserPostPageState extends State<CreateUserPostPage> {
                 Expanded(
                   child: TextField(
                     controller: _parcelHeightController,
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
                     decoration: const InputDecoration(
                       labelText: 'Height (cm)',
                       border: OutlineInputBorder(),
@@ -2415,7 +2724,8 @@ class UserMyPostsPage extends StatelessWidget {
                       Text(_userPostTime(p)),
                       const SizedBox(height: 4),
                       Text('Budget: ()'),
-                      if (p.requiresVerifiedVehicle || p.requiresExpertVehicle) ...[
+                      if (p.requiresVerifiedVehicle ||
+                          p.requiresExpertVehicle) ...[
                         const SizedBox(height: 6),
                         Wrap(
                           spacing: 8,
@@ -2471,9 +2781,7 @@ class UserMyPostsPage extends StatelessWidget {
                                 if (!context.mounted) return;
                                 ScaffoldMessenger.of(context).showSnackBar(
                                   SnackBar(
-                                    content: Text(
-                                      'Failed to update: $e',
-                                    ),
+                                    content: Text('Failed to update: $e'),
                                   ),
                                 );
                               }
@@ -2509,7 +2817,9 @@ class UserMyPostsPage extends StatelessWidget {
                                   ),
                                   TextButton(
                                     onPressed: () => Navigator.pop(ctx, true),
-                                    style: TextButton.styleFrom(foregroundColor: Colors.red),
+                                    style: TextButton.styleFrom(
+                                      foregroundColor: Colors.red,
+                                    ),
                                     child: const Text('Delete'),
                                   ),
                                 ],
@@ -2532,11 +2842,14 @@ class UserMyPostsPage extends StatelessWidget {
                                 context: context,
                                 builder: (ctx) => AlertDialog(
                                   shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(16)),
+                                    borderRadius: BorderRadius.circular(16),
+                                  ),
                                   title: Row(
                                     children: [
-                                      Icon(Icons.lock_outline,
-                                          color: Colors.orange[700]),
+                                      Icon(
+                                        Icons.lock_outline,
+                                        color: Colors.orange[700],
+                                      ),
                                       const SizedBox(width: 8),
                                       const Text('Cannot Delete Post'),
                                     ],
@@ -2556,39 +2869,46 @@ class UserMyPostsPage extends StatelessWidget {
                                         padding: const EdgeInsets.all(10),
                                         decoration: BoxDecoration(
                                           color: Colors.orange.shade50,
-                                          borderRadius:
-                                              BorderRadius.circular(8),
+                                          borderRadius: BorderRadius.circular(
+                                            8,
+                                          ),
                                           border: Border.all(
-                                              color: Colors.orange.shade200),
+                                            color: Colors.orange.shade200,
+                                          ),
                                         ),
                                         child: const Column(
                                           crossAxisAlignment:
                                               CrossAxisAlignment.start,
                                           children: [
                                             Text(
-                                                'Active = pending, accepted, confirmed, in_progress',
-                                                style: TextStyle(
-                                                    fontWeight: FontWeight.bold,
-                                                    fontSize: 12,
-                                                    color: Colors.deepOrange)),
+                                              'Active = pending, accepted, confirmed, in_progress',
+                                              style: TextStyle(
+                                                fontWeight: FontWeight.bold,
+                                                fontSize: 12,
+                                                color: Colors.deepOrange,
+                                              ),
+                                            ),
                                             SizedBox(height: 8),
-                                            Text('You can instead:',
-                                                style: TextStyle(
-                                                    fontWeight: FontWeight.bold,
-                                                    fontSize: 13)),
+                                            Text(
+                                              'You can instead:',
+                                              style: TextStyle(
+                                                fontWeight: FontWeight.bold,
+                                                fontSize: 13,
+                                              ),
+                                            ),
                                             SizedBox(height: 4),
                                             Text(
-                                                '? Mark post inactive ? stops new bookings',
-                                                style:
-                                                    TextStyle(fontSize: 13)),
+                                              '? Mark post inactive ? stops new bookings',
+                                              style: TextStyle(fontSize: 13),
+                                            ),
                                             Text(
-                                                '? Wait for active bookings to complete',
-                                                style:
-                                                    TextStyle(fontSize: 13)),
+                                              '? Wait for active bookings to complete',
+                                              style: TextStyle(fontSize: 13),
+                                            ),
                                             Text(
-                                                '? Cancel/refund active bookings first',
-                                                style:
-                                                    TextStyle(fontSize: 13)),
+                                              '? Cancel/refund active bookings first',
+                                              style: TextStyle(fontSize: 13),
+                                            ),
                                           ],
                                         ),
                                       ),
@@ -2607,7 +2927,8 @@ class UserMyPostsPage extends StatelessWidget {
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(
                                   content: Text(
-                                      'Failed to delete: ${e.toString().split('\n').first}'),
+                                    'Failed to delete: ${e.toString().split('\n').first}',
+                                  ),
                                   backgroundColor: Colors.red,
                                 ),
                               );
@@ -2802,18 +3123,26 @@ class MyPostsPage extends StatelessWidget {
                       // Show lat/lng if available
                       Builder(
                         builder: (context) {
-                          final location = slot.baseLocation ?? slot.fromLocation;
+                          final location =
+                              slot.baseLocation ?? slot.fromLocation;
                           final coords = _extractLatLng(location);
                           if (coords != null) {
                             return Padding(
                               padding: const EdgeInsets.only(top: 4),
                               child: Row(
                                 children: [
-                                  Icon(Icons.location_on, size: 12, color: Colors.grey[600]),
+                                  Icon(
+                                    Icons.location_on,
+                                    size: 12,
+                                    color: Colors.grey[600],
+                                  ),
                                   const SizedBox(width: 4),
                                   Text(
                                     'Lat: ${coords['lat']!.toStringAsFixed(6)}, Lng: ${coords['lng']!.toStringAsFixed(6)}',
-                                    style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: Colors.grey[600],
+                                    ),
                                   ),
                                 ],
                               ),
@@ -2863,7 +3192,10 @@ class MyPostsPage extends StatelessWidget {
 
   String _fmtRange(DateTime start, DateTime end) {
     // Format: 26/1 09:30 IST
-    return TimezoneUtils.formatShortDateTimeWithTimezone(start, show24Hour: true);
+    return TimezoneUtils.formatShortDateTimeWithTimezone(
+      start,
+      show24Hour: true,
+    );
   }
 
   String _serviceLabel(ServiceType type) {
@@ -2908,17 +3240,19 @@ class _EarningsPageState extends State<EarningsPage> {
           final providerBookings = allBookings
               .where((b) => b.providerId == currentUser.id)
               .toList();
-          
+
           // Separate completed vs pending
           final completedBookings = providerBookings
               .where((b) => b.status == BookingStatus.completed)
               .toList();
           final pendingBookings = providerBookings
-              .where((b) => 
-                  b.status == BookingStatus.pending ||
-                  b.status == BookingStatus.accepted ||
-                  b.status == BookingStatus.confirmed ||
-                  b.status == BookingStatus.inProgress)
+              .where(
+                (b) =>
+                    b.status == BookingStatus.pending ||
+                    b.status == BookingStatus.accepted ||
+                    b.status == BookingStatus.confirmed ||
+                    b.status == BookingStatus.inProgress,
+              )
               .toList();
 
           // Calculate total earnings (completed only for accurate earnings)
@@ -2926,7 +3260,7 @@ class _EarningsPageState extends State<EarningsPage> {
             0,
             (sum, booking) => sum + booking.price,
           );
-          
+
           // Calculate expected earnings (pending + completed)
           final expectedEarnings = providerBookings.fold<double>(
             0,
@@ -2993,7 +3327,10 @@ class _EarningsPageState extends State<EarningsPage> {
                       if (pendingBookings.isNotEmpty) ...[
                         const SizedBox(height: 8),
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 6,
+                          ),
                           decoration: BoxDecoration(
                             color: Colors.orange.shade100,
                             borderRadius: BorderRadius.circular(20),
@@ -3131,7 +3468,11 @@ class _EarningsPageState extends State<EarningsPage> {
               children: [
                 CircleAvatar(
                   backgroundColor: Colors.green.withValues(alpha: 0.1),
-                  child: const Icon(Icons.check_circle, color: Colors.green, size: 20),
+                  child: const Icon(
+                    Icons.check_circle,
+                    color: Colors.green,
+                    size: 20,
+                  ),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -3139,12 +3480,17 @@ class _EarningsPageState extends State<EarningsPage> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        slot != null ? '${slot.serviceType.displayName} Service' : 'Service',
+                        slot != null
+                            ? '${slot.serviceType.displayName} Service'
+                            : 'Service',
                         style: const TextStyle(fontWeight: FontWeight.w500),
                       ),
                       Text(
                         '${booking.createdAt.day}/${booking.createdAt.month}/${booking.createdAt.year}',
-                        style: const TextStyle(fontSize: 12, color: Colors.grey),
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey,
+                        ),
                       ),
                     ],
                   ),
@@ -3296,7 +3642,7 @@ class SettingsPage extends StatelessWidget {
                     onTap: () {
                       final currentUser = AuthRepository.instance.currentUser;
                       if (currentUser == null) return;
-                      
+
                       Navigator.push(
                         context,
                         MaterialPageRoute(
@@ -3325,7 +3671,7 @@ class SettingsPage extends StatelessWidget {
                   StatefulBuilder(
                     builder: (context, setState) {
                       String? nameError;
-                      
+
                       return TextField(
                         controller: nameController,
                         decoration: InputDecoration(
@@ -3336,14 +3682,16 @@ class SettingsPage extends StatelessWidget {
                               ? null
                               : FutureBuilder<bool>(
                                   future: () async {
-                                    final currentUser = AuthRepository.instance.currentUser;
+                                    final currentUser =
+                                        AuthRepository.instance.currentUser;
                                     if (currentUser == null) return true;
-                                    
+
                                     await ProfileNameRegistry.instance.init();
-                                    return ProfileNameRegistry.instance.isNameAvailable(
-                                      nameController.text.trim(),
-                                      currentUserId: currentUser.id,
-                                    );
+                                    return ProfileNameRegistry.instance
+                                        .isNameAvailable(
+                                          nameController.text.trim(),
+                                          currentUserId: currentUser.id,
+                                        );
                                   }(),
                                   builder: (context, snapshot) {
                                     if (!snapshot.hasData) {
@@ -3352,15 +3700,21 @@ class SettingsPage extends StatelessWidget {
                                         child: SizedBox(
                                           width: 16,
                                           height: 16,
-                                          child: CircularProgressIndicator(strokeWidth: 2),
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                          ),
                                         ),
                                       );
                                     }
-                                    
+
                                     final isAvailable = snapshot.data!;
                                     return Icon(
-                                      isAvailable ? Icons.check_circle : Icons.error,
-                                      color: isAvailable ? Colors.green : Colors.red,
+                                      isAvailable
+                                          ? Icons.check_circle
+                                          : Icons.error,
+                                      color: isAvailable
+                                          ? Colors.green
+                                          : Colors.red,
                                     );
                                   },
                                 ),
@@ -3400,9 +3754,7 @@ class SettingsPage extends StatelessWidget {
                       DropdownMenuItem(value: 'other', child: Text('Other')),
                     ],
                     onChanged: (value) async {
-                      await ProfileRepository.instance.update(
-                        gender: value,
-                      );
+                      await ProfileRepository.instance.update(gender: value);
                     },
                   ),
                   const SizedBox(height: 12),
@@ -3490,124 +3842,6 @@ class SettingsPage extends StatelessWidget {
                       ),
                     ),
                   ],
-                  ValueListenableBuilder<String>(
-                    valueListenable: AppPreferences.instance.currencyCode,
-                    builder: (context, selectedCode, _) {
-                      return DropdownButtonFormField<String>(
-                        initialValue: selectedCode,
-                        decoration: const InputDecoration(
-                          labelText: 'Currency',
-                          border: OutlineInputBorder(),
-                        ),
-                        items: const [
-                          // Asia
-                          DropdownMenuItem(value: 'INR', child: Text('🇮🇳 INR - Indian Rupee')),
-                          DropdownMenuItem(value: 'AED', child: Text('🇦🇪 AED - UAE Dirham')),
-                          DropdownMenuItem(value: 'SGD', child: Text('🇸🇬 SGD - Singapore Dollar')),
-                          DropdownMenuItem(value: 'JPY', child: Text('🇯🇵 JPY - Japanese Yen')),
-                          DropdownMenuItem(value: 'CNY', child: Text('🇨🇳 CNY - Chinese Yuan')),
-                          DropdownMenuItem(value: 'HKD', child: Text('🇭🇰 HKD - Hong Kong Dollar')),
-                          DropdownMenuItem(value: 'KRW', child: Text('🇰🇷 KRW - South Korean Won')),
-                          DropdownMenuItem(value: 'THB', child: Text('🇹🇭 THB - Thai Baht')),
-                          DropdownMenuItem(value: 'MYR', child: Text('🇲🇾 MYR - Malaysian Ringgit')),
-                          DropdownMenuItem(value: 'IDR', child: Text('🇮🇩 IDR - Indonesian Rupiah')),
-                          DropdownMenuItem(value: 'PHP', child: Text('🇵🇭 PHP - Philippine Peso')),
-                          DropdownMenuItem(value: 'PKR', child: Text('🇵🇰 PKR - Pakistani Rupee')),
-                          DropdownMenuItem(value: 'BDT', child: Text('🇧🇩 BDT - Bangladeshi Taka')),
-                          DropdownMenuItem(value: 'LKR', child: Text('🇱🇰 LKR - Sri Lankan Rupee')),
-                          DropdownMenuItem(value: 'NPR', child: Text('🇳🇵 NPR - Nepalese Rupee')),
-                          DropdownMenuItem(value: 'SAR', child: Text('🇸🇦 SAR - Saudi Riyal')),
-                          DropdownMenuItem(value: 'QAR', child: Text('🇶🇦 QAR - Qatari Riyal')),
-                          DropdownMenuItem(value: 'KWD', child: Text('🇰🇼 KWD - Kuwaiti Dinar')),
-                          DropdownMenuItem(value: 'BHD', child: Text('🇧🇭 BHD - Bahraini Dinar')),
-                          DropdownMenuItem(value: 'OMR', child: Text('🇴🇲 OMR - Omani Rial')),
-                          DropdownMenuItem(value: 'VND', child: Text('🇻🇳 VND - Vietnamese Dong')),
-                          // Americas
-                          DropdownMenuItem(value: 'USD', child: Text('🇺🇸 USD - US Dollar')),
-                          DropdownMenuItem(value: 'CAD', child: Text('🇨🇦 CAD - Canadian Dollar')),
-                          DropdownMenuItem(value: 'BRL', child: Text('🇧🇷 BRL - Brazilian Real')),
-                          DropdownMenuItem(value: 'MXN', child: Text('🇲🇽 MXN - Mexican Peso')),
-                          DropdownMenuItem(value: 'ARS', child: Text('🇦🇷 ARS - Argentine Peso')),
-                          DropdownMenuItem(value: 'CLP', child: Text('🇨🇱 CLP - Chilean Peso')),
-                          DropdownMenuItem(value: 'COP', child: Text('🇨🇴 COP - Colombian Peso')),
-                          DropdownMenuItem(value: 'PEN', child: Text('🇵🇪 PEN - Peruvian Sol')),
-                          // Europe
-                          DropdownMenuItem(value: 'EUR', child: Text('🇪🇺 EUR - Euro')),
-                          DropdownMenuItem(value: 'GBP', child: Text('🇬🇧 GBP - British Pound')),
-                          DropdownMenuItem(value: 'CHF', child: Text('🇨🇭 CHF - Swiss Franc')),
-                          DropdownMenuItem(value: 'SEK', child: Text('🇸🇪 SEK - Swedish Krona')),
-                          DropdownMenuItem(value: 'NOK', child: Text('🇳🇴 NOK - Norwegian Krone')),
-                          DropdownMenuItem(value: 'DKK', child: Text('🇩🇰 DKK - Danish Krone')),
-                          DropdownMenuItem(value: 'PLN', child: Text('🇵🇱 PLN - Polish Zloty')),
-                          DropdownMenuItem(value: 'CZK', child: Text('🇨🇿 CZK - Czech Koruna')),
-                          DropdownMenuItem(value: 'HUF', child: Text('🇭🇺 HUF - Hungarian Forint')),
-                          DropdownMenuItem(value: 'TRY', child: Text('🇹🇷 TRY - Turkish Lira')),
-                          DropdownMenuItem(value: 'RUB', child: Text('🇷🇺 RUB - Russian Ruble')),
-                          // Oceania
-                          DropdownMenuItem(value: 'AUD', child: Text('🇦🇺 AUD - Australian Dollar')),
-                          DropdownMenuItem(value: 'NZD', child: Text('🇳🇿 NZD - New Zealand Dollar')),
-                          // Africa
-                          DropdownMenuItem(value: 'ZAR', child: Text('🇿🇦 ZAR - South African Rand')),
-                          DropdownMenuItem(value: 'NGN', child: Text('🇳🇬 NGN - Nigerian Naira')),
-                          DropdownMenuItem(value: 'KES', child: Text('🇰🇪 KES - Kenyan Shilling')),
-                          DropdownMenuItem(value: 'GHS', child: Text('🇬🇭 GHS - Ghanaian Cedi')),
-                          DropdownMenuItem(value: 'EGP', child: Text('🇪🇬 EGP - Egyptian Pound')),
-                        ],
-                        onChanged: (code) {
-                          if (code == null) return;
-                          AppPreferences.instance.setCurrencyCode(code);
-                        },
-                      );
-                    },
-                  ),
-                  const SizedBox(height: 12),
-                  ValueListenableBuilder<String>(
-                    valueListenable: AppPreferences.instance.preferredCountry,
-                    builder: (context, selectedCountry, _) {
-                      return DropdownButtonFormField<String>(
-                        initialValue: selectedCountry,
-                        decoration: const InputDecoration(
-                          labelText: 'Preferred country',
-                          border: OutlineInputBorder(),
-                        ),
-                        items: const [
-                          DropdownMenuItem(value: 'India', child: Text('🇮🇳 India (INR)')),
-                          DropdownMenuItem(value: 'United States', child: Text('🇺🇸 United States (USD)')),
-                          DropdownMenuItem(value: 'United Kingdom', child: Text('🇬🇧 United Kingdom (GBP)')),
-                          DropdownMenuItem(value: 'UAE', child: Text('🇦🇪 UAE (AED)')),
-                          DropdownMenuItem(value: 'Singapore', child: Text('🇸🇬 Singapore (SGD)')),
-                          DropdownMenuItem(value: 'Australia', child: Text('🇦🇺 Australia (AUD)')),
-                          DropdownMenuItem(value: 'Canada', child: Text('🇨🇦 Canada (CAD)')),
-                          DropdownMenuItem(value: 'European Union', child: Text('🇪🇺 Europe (EUR)')),
-                          DropdownMenuItem(value: 'Japan', child: Text('🇯🇵 Japan (JPY)')),
-                          DropdownMenuItem(value: 'China', child: Text('🇨🇳 China (CNY)')),
-                          DropdownMenuItem(value: 'South Korea', child: Text('🇰🇷 South Korea (KRW)')),
-                          DropdownMenuItem(value: 'Saudi Arabia', child: Text('🇸🇦 Saudi Arabia (SAR)')),
-                          DropdownMenuItem(value: 'Qatar', child: Text('🇶🇦 Qatar (QAR)')),
-                          DropdownMenuItem(value: 'Kuwait', child: Text('🇰🇼 Kuwait (KWD)')),
-                          DropdownMenuItem(value: 'Pakistan', child: Text('🇵🇰 Pakistan (PKR)')),
-                          DropdownMenuItem(value: 'Bangladesh', child: Text('🇧🇩 Bangladesh (BDT)')),
-                          DropdownMenuItem(value: 'Sri Lanka', child: Text('🇱🇰 Sri Lanka (LKR)')),
-                          DropdownMenuItem(value: 'Nepal', child: Text('🇳🇵 Nepal (NPR)')),
-                          DropdownMenuItem(value: 'Thailand', child: Text('🇹🇭 Thailand (THB)')),
-                          DropdownMenuItem(value: 'Malaysia', child: Text('🇲🇾 Malaysia (MYR)')),
-                          DropdownMenuItem(value: 'Indonesia', child: Text('🇮🇩 Indonesia (IDR)')),
-                          DropdownMenuItem(value: 'Philippines', child: Text('🇵🇭 Philippines (PHP)')),
-                          DropdownMenuItem(value: 'South Africa', child: Text('🇿🇦 South Africa (ZAR)')),
-                          DropdownMenuItem(value: 'Nigeria', child: Text('🇳🇬 Nigeria (NGN)')),
-                          DropdownMenuItem(value: 'Brazil', child: Text('🇧🇷 Brazil (BRL)')),
-                          DropdownMenuItem(value: 'New Zealand', child: Text('🇳🇿 New Zealand (NZD)')),
-                          DropdownMenuItem(value: 'Switzerland', child: Text('🇨🇭 Switzerland (CHF)')),
-                          DropdownMenuItem(value: 'Turkey', child: Text('🇹🇷 Turkey (TRY)')),
-                          DropdownMenuItem(value: 'Russia', child: Text('🇷🇺 Russia (RUB)')),
-                        ],
-                        onChanged: (country) {
-                          if (country == null) return;
-                          AppPreferences.instance.setPreferredCountry(country);
-                        },
-                      );
-                    },
-                  ),
                   const SizedBox(height: 24),
 
                   // Payment Provider Section
@@ -3638,23 +3872,50 @@ class SettingsPage extends StatelessWidget {
                             children: [
                               Expanded(
                                 child: GestureDetector(
-                                  onTap: () => ProfileRepository.instance.updatePaymentProvider('razorpay'),
+                                  onTap: () => ProfileRepository.instance
+                                      .updatePaymentProvider('razorpay'),
                                   child: Container(
                                     padding: const EdgeInsets.all(12),
                                     decoration: BoxDecoration(
-                                      color: isRazorpay ? Colors.blue.withValues(alpha: 0.1) : Colors.grey[100],
+                                      color: isRazorpay
+                                          ? Colors.blue.withValues(alpha: 0.1)
+                                          : Colors.grey[100],
                                       borderRadius: BorderRadius.circular(8),
                                       border: Border.all(
-                                        color: isRazorpay ? Colors.blue : Colors.grey.shade300,
+                                        color: isRazorpay
+                                            ? Colors.blue
+                                            : Colors.grey.shade300,
                                         width: isRazorpay ? 2 : 1,
                                       ),
                                     ),
                                     child: Column(
                                       children: [
-                                        Icon(Icons.account_balance, color: isRazorpay ? Colors.blue : Colors.grey, size: 28),
+                                        Icon(
+                                          Icons.account_balance,
+                                          color: isRazorpay
+                                              ? Colors.blue
+                                              : Colors.grey,
+                                          size: 28,
+                                        ),
                                         const SizedBox(height: 4),
-                                        Text('Razorpay', style: TextStyle(fontWeight: FontWeight.bold, color: isRazorpay ? Colors.blue : Colors.grey[700])),
-                                        Text('Bank payout', style: TextStyle(fontSize: 10, color: isRazorpay ? Colors.blue : Colors.grey[600])),
+                                        Text(
+                                          'Razorpay',
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                            color: isRazorpay
+                                                ? Colors.blue
+                                                : Colors.grey[700],
+                                          ),
+                                        ),
+                                        Text(
+                                          'Bank payout',
+                                          style: TextStyle(
+                                            fontSize: 10,
+                                            color: isRazorpay
+                                                ? Colors.blue
+                                                : Colors.grey[600],
+                                          ),
+                                        ),
                                       ],
                                     ),
                                   ),
@@ -3663,23 +3924,48 @@ class SettingsPage extends StatelessWidget {
                               const SizedBox(width: 12),
                               Expanded(
                                 child: GestureDetector(
-                                  onTap: () => ProfileRepository.instance.updatePaymentProvider('stripe'),
+                                  onTap: () => ProfileRepository.instance
+                                      .updatePaymentProvider('stripe'),
                                   child: Container(
                                     padding: const EdgeInsets.all(12),
                                     decoration: BoxDecoration(
-                                      color: isStripe ? Colors.purple.withValues(alpha: 0.1) : Colors.grey[100],
+                                      color: isStripe
+                                          ? Colors.purple.withValues(alpha: 0.1)
+                                          : Colors.grey[100],
                                       borderRadius: BorderRadius.circular(8),
                                       border: Border.all(
-                                        color: isStripe ? Colors.purple : Colors.grey.shade300,
+                                        color: isStripe
+                                            ? Colors.purple
+                                            : Colors.grey.shade300,
                                         width: isStripe ? 2 : 1,
                                       ),
                                     ),
                                     child: Column(
                                       children: [
-                                        Icon(Icons.credit_card, color: isStripe ? Colors.purple : Colors.grey, size: 28),
+                                        Icon(
+                                          Icons.credit_card,
+                                          color: isStripe
+                                              ? Colors.purple
+                                              : Colors.grey,
+                                          size: 28,
+                                        ),
                                         const SizedBox(height: 4),
-                                        Text('Stripe', style: TextStyle(fontWeight: FontWeight.bold, color: isStripe ? Colors.purple : Colors.grey[700])),
-                                        Text('International', style: TextStyle(fontSize: 10, color: Colors.grey[600])),
+                                        Text(
+                                          'Stripe',
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                            color: isStripe
+                                                ? Colors.purple
+                                                : Colors.grey[700],
+                                          ),
+                                        ),
+                                        Text(
+                                          'International',
+                                          style: TextStyle(
+                                            fontSize: 10,
+                                            color: Colors.grey[600],
+                                          ),
+                                        ),
                                       ],
                                     ),
                                   ),
@@ -3689,8 +3975,74 @@ class SettingsPage extends StatelessWidget {
                           ),
                           const SizedBox(height: 16),
 
+                          // Currency Display (Read-only, based on connected account)
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Colors.grey.withValues(alpha: 0.05),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: Colors.grey.shade300),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(
+                                  Icons.account_balance_wallet,
+                                  color: Colors.grey,
+                                  size: 20,
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      const Text(
+                                        'Currency',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: Colors.grey,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        _getCurrencyDisplay(profile),
+                                        style: const TextStyle(
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                if (isRazorpay || isStripe)
+                                  const Icon(
+                                    Icons.lock_outline,
+                                    color: Colors.grey,
+                                    size: 16,
+                                  ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            isRazorpay
+                                ? 'Currency is automatically set to INR for Razorpay'
+                                : isStripe
+                                ? 'Currency is automatically fetched from your Stripe account'
+                                : 'Connect a payment provider to see currency',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: Colors.grey[600],
+                              fontStyle: FontStyle.italic,
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+
                           // Razorpay Details
-                          if (selectedProvider == null || selectedProvider.isEmpty)
+                          if (selectedProvider == null ||
+                              selectedProvider.isEmpty)
                             Container(
                               width: double.infinity,
                               padding: const EdgeInsets.all(12),
@@ -3701,11 +4053,17 @@ class SettingsPage extends StatelessWidget {
                               ),
                               child: const Text(
                                 'Choose a payment gateway to set up payouts.',
-                                style: TextStyle(fontSize: 13, color: Colors.grey),
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: Colors.grey,
+                                ),
                               ),
                             ),
                           if (isRazorpay) ...[
-                            const Text('Razorpay Bank Details', style: TextStyle(fontWeight: FontWeight.w600)),
+                            const Text(
+                              'Razorpay Bank Details',
+                              style: TextStyle(fontWeight: FontWeight.w600),
+                            ),
                             const SizedBox(height: 8),
                             // Account Holder
                             TextFormField(
@@ -3765,22 +4123,31 @@ class SettingsPage extends StatelessWidget {
                               ),
                               onChanged: (v) async {
                                 await ProfileRepository.instance.saveProfile(
-                                  profile.copyWith(bankIFSC: v.trim().toUpperCase()),
+                                  profile.copyWith(
+                                    bankIFSC: v.trim().toUpperCase(),
+                                  ),
                                 );
                               },
                             ),
                             const SizedBox(height: 12),
                             // Account Type
                             DropdownButtonFormField<String>(
-                              initialValue: profile.bankAccountType ?? 'savings',
+                              initialValue:
+                                  profile.bankAccountType ?? 'savings',
                               decoration: const InputDecoration(
                                 labelText: 'Account Type',
                                 border: OutlineInputBorder(),
                                 prefixIcon: Icon(Icons.account_balance_wallet),
                               ),
                               items: const [
-                                DropdownMenuItem(value: 'savings', child: Text('Savings')),
-                                DropdownMenuItem(value: 'current', child: Text('Current')),
+                                DropdownMenuItem(
+                                  value: 'savings',
+                                  child: Text('Savings'),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'current',
+                                  child: Text('Current'),
+                                ),
                               ],
                               onChanged: (v) async {
                                 if (v == null) return;
@@ -3789,21 +4156,73 @@ class SettingsPage extends StatelessWidget {
                                 );
                               },
                             ),
+
+                            // 🧪 TEST MODE HELPER for Razorpay
+                            const SizedBox(height: 12),
+                            OutlinedButton.icon(
+                              onPressed: () async {
+                                // Quick test mode setup for Razorpay
+                                final testProfile = profile.copyWith(
+                                  bankAccountHolder: 'Test User',
+                                  bankAccountNumber: '1234567890',
+                                  bankName: 'Test Bank',
+                                  bankIFSC: 'TEST0001234',
+                                  bankAccountType: 'savings',
+                                  razorpayAccountId: 'rzp_test_contact_id',
+                                  bankCurrency: 'INR',
+                                );
+                                await ProfileRepository.instance.saveProfile(
+                                  testProfile,
+                                );
+                                if (context.mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text(
+                                        '✅ Test Razorpay details filled! Currency: INR',
+                                      ),
+                                      backgroundColor: Colors.green,
+                                    ),
+                                  );
+                                }
+                              },
+                              icon: const Icon(Icons.science, size: 16),
+                              label: const Text(
+                                '🧪 Fill Test Bank Details (Development)',
+                                style: TextStyle(fontSize: 12),
+                              ),
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: Colors.orange,
+                                side: const BorderSide(color: Colors.orange),
+                              ),
+                            ),
                             const SizedBox(height: 8),
                             // Status
-                            if (profile.bankAccountNumber != null && profile.bankAccountNumber!.isNotEmpty)
+                            if (profile.bankAccountNumber != null &&
+                                profile.bankAccountNumber!.isNotEmpty)
                               Container(
                                 padding: const EdgeInsets.all(10),
                                 decoration: BoxDecoration(
                                   color: Colors.green.withValues(alpha: 0.1),
                                   borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(color: Colors.green.withValues(alpha: 0.3)),
+                                  border: Border.all(
+                                    color: Colors.green.withValues(alpha: 0.3),
+                                  ),
                                 ),
                                 child: const Row(
                                   children: [
-                                    Icon(Icons.check_circle, color: Colors.green, size: 18),
+                                    Icon(
+                                      Icons.check_circle,
+                                      color: Colors.green,
+                                      size: 18,
+                                    ),
                                     SizedBox(width: 8),
-                                    Text('Bank details saved ✅', style: TextStyle(color: Colors.green, fontSize: 13)),
+                                    Text(
+                                      'Bank details saved ✅',
+                                      style: TextStyle(
+                                        color: Colors.green,
+                                        fontSize: 13,
+                                      ),
+                                    ),
                                   ],
                                 ),
                               ),
@@ -3811,37 +4230,70 @@ class SettingsPage extends StatelessWidget {
 
                           // Stripe Details
                           if (isStripe) ...[
-                            const Text('Stripe Connect', style: TextStyle(fontWeight: FontWeight.w600)),
+                            const Text(
+                              'Stripe Connect',
+                              style: TextStyle(fontWeight: FontWeight.w600),
+                            ),
                             const SizedBox(height: 8),
-                            if (profile.stripeAccountId != null && profile.stripeAccountId!.isNotEmpty) ...[
+                            if (profile.stripeAccountId != null &&
+                                profile.stripeAccountId!.isNotEmpty) ...[
                               // Already linked
                               Container(
                                 padding: const EdgeInsets.all(12),
                                 decoration: BoxDecoration(
                                   color: Colors.green.withValues(alpha: 0.1),
                                   borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(color: Colors.green.withValues(alpha: 0.3)),
+                                  border: Border.all(
+                                    color: Colors.green.withValues(alpha: 0.3),
+                                  ),
                                 ),
                                 child: Row(
                                   children: [
-                                    const Icon(Icons.check_circle, color: Colors.green, size: 18),
+                                    const Icon(
+                                      Icons.check_circle,
+                                      color: Colors.green,
+                                      size: 18,
+                                    ),
                                     const SizedBox(width: 8),
                                     Expanded(
                                       child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
                                         children: [
-                                          const Text('Stripe account linked ✅', style: TextStyle(color: Colors.green, fontSize: 13, fontWeight: FontWeight.bold)),
-                                          Text('ID: ${profile.stripeAccountId}', style: const TextStyle(fontSize: 11, color: Colors.grey)),
+                                          const Text(
+                                            'Stripe account linked ✅',
+                                            style: TextStyle(
+                                              color: Colors.green,
+                                              fontSize: 13,
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
+                                          Text(
+                                            'ID: ${profile.stripeAccountId}',
+                                            style: const TextStyle(
+                                              fontSize: 11,
+                                              color: Colors.grey,
+                                            ),
+                                          ),
                                         ],
                                       ),
                                     ),
                                     TextButton(
                                       onPressed: () async {
-                                        await ProfileRepository.instance.saveProfile(
-                                          profile.copyWith(setStripeNull: true),
-                                        );
+                                        await ProfileRepository.instance
+                                            .saveProfile(
+                                              profile.copyWith(
+                                                setStripeNull: true,
+                                              ),
+                                            );
                                       },
-                                      child: const Text('Unlink', style: TextStyle(color: Colors.red, fontSize: 12)),
+                                      child: const Text(
+                                        'Unlink',
+                                        style: TextStyle(
+                                          color: Colors.red,
+                                          fontSize: 12,
+                                        ),
+                                      ),
                                     ),
                                   ],
                                 ),
@@ -3853,65 +4305,131 @@ class SettingsPage extends StatelessWidget {
                                 decoration: BoxDecoration(
                                   color: Colors.orange.withValues(alpha: 0.1),
                                   borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(color: Colors.orange.withValues(alpha: 0.3)),
+                                  border: Border.all(
+                                    color: Colors.orange.withValues(alpha: 0.3),
+                                  ),
                                 ),
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     const Row(
                                       children: [
-                                        Icon(Icons.warning_amber, color: Colors.orange, size: 18),
+                                        Icon(
+                                          Icons.warning_amber,
+                                          color: Colors.orange,
+                                          size: 18,
+                                        ),
                                         SizedBox(width: 8),
-                                        Text('Stripe not set up', style: TextStyle(color: Colors.orange, fontWeight: FontWeight.bold)),
+                                        Text(
+                                          'Stripe not set up',
+                                          style: TextStyle(
+                                            color: Colors.orange,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
                                       ],
                                     ),
                                     const SizedBox(height: 8),
                                     const Text(
                                       'Set up Stripe to receive international payouts directly to your bank account.',
-                                      style: TextStyle(fontSize: 12, color: Colors.grey),
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: Colors.grey,
+                                      ),
                                     ),
                                     const SizedBox(height: 12),
                                     SizedBox(
                                       width: double.infinity,
                                       child: ElevatedButton.icon(
                                         onPressed: () async {
-                                          final currentProfile = ProfileRepository.instance.profile.value;
+                                          final currentProfile =
+                                              ProfileRepository
+                                                  .instance
+                                                  .profile
+                                                  .value;
                                           if (currentProfile.email == null) {
-                                            ScaffoldMessenger.of(context).showSnackBar(
-                                              const SnackBar(content: Text('Please add your email first')),
+                                            ScaffoldMessenger.of(
+                                              context,
+                                            ).showSnackBar(
+                                              const SnackBar(
+                                                content: Text(
+                                                  'Please add your email first',
+                                                ),
+                                              ),
                                             );
                                             return;
                                           }
                                           // Show loading
-                                          ScaffoldMessenger.of(context).showSnackBar(
-                                            const SnackBar(content: Text('Setting up Stripe account...')),
+                                          ScaffoldMessenger.of(
+                                            context,
+                                          ).showSnackBar(
+                                            const SnackBar(
+                                              content: Text(
+                                                'Setting up Stripe account...',
+                                              ),
+                                            ),
                                           );
-                                          final stripeCountry = currentProfile.country ??
-                                              AppPreferences.instance.preferredCountry.value;
-                                          final result = await StripeService.instance.createConnectedAccount(
-                                            email: currentProfile.email!,
-                                            country: stripeCountry,
-                                            userId: currentProfile.id,
-                                          );
-                                          if (result == null || !context.mounted) return;
-                                          final setupError = result['error'] as String?;
-                                          if (setupError != null && setupError.isNotEmpty) {
-                                            ScaffoldMessenger.of(context).showSnackBar(
-                                              SnackBar(content: Text(setupError)),
+                                          final stripeCountry =
+                                              currentProfile.country ??
+                                              AppPreferences
+                                                  .instance
+                                                  .preferredCountry
+                                                  .value;
+                                          final result = await StripeService
+                                              .instance
+                                              .createConnectedAccount(
+                                                email: currentProfile.email!,
+                                                country: stripeCountry,
+                                                userId: currentProfile.id,
+                                              );
+                                          if (result == null ||
+                                              !context.mounted) {
+                                            return;
+                                          }
+                                          final setupError =
+                                              result['error'] as String?;
+                                          if (setupError != null &&
+                                              setupError.isNotEmpty) {
+                                            ScaffoldMessenger.of(
+                                              context,
+                                            ).showSnackBar(
+                                              SnackBar(
+                                                content: Text(setupError),
+                                              ),
                                             );
                                             return;
                                           }
-                                          final onboardingUrl = result['url'] as String?;
-                                          final accountId = result['account_id'] as String?;
+                                          final onboardingUrl =
+                                              result['url'] as String?;
+                                          final accountId =
+                                              result['account_id'] as String?;
+                                          final currency =
+                                              result['currency']
+                                                  as String?; // ← Get currency from Stripe!
+
                                           if (accountId != null) {
-                                            await ProfileRepository.instance.updateStripeAccount(accountId);
+                                            await ProfileRepository.instance
+                                                .updateStripeAccount(
+                                                  accountId,
+                                                  currency:
+                                                      currency, // ← Pass currency!
+                                                );
                                           }
                                           if (onboardingUrl != null) {
-                                            await launchUrl(Uri.parse(onboardingUrl), mode: LaunchMode.externalApplication);
+                                            await launchUrl(
+                                              Uri.parse(onboardingUrl),
+                                              mode: LaunchMode
+                                                  .externalApplication,
+                                            );
                                           }
                                         },
-                                        icon: const Icon(Icons.open_in_new, size: 16),
-                                        label: const Text('Setup Stripe Account'),
+                                        icon: const Icon(
+                                          Icons.open_in_new,
+                                          size: 16,
+                                        ),
+                                        label: const Text(
+                                          'Setup Stripe Account',
+                                        ),
                                         style: ElevatedButton.styleFrom(
                                           backgroundColor: Colors.purple,
                                           foregroundColor: Colors.white,
@@ -3919,21 +4437,143 @@ class SettingsPage extends StatelessWidget {
                                       ),
                                     ),
                                     const SizedBox(height: 8),
-                                    // Manual entry option
-                                    TextFormField(
-                                      initialValue: profile.stripeAccountId,
-                                      decoration: const InputDecoration(
-                                        labelText: 'Or enter Stripe Account ID manually',
-                                        border: OutlineInputBorder(),
-                                        prefixIcon: Icon(Icons.credit_card),
-                                        hintText: 'acct_xxxxxxxxxxxxxxxx',
-                                        isDense: true,
+                                    // Manual entry option - shows current stripe_account_id
+                                    Container(
+                                      padding: const EdgeInsets.all(12),
+                                      decoration: BoxDecoration(
+                                        color:
+                                            profile.stripeAccountId != null &&
+                                                profile
+                                                    .stripeAccountId!
+                                                    .isNotEmpty
+                                            ? Colors.green.withValues(
+                                                alpha: 0.1,
+                                              )
+                                            : Colors.grey.withValues(
+                                                alpha: 0.05,
+                                              ),
+                                        borderRadius: BorderRadius.circular(8),
+                                        border: Border.all(
+                                          color:
+                                              profile.stripeAccountId != null &&
+                                                  profile
+                                                      .stripeAccountId!
+                                                      .isNotEmpty
+                                              ? Colors.green
+                                              : Colors.grey.shade300,
+                                        ),
                                       ),
-                                      onChanged: (v) async {
-                                        if (v.startsWith('acct_')) {
-                                          await ProfileRepository.instance.updateStripeAccount(v.trim());
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Row(
+                                            children: [
+                                              Icon(
+                                                profile.stripeAccountId !=
+                                                            null &&
+                                                        profile
+                                                            .stripeAccountId!
+                                                            .isNotEmpty
+                                                    ? Icons.check_circle
+                                                    : Icons.info_outline,
+                                                size: 16,
+                                                color:
+                                                    profile.stripeAccountId !=
+                                                            null &&
+                                                        profile
+                                                            .stripeAccountId!
+                                                            .isNotEmpty
+                                                    ? Colors.green
+                                                    : Colors.grey,
+                                              ),
+                                              const SizedBox(width: 8),
+                                              Text(
+                                                profile.stripeAccountId !=
+                                                            null &&
+                                                        profile
+                                                            .stripeAccountId!
+                                                            .isNotEmpty
+                                                    ? 'Stripe Account Connected'
+                                                    : 'No Stripe Account',
+                                                style: TextStyle(
+                                                  fontWeight: FontWeight.w600,
+                                                  fontSize: 12,
+                                                  color:
+                                                      profile.stripeAccountId !=
+                                                              null &&
+                                                          profile
+                                                              .stripeAccountId!
+                                                              .isNotEmpty
+                                                      ? Colors.green.shade800
+                                                      : Colors.grey.shade700,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                          if (profile.stripeAccountId != null &&
+                                              profile
+                                                  .stripeAccountId!
+                                                  .isNotEmpty) ...[
+                                            const SizedBox(height: 8),
+                                            Text(
+                                              profile.stripeAccountId!,
+                                              style: TextStyle(
+                                                fontSize: 11,
+                                                fontFamily: 'monospace',
+                                                color: Colors.grey.shade700,
+                                              ),
+                                            ),
+                                            if (profile.bankCurrency !=
+                                                null) ...[
+                                              const SizedBox(height: 4),
+                                              Text(
+                                                'Currency: ${profile.bankCurrency}',
+                                                style: TextStyle(
+                                                  fontSize: 11,
+                                                  color: Colors.grey.shade600,
+                                                ),
+                                              ),
+                                            ],
+                                          ],
+                                        ],
+                                      ),
+                                    ),
+
+                                    // 🧪 TEST MODE HELPER
+                                    const SizedBox(height: 12),
+                                    OutlinedButton.icon(
+                                      onPressed: () async {
+                                        // Quick test mode setup
+                                        await ProfileRepository.instance
+                                            .updateStripeAccount(
+                                              'acct_test_quickohunt_dev',
+                                              currency: 'USD',
+                                            );
+                                        if (context.mounted) {
+                                          ScaffoldMessenger.of(
+                                            context,
+                                          ).showSnackBar(
+                                            const SnackBar(
+                                              content: Text(
+                                                '✅ Test Stripe account set! Currency: USD',
+                                              ),
+                                              backgroundColor: Colors.green,
+                                            ),
+                                          );
                                         }
                                       },
+                                      icon: const Icon(Icons.science, size: 16),
+                                      label: const Text(
+                                        '🧪 Use Test Account (Development)',
+                                        style: TextStyle(fontSize: 12),
+                                      ),
+                                      style: OutlinedButton.styleFrom(
+                                        foregroundColor: Colors.orange,
+                                        side: const BorderSide(
+                                          color: Colors.orange,
+                                        ),
+                                      ),
                                     ),
                                   ],
                                 ),
@@ -3947,16 +4587,25 @@ class SettingsPage extends StatelessWidget {
                             decoration: BoxDecoration(
                               color: Colors.blue.withValues(alpha: 0.1),
                               borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: Colors.blue.withValues(alpha: 0.3)),
+                              border: Border.all(
+                                color: Colors.blue.withValues(alpha: 0.3),
+                              ),
                             ),
                             child: Row(
                               children: [
-                                Icon(Icons.info_outline, color: Colors.blue[700], size: 20),
+                                Icon(
+                                  Icons.info_outline,
+                                  color: Colors.blue[700],
+                                  size: 20,
+                                ),
                                 const SizedBox(width: 8),
                                 Expanded(
                                   child: Text(
                                     'Your payment details are encrypted and secure. Only used to transfer your earnings.',
-                                    style: TextStyle(fontSize: 12, color: Colors.blue[900]),
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: Colors.blue[900],
+                                    ),
                                   ),
                                 ),
                               ],
@@ -3997,7 +4646,9 @@ class SettingsPage extends StatelessWidget {
                           if (!context.mounted) return;
                           ScaffoldMessenger.of(context).showSnackBar(
                             SnackBar(
-                              content: Text(e.toString().replaceAll('Exception: ', '')),
+                              content: Text(
+                                e.toString().replaceAll('Exception: ', ''),
+                              ),
                               backgroundColor: Colors.red,
                               duration: const Duration(seconds: 4),
                             ),
@@ -4099,18 +4750,28 @@ class _MainScreenState extends State<MainScreen> {
                     padding: const EdgeInsets.only(right: 8),
                     child: Center(
                       child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 6,
+                        ),
                         decoration: BoxDecoration(
                           color: Colors.green.withValues(alpha: 0.2),
                           borderRadius: BorderRadius.circular(12),
                         ),
                         child: const Row(
                           children: [
-                            Icon(Icons.check_circle, color: Colors.green, size: 16),
+                            Icon(
+                              Icons.check_circle,
+                              color: Colors.green,
+                              size: 16,
+                            ),
                             SizedBox(width: 4),
                             Text(
                               'Logged in',
-                              style: TextStyle(color: Colors.green, fontSize: 12),
+                              style: TextStyle(
+                                color: Colors.green,
+                                fontSize: 12,
+                              ),
                             ),
                           ],
                         ),
@@ -4172,7 +4833,9 @@ class SlotFeedItem {
 }
 
 class PostsPage extends StatefulWidget {
-  const PostsPage({super.key});
+  final bool initialShowUserPosts;
+
+  const PostsPage({super.key, this.initialShowUserPosts = false});
 
   @override
   State<PostsPage> createState() => _PostsPageState();
@@ -4211,8 +4874,7 @@ class _PostsPageState extends State<PostsPage> {
   _selectedServiceType; // null = show all, otherwise filter by service type
 
   // Route filter
-  SlotType?
-  _selectedSlotType; // null = both, otherwise filter by slot type
+  SlotType? _selectedSlotType; // null = both, otherwise filter by slot type
 
   // Pickup mode filter
   PickupMode?
@@ -4220,7 +4882,7 @@ class _PostsPageState extends State<PostsPage> {
 
   // Booking mode filter (Post Mode)
   PostMode? _selectedPostMode; // null = all, otherwise filter by post mode
-  
+
   // Wait for full deadline filter (only when Wait for Full is selected)
   int? _waitForFullDeadlineHours; // Filter by deadline hours
 
@@ -4232,11 +4894,19 @@ class _PostsPageState extends State<PostsPage> {
   String? _filterToLocation;
   String? _filterBaseLocation;
 
+  // Country filter
+  final Set<String> _filterCountries = {}; // Empty = show all countries
+
+  // Currency filter
+  String? _selectedCurrency; // null = show all currencies
+
   // Operator filter (only for Lease)
   bool?
   _withOperator; // null = both, true = with operator, false = without operator
 
   // Security deposit filter (only for Lease)
+  bool?
+  _requiresSecurityDeposit; // null = both, true = with deposit, false = without deposit
   double? _minSecurityDeposit;
   double? _maxSecurityDeposit;
 
@@ -4275,6 +4945,7 @@ class _PostsPageState extends State<PostsPage> {
   @override
   void initState() {
     super.initState();
+    _showUserPosts = widget.initialShowUserPosts;
   }
 
   @override
@@ -4312,17 +4983,18 @@ class _PostsPageState extends State<PostsPage> {
                       duration: Duration(seconds: 1),
                     ),
                   );
-                  
+
                   // Reload all data from Supabase
                   final messenger = ScaffoldMessenger.of(context);
                   await Future.wait([
                     VehicleRepository.instance.loadAllVehicles(),
-                    CustomerVehicleRepository.instance.init(),
+                    CustomerVehicleRepository.instance
+                        .reload(), // Use reload() instead of init()
                     SlotRepository.instance.loadAllSlots(),
                     CustomerSlotRepository.instance.init(),
                     BookingRepository.instance.refreshFromSupabase(),
                   ]);
-                  
+
                   if (mounted) {
                     messenger.showSnackBar(
                       const SnackBar(
@@ -4345,7 +5017,8 @@ class _PostsPageState extends State<PostsPage> {
                 icon: const Icon(Icons.info_outline),
                 onPressed: () {
                   final providerSlots = SlotRepository.instance.allSlots.length;
-                  final userSlots = CustomerSlotRepository.instance.allSlots.length;
+                  final userSlots =
+                      CustomerSlotRepository.instance.allSlots.length;
                   final providerVehicles =
                       VehicleRepository.instance.allVehicles.length;
                   final userVehicles =
@@ -4397,7 +5070,8 @@ class _PostsPageState extends State<PostsPage> {
                                     decoration: InputDecoration(
                                       hintText: 'From',
                                       prefixIcon: const Icon(Icons.my_location),
-                                      suffixIcon: _fromSearchController.text.isEmpty
+                                      suffixIcon:
+                                          _fromSearchController.text.isEmpty
                                           ? null
                                           : IconButton(
                                               onPressed: () {
@@ -4414,7 +5088,9 @@ class _PostsPageState extends State<PostsPage> {
                                     onChanged: (v) {
                                       setState(() {
                                         final t = v.trim();
-                                        _filterFromLocation = t.isEmpty ? null : t;
+                                        _filterFromLocation = t.isEmpty
+                                            ? null
+                                            : t;
                                       });
                                     },
                                   ),
@@ -4426,7 +5102,8 @@ class _PostsPageState extends State<PostsPage> {
                                     decoration: InputDecoration(
                                       hintText: 'To',
                                       prefixIcon: const Icon(Icons.place),
-                                      suffixIcon: _toSearchController.text.isEmpty
+                                      suffixIcon:
+                                          _toSearchController.text.isEmpty
                                           ? null
                                           : IconButton(
                                               onPressed: () {
@@ -4443,7 +5120,9 @@ class _PostsPageState extends State<PostsPage> {
                                     onChanged: (v) {
                                       setState(() {
                                         final t = v.trim();
-                                        _filterToLocation = t.isEmpty ? null : t;
+                                        _filterToLocation = t.isEmpty
+                                            ? null
+                                            : t;
                                       });
                                     },
                                   ),
@@ -4451,35 +5130,36 @@ class _PostsPageState extends State<PostsPage> {
                               ],
                             )
                           : _selectedSlotType == SlotType.fromRange
-                              ? TextField(
-                                  controller: _baseSearchController,
-                                  decoration: InputDecoration(
-                                    hintText: 'Base location',
-                                    prefixIcon: const Icon(Icons.location_on),
-                                    suffixIcon: _baseSearchController.text.isEmpty
-                                        ? null
-                                        : IconButton(
-                                            onPressed: () {
-                                              setState(() {
-                                                _baseSearchController.clear();
-                                                _filterBaseLocation = null;
-                                              });
-                                            },
-                                            icon: const Icon(Icons.clear),
-                                          ),
-                                    border: const OutlineInputBorder(),
-                                    isDense: true,
-                                  ),
-                                  onChanged: (v) {
-                                    final t = v.trim();
-                                    setState(() {
-                                      _filterBaseLocation = t.isEmpty ? null : t;
-                                      _filterBaseLatLon = null; // reset until resolved
-                                    });
-                                    if (t.length >= 3) {
-                                      LocationAutocompleteService.instance
-                                          .searchLocations(t)
-                                          .then((results) {
+                          ? TextField(
+                              controller: _baseSearchController,
+                              decoration: InputDecoration(
+                                hintText: 'Base location',
+                                prefixIcon: const Icon(Icons.location_on),
+                                suffixIcon: _baseSearchController.text.isEmpty
+                                    ? null
+                                    : IconButton(
+                                        onPressed: () {
+                                          setState(() {
+                                            _baseSearchController.clear();
+                                            _filterBaseLocation = null;
+                                          });
+                                        },
+                                        icon: const Icon(Icons.clear),
+                                      ),
+                                border: const OutlineInputBorder(),
+                                isDense: true,
+                              ),
+                              onChanged: (v) {
+                                final t = v.trim();
+                                setState(() {
+                                  _filterBaseLocation = t.isEmpty ? null : t;
+                                  _filterBaseLatLon =
+                                      null; // reset until resolved
+                                });
+                                if (t.length >= 3) {
+                                  LocationAutocompleteService.instance
+                                      .searchLocations(t)
+                                      .then((results) {
                                         if (results.isNotEmpty && mounted) {
                                           setState(() {
                                             _filterBaseLatLon = (
@@ -4489,31 +5169,31 @@ class _PostsPageState extends State<PostsPage> {
                                           });
                                         }
                                       });
-                                    }
-                                  },
-                                )
-                              : TextField(
-                                  controller: _searchController,
-                                  decoration: InputDecoration(
-                                    hintText: _showUserPosts
-                                        ? 'Search customer requests'
-                                        : 'Search by location',
-                                    prefixIcon: const Icon(Icons.search),
-                                    suffixIcon: _searchController.text.isEmpty
-                                        ? null
-                                        : IconButton(
-                                            onPressed: () {
-                                              setState(() {
-                                                _searchController.clear();
-                                              });
-                                            },
-                                            icon: const Icon(Icons.clear),
-                                          ),
-                                    border: const OutlineInputBorder(),
-                                    isDense: true,
-                                  ),
-                                  onChanged: (_) => setState(() {}),
-                                ),
+                                }
+                              },
+                            )
+                          : TextField(
+                              controller: _searchController,
+                              decoration: InputDecoration(
+                                hintText: _showUserPosts
+                                    ? 'Search customer requests'
+                                    : 'Search by location',
+                                prefixIcon: const Icon(Icons.search),
+                                suffixIcon: _searchController.text.isEmpty
+                                    ? null
+                                    : IconButton(
+                                        onPressed: () {
+                                          setState(() {
+                                            _searchController.clear();
+                                          });
+                                        },
+                                        icon: const Icon(Icons.clear),
+                                      ),
+                                border: const OutlineInputBorder(),
+                                isDense: true,
+                              ),
+                              onChanged: (_) => setState(() {}),
+                            ),
                     ),
                     const SizedBox(width: 12),
                     OutlinedButton.icon(
@@ -4624,6 +5304,8 @@ class _PostsPageState extends State<PostsPage> {
                                       ? null
                                       : service;
                                   _withOperator = null; // Reset operator filter
+                                  _requiresSecurityDeposit =
+                                      null; // Reset deposit presence filter
                                   _minSecurityDeposit = null;
                                   _maxSecurityDeposit = null;
                                 });
@@ -4694,18 +5376,22 @@ class _PostsPageState extends State<PostsPage> {
               style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 16),
-            ...SortOption.values.map((option) => ListTile(
-              leading: Icon(
-                _sortOption == option ? Icons.check_circle : Icons.circle_outlined,
-                color: _sortOption == option ? Colors.blue : Colors.grey,
+            ...SortOption.values.map(
+              (option) => ListTile(
+                leading: Icon(
+                  _sortOption == option
+                      ? Icons.check_circle
+                      : Icons.circle_outlined,
+                  color: _sortOption == option ? Colors.blue : Colors.grey,
+                ),
+                title: Text(option.displayName),
+                selected: _sortOption == option,
+                onTap: () {
+                  setState(() => _sortOption = option);
+                  Navigator.pop(context);
+                },
               ),
-              title: Text(option.displayName),
-              selected: _sortOption == option,
-              onTap: () {
-                setState(() => _sortOption = option);
-                Navigator.pop(context);
-              },
-            )),
+            ),
             const SizedBox(height: 8),
           ],
         ),
@@ -4881,12 +5567,26 @@ class _PostsPageState extends State<PostsPage> {
 
         return ListView(
           children: [
-            ...filteredSlots.map(
-              (item) => SlotCard(
+            ...filteredSlots.map((item) {
+              // Get customer profile info for customer posts
+              final customerName =
+                  ProfileNameRegistry.instance.getNameForUser(
+                    item.slot.profileId,
+                  ) ??
+                  'User ${item.slot.profileId.substring(0, 6)}';
+
+              final customerAvatar =
+                  ProfileNameRegistry.instance.getAvatarForUser(
+                    item.slot.profileId,
+                  ) ??
+                  '';
+
+              return SlotCard(
                 slot: item.slot,
                 vehicle: item.vehicle,
-                providerName: 'Looking for service',
-                providerAvatar: '',
+                providerName:
+                    customerName, // Show customer name instead of "Looking for service"
+                providerAvatar: customerAvatar, // Show customer avatar
                 providerRating: 0.0,
                 isOffer: false, // User is looking, not offering
                 isUserPost: true,
@@ -4897,8 +5597,8 @@ class _PostsPageState extends State<PostsPage> {
                       builder: (context) => SlotDetailScreen(
                         slot: item.slot,
                         vehicle: item.vehicle,
-                        providerName: 'User Request',
-                        providerAvatar: '',
+                        providerName: customerName,
+                        providerAvatar: customerAvatar,
                         providerRating: 0.0,
                         isOffer: false,
                       ),
@@ -4927,16 +5627,21 @@ class _PostsPageState extends State<PostsPage> {
 
                   final profile = ProfileRepository.instance.profile.value;
 
-                  final booking = await BookingRepository.instance.createBooking(
-                    slotId: item.slot.id,
-                    providerId: currentUser.id,
-                    providerName: profile.profileName,
-                    providerPhone: profile.phone,
-                    userId: item.slot.profileId, // Use post owner
-                    defaultCapacity: item.slot.capacity,
-                    price: item.slot.price,
-                    userName: ProfileNameRegistry.instance.getNameForUser(item.slot.profileId) ?? 'User',
-                  );
+                  final booking = await BookingRepository.instance
+                      .createBooking(
+                        slotId: item.slot.id,
+                        providerId: currentUser.id,
+                        providerName: profile.profileName,
+                        providerPhone: profile.phone,
+                        userId: item.slot.profileId, // Use post owner
+                        defaultCapacity: item.slot.capacity,
+                        price: item.slot.price,
+                        userName:
+                            ProfileNameRegistry.instance.getNameForUser(
+                              item.slot.profileId,
+                            ) ??
+                            'User',
+                      );
 
                   if (!context.mounted) return;
 
@@ -4955,8 +5660,8 @@ class _PostsPageState extends State<PostsPage> {
                   );
                   mainTabIndex.value = 1;
                 },
-              ),
-            ),
+              );
+            }),
             const SizedBox(height: 12),
           ],
         );
@@ -4977,7 +5682,6 @@ class _PostsPageState extends State<PostsPage> {
     }
   }
 
-
   List<SlotFeedItem> _filteredSlotItems() {
     final currentUser = AuthRepository.instance.currentUser;
 
@@ -4992,9 +5696,9 @@ class _PostsPageState extends State<PostsPage> {
       // User Posts tab - show ALL customer requests (common feed)
       final allUserSlots = CustomerSlotRepository.instance.allSlots;
       debugPrint('Total user slots: ${allUserSlots.length}');
-      
+
       final now = DateTime.now();
-      
+
       repoItems = allUserSlots
           .where(
             // Filter out expired posts (end time has passed)
@@ -5021,16 +5725,18 @@ class _PostsPageState extends State<PostsPage> {
       // Provider Posts tab - show ALL provider offers (common feed)
       final allProviderSlots = SlotRepository.instance.allSlots;
       debugPrint('Total provider slots: ${allProviderSlots.length}');
-      
+
       final now = DateTime.now();
-      
+
       repoItems = allProviderSlots
           .where(
             // Filter out expired posts (end time has passed)
             (e) {
               final isActive = e.slot.endTime.isAfter(now);
               if (!isActive && kDebugMode) {
-                debugPrint('⏰ Filtered expired post: ${e.slot.id} ended ${e.slot.endTime}');
+                debugPrint(
+                  '⏰ Filtered expired post: ${e.slot.id} ended ${e.slot.endTime}',
+                );
               }
               return isActive;
             },
@@ -5100,57 +5806,70 @@ class _PostsPageState extends State<PostsPage> {
       '?? After price filter (${_minPrice ?? "any"}-${_maxPrice ?? "any"}): ${priceFiltered.length}',
     );
 
-    // Apply rating filter (min and max rating)
-    final ratingFiltered = (_minRating == null && _maxRating == null)
+    // Apply currency filter
+    final currencyFiltered = _selectedCurrency == null
         ? priceFiltered
         : priceFiltered
-            .where((e) {
-              // Get provider rating from profile
-              // For now, using vehicle average_rating as proxy
-              // In future, query profiles table for provider_rating
-              final rating = e.vehicle.averageRating;
-              
-              // Check min condition
-              if (_minRating != null && rating < _minRating!) {
-                return false;
-              }
-              
-              // Check max condition
-              if (_maxRating != null && rating > _maxRating!) {
-                return false;
-              }
-              
-              return true;
-            })
-            .toList(growable: false);
+              .where(
+                (e) => e.slot.currencyType.toUpperCase() == _selectedCurrency,
+              )
+              .toList(growable: false);
+    debugPrint(
+      '?? After currency filter (${_selectedCurrency ?? "all"}): ${currencyFiltered.length}',
+    );
+
+    // Apply rating filter (min and max rating)
+    final ratingFiltered = (_minRating == null && _maxRating == null)
+        ? currencyFiltered
+        : currencyFiltered
+              .where((e) {
+                // Get provider rating from profile
+                // For now, using vehicle average_rating as proxy
+                // In future, query profiles table for provider_rating
+                final rating = e.vehicle.averageRating;
+
+                // Check min condition
+                if (_minRating != null && rating < _minRating!) {
+                  return false;
+                }
+
+                // Check max condition
+                if (_maxRating != null && rating > _maxRating!) {
+                  return false;
+                }
+
+                return true;
+              })
+              .toList(growable: false);
     debugPrint(
       '⭐ After rating filter (${_minRating?.toStringAsFixed(1) ?? "any"}-${_maxRating?.toStringAsFixed(1) ?? "any"} stars): ${ratingFiltered.length}',
     );
 
     // Apply rating count filter (min and max number of ratings)
-    final ratingCountFiltered = (_minRatingCount == null && _maxRatingCount == null)
+    final ratingCountFiltered =
+        (_minRatingCount == null && _maxRatingCount == null)
         ? ratingFiltered
         : ratingFiltered
-            .where((e) {
-              // Count reviews for this vehicle's provider
-              final reviews = ReviewRepository.instance.reviews.value
-                  .where((r) => r.revieweeId == e.vehicle.userId)
-                  .toList();
-              final count = reviews.length;
-              
-              // Check min condition
-              if (_minRatingCount != null && count < _minRatingCount!) {
-                return false;
-              }
-              
-              // Check max condition
-              if (_maxRatingCount != null && count > _maxRatingCount!) {
-                return false;
-              }
-              
-              return true;
-            })
-            .toList(growable: false);
+              .where((e) {
+                // Count reviews for this vehicle's provider
+                final reviews = ReviewRepository.instance.reviews.value
+                    .where((r) => r.revieweeId == e.vehicle.userId)
+                    .toList();
+                final count = reviews.length;
+
+                // Check min condition
+                if (_minRatingCount != null && count < _minRatingCount!) {
+                  return false;
+                }
+
+                // Check max condition
+                if (_maxRatingCount != null && count > _maxRatingCount!) {
+                  return false;
+                }
+
+                return true;
+              })
+              .toList(growable: false);
     debugPrint(
       '🔢 After rating count filter (${_minRatingCount ?? "any"}-${_maxRatingCount ?? "any"} ratings): ${ratingCountFiltered.length}',
     );
@@ -5169,160 +5888,216 @@ class _PostsPageState extends State<PostsPage> {
               .where((e) => e.slot.withOperator == _withOperator)
               .toList();
 
-    // Apply security deposit filter (Lease only)
-    final depositFiltered = (_minSecurityDeposit == null &&
-            _maxSecurityDeposit == null)
+    // Apply security deposit filter (ALL service types)
+    // Step 1: Filter by presence/absence of deposit
+    final depositPresenceFiltered = _requiresSecurityDeposit == null
         ? operatorFiltered
-        : operatorFiltered
-            .where((e) {
-              if (e.slot.serviceType != ServiceType.lease) return true;
-              final d = e.slot.securityDeposit;
-              if (d == null) return false;
-              if (_minSecurityDeposit != null && d < _minSecurityDeposit!) {
-                return false;
-              }
-              if (_maxSecurityDeposit != null && d > _maxSecurityDeposit!) {
-                return false;
-              }
-              return true;
-            })
-            .toList(growable: false);
+        : operatorFiltered.where((e) {
+            final hasDeposit =
+                e.slot.securityDeposit != null && e.slot.securityDeposit! > 0;
+            // _requiresSecurityDeposit: true = with deposit, false = without deposit
+            return hasDeposit == _requiresSecurityDeposit;
+          }).toList();
+
+    // Step 2: Filter by deposit amount range (only if "with deposit" is selected)
+    final depositFiltered =
+        (_minSecurityDeposit == null && _maxSecurityDeposit == null)
+        ? depositPresenceFiltered
+        : depositPresenceFiltered
+              .where((e) {
+                final d = e.slot.securityDeposit;
+                if (d == null) return false;
+                if (_minSecurityDeposit != null && d < _minSecurityDeposit!) {
+                  return false;
+                }
+                if (_maxSecurityDeposit != null && d > _maxSecurityDeposit!) {
+                  return false;
+                }
+                return true;
+              })
+              .toList(growable: false);
 
     // Apply parcel dimension filter
-    final hasParcelFilter = _minParcelWeight != null || _maxParcelWeight != null ||
-        _minParcelLength != null || _maxParcelLength != null ||
-        _minParcelWidth  != null || _maxParcelWidth  != null ||
-        _minParcelHeight != null || _maxParcelHeight != null;
+    final hasParcelFilter =
+        _minParcelWeight != null ||
+        _maxParcelWeight != null ||
+        _minParcelLength != null ||
+        _maxParcelLength != null ||
+        _minParcelWidth != null ||
+        _maxParcelWidth != null ||
+        _minParcelHeight != null ||
+        _maxParcelHeight != null;
     final parcelFiltered = !hasParcelFilter
         ? depositFiltered
-        : depositFiltered.where((e) {
-            if (e.slot.serviceType != ServiceType.parcel) return true;
-            bool check(double? val, double? min, double? max) {
-              if (val == null) return min == null && max == null;
-              if (min != null && val < min) return false;
-              if (max != null && val > max) return false;
-              return true;
-            }
-            return check(e.slot.maxWeight, _minParcelWeight, _maxParcelWeight) &&
-                check(e.slot.maxLength, _minParcelLength, _maxParcelLength) &&
-                check(e.slot.maxWidth,  _minParcelWidth,  _maxParcelWidth)  &&
-                check(e.slot.maxHeight, _minParcelHeight, _maxParcelHeight);
-          }).toList(growable: false);
+        : depositFiltered
+              .where((e) {
+                if (e.slot.serviceType != ServiceType.parcel) return true;
+                bool check(double? val, double? min, double? max) {
+                  if (val == null) return min == null && max == null;
+                  if (min != null && val < min) return false;
+                  if (max != null && val > max) return false;
+                  return true;
+                }
+
+                return check(
+                      e.slot.maxWeight,
+                      _minParcelWeight,
+                      _maxParcelWeight,
+                    ) &&
+                    check(
+                      e.slot.maxLength,
+                      _minParcelLength,
+                      _maxParcelLength,
+                    ) &&
+                    check(e.slot.maxWidth, _minParcelWidth, _maxParcelWidth) &&
+                    check(e.slot.maxHeight, _minParcelHeight, _maxParcelHeight);
+              })
+              .toList(growable: false);
 
     // Apply route type filter
     final routeFiltered = _selectedSlotType == null
         ? parcelFiltered
         : parcelFiltered
-            .where((e) => e.slot.slotType == _selectedSlotType)
-            .toList(growable: false);
+              .where((e) => e.slot.slotType == _selectedSlotType)
+              .toList(growable: false);
     // Apply pickup mode filter
     final pickupFiltered = _selectedPickupMode == null
         ? routeFiltered
         : routeFiltered
-            .where((e) => e.slot.pickupOption == _selectedPickupMode)
-            .toList(growable: false);
-    
+              .where((e) => e.slot.pickupOption == _selectedPickupMode)
+              .toList(growable: false);
+
     // Apply booking mode (post mode) filter
     final postModeFiltered = _selectedPostMode == null
         ? pickupFiltered
         : pickupFiltered
-            .where((e) {
-              if (e.slot.postMode != _selectedPostMode) return false;
-              
-              // If Wait for Full is selected and deadline filter is set
-              if (_selectedPostMode == PostMode.waitForFull && 
-                  _waitForFullDeadlineHours != null) {
-                final slotDeadline = e.slot.waitForFullDeadlineHours;
-                if (slotDeadline == null) return false;
-                return slotDeadline == _waitForFullDeadlineHours;
-              }
-              
-              return true;
-            })
-            .toList(growable: false);
+              .where((e) {
+                if (e.slot.postMode != _selectedPostMode) return false;
+
+                // If Wait for Full is selected and deadline filter is set
+                if (_selectedPostMode == PostMode.waitForFull &&
+                    _waitForFullDeadlineHours != null) {
+                  final slotDeadline = e.slot.waitForFullDeadlineHours;
+                  if (slotDeadline == null) return false;
+                  return slotDeadline == _waitForFullDeadlineHours;
+                }
+
+                return true;
+              })
+              .toList(growable: false);
 
     // Apply location filters
-    final locationFiltered = (_filterFromLocation == null ||
-                _filterFromLocation!.trim().isEmpty) &&
+    final locationFiltered =
+        (_filterFromLocation == null || _filterFromLocation!.trim().isEmpty) &&
             (_filterToLocation == null || _filterToLocation!.trim().isEmpty) &&
-            (_filterBaseLocation == null ||
-                _filterBaseLocation!.trim().isEmpty)
+            (_filterBaseLocation == null || _filterBaseLocation!.trim().isEmpty)
         ? postModeFiltered
         : postModeFiltered
-            .where((e) {
-              final slot = e.slot;
-              final fromNeedle = (_filterFromLocation ?? '').trim().toLowerCase();
-              final toNeedle = (_filterToLocation ?? '').trim().toLowerCase();
-              final baseNeedle = (_filterBaseLocation ?? '').trim().toLowerCase();
+              .where((e) {
+                final slot = e.slot;
+                final fromNeedle = (_filterFromLocation ?? '')
+                    .trim()
+                    .toLowerCase();
+                final toNeedle = (_filterToLocation ?? '').trim().toLowerCase();
+                final baseNeedle = (_filterBaseLocation ?? '')
+                    .trim()
+                    .toLowerCase();
 
-              final fromHay = (slot.fromLocation ?? '').toLowerCase();
-              final toHay = (slot.toLocation ?? '').toLowerCase();
+                final fromHay = (slot.fromLocation ?? '').toLowerCase();
+                final toHay = (slot.toLocation ?? '').toLowerCase();
 
-              if (fromNeedle.isNotEmpty && !fromHay.contains(fromNeedle)) {
-                return false;
-              }
-              if (toNeedle.isNotEmpty && !toHay.contains(toNeedle)) {
-                return false;
-              }
-
-              // Base location: use radius-based filtering for fromRange slots
-              if (baseNeedle.isNotEmpty) {
-                final rawBase = slot.baseLocation ?? '';
-                // baseLocation format: "Name|lat,lon"
-                final parts = rawBase.split('|');
-                final coordStr = parts.length == 2 ? parts[1] : null;
-                final coords = coordStr?.split(',');
-                final baseLat = coords != null && coords.length == 2
-                    ? double.tryParse(coords[0])
-                    : null;
-                final baseLon = coords != null && coords.length == 2
-                    ? double.tryParse(coords[1])
-                    : null;
-
-                final searchLatLon = _filterBaseLatLon;
-                final slotRadius = slot.radius;
-
-                if (baseLat != null &&
-                    baseLon != null &&
-                    searchLatLon != null &&
-                    slotRadius != null &&
-                    slotRadius > 0) {
-                  // Radius-based: show slot if searched location is within slot's radius
-                  final dist = _haversineKm(
-                    searchLatLon.$1,
-                    searchLatLon.$2,
-                    baseLat,
-                    baseLon,
-                  );
-                  if (dist > slotRadius) return false;
-                } else {
-                  // Fallback: text contains match
-                  final baseHay = rawBase.toLowerCase();
-                  if (!baseHay.contains(baseNeedle)) return false;
+                if (fromNeedle.isNotEmpty && !fromHay.contains(fromNeedle)) {
+                  return false;
                 }
-              }
+                if (toNeedle.isNotEmpty && !toHay.contains(toNeedle)) {
+                  return false;
+                }
 
-              return true;
-            })
-            .toList(growable: false);
+                // Base location: use radius-based filtering for fromRange slots
+                if (baseNeedle.isNotEmpty) {
+                  final rawBase = slot.baseLocation ?? '';
+                  // baseLocation format: "Name|lat,lon"
+                  final parts = rawBase.split('|');
+                  final coordStr = parts.length == 2 ? parts[1] : null;
+                  final coords = coordStr?.split(',');
+                  final baseLat = coords != null && coords.length == 2
+                      ? double.tryParse(coords[0])
+                      : null;
+                  final baseLon = coords != null && coords.length == 2
+                      ? double.tryParse(coords[1])
+                      : null;
 
-    final distanceFiltered = _maxDistanceKm == null
+                  final searchLatLon = _filterBaseLatLon;
+                  final slotRadius = slot.radius;
+
+                  if (baseLat != null &&
+                      baseLon != null &&
+                      searchLatLon != null &&
+                      slotRadius != null &&
+                      slotRadius > 0) {
+                    // Radius-based: show slot if searched location is within slot's radius
+                    final dist = _haversineKm(
+                      searchLatLon.$1,
+                      searchLatLon.$2,
+                      baseLat,
+                      baseLon,
+                    );
+                    if (dist > slotRadius) return false;
+                  } else {
+                    // Fallback: text contains match
+                    final baseHay = rawBase.toLowerCase();
+                    if (!baseHay.contains(baseNeedle)) return false;
+                  }
+                }
+
+                return true;
+              })
+              .toList(growable: false);
+
+    // Apply country filter
+    final countryFiltered = _filterCountries.isEmpty
         ? locationFiltered
         : locationFiltered
-            .where((e) {
-              final userPos = _currentUserPosition;
-              if (userPos == null) return true;
-              final vehiclePos = _vehicleResolvedLatLng(e.vehicle);
-              if (vehiclePos == null) return false;
-              final distance = _haversineKm(
-                userPos.$1,
-                userPos.$2,
-                vehiclePos.$1,
-                vehiclePos.$2,
-              );
-              return distance <= (_maxDistanceKm ?? double.infinity);
-            })
-            .toList(growable: false);
+              .where((e) {
+                // Extract country code from the post's location
+                // Try baseLocation first (for fromRange slots), then fromLocation
+                final locationToCheck =
+                    (e.slot.baseLocation?.isNotEmpty ?? false)
+                    ? e.slot.baseLocation
+                    : e.slot.fromLocation;
+
+                final countryCode = PaymentService.countryCodeFromLocation(
+                  locationToCheck,
+                );
+
+                // If country code couldn't be determined, exclude the post
+                if (countryCode == null) return false;
+
+                // Check if the country code matches any selected countries
+                return _filterCountries.contains(countryCode);
+              })
+              .toList(growable: false);
+    debugPrint(
+      '🌍 After country filter (${_filterCountries.isEmpty ? "all" : _filterCountries.join(", ")}): ${countryFiltered.length}',
+    );
+
+    final distanceFiltered = _maxDistanceKm == null
+        ? countryFiltered
+        : countryFiltered
+              .where((e) {
+                final userPos = _currentUserPosition;
+                if (userPos == null) return true;
+                final vehiclePos = _vehicleResolvedLatLng(e.vehicle);
+                if (vehiclePos == null) return false;
+                final distance = _haversineKm(
+                  userPos.$1,
+                  userPos.$2,
+                  vehiclePos.$1,
+                  vehiclePos.$2,
+                );
+                return distance <= (_maxDistanceKm ?? double.infinity);
+              })
+              .toList(growable: false);
 
     if (!_nearestEnabled) {
       final result = _applySorting(distanceFiltered);
@@ -5331,13 +6106,15 @@ class _PostsPageState extends State<PostsPage> {
     }
 
     final result = _sortByDistance(distanceFiltered);
-    debugPrint('?? FINAL RESULT: ${result.length} posts after all filters (sorted by distance)');
+    debugPrint(
+      '?? FINAL RESULT: ${result.length} posts after all filters (sorted by distance)',
+    );
     return result;
   }
 
   List<SlotFeedItem> _applySorting(List<SlotFeedItem> items) {
     final sorted = List<SlotFeedItem>.from(items);
-    
+
     switch (_sortOption) {
       case SortOption.priceHighToLow:
         sorted.sort((a, b) => b.slot.price.compareTo(a.slot.price));
@@ -5346,10 +6123,14 @@ class _PostsPageState extends State<PostsPage> {
         sorted.sort((a, b) => a.slot.price.compareTo(b.slot.price));
         break;
       case SortOption.ratingHighToLow:
-        sorted.sort((a, b) => b.vehicle.averageRating.compareTo(a.vehicle.averageRating));
+        sorted.sort(
+          (a, b) => b.vehicle.averageRating.compareTo(a.vehicle.averageRating),
+        );
         break;
       case SortOption.bookingsHighToLow:
-        sorted.sort((a, b) => b.vehicle.totalBookings.compareTo(a.vehicle.totalBookings));
+        sorted.sort(
+          (a, b) => b.vehicle.totalBookings.compareTo(a.vehicle.totalBookings),
+        );
         break;
       case SortOption.newest:
         sorted.sort((a, b) => b.slot.createdAt.compareTo(a.slot.createdAt));
@@ -5358,7 +6139,7 @@ class _PostsPageState extends State<PostsPage> {
         sorted.sort((a, b) => a.slot.createdAt.compareTo(b.slot.createdAt));
         break;
     }
-    
+
     return sorted;
   }
 
@@ -5431,9 +6212,9 @@ class _PostsPageState extends State<PostsPage> {
         return false;
       } catch (e) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Location error: $e')),
-          );
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text('Location error: $e')));
         }
         return false;
       }
@@ -5492,7 +6273,8 @@ class _PostsPageState extends State<PostsPage> {
       text: _maxPrice?.toInt().toString() ?? '',
     );
     final maxDistanceController = TextEditingController(
-      text: _maxDistanceKm?.toStringAsFixed(
+      text:
+          _maxDistanceKm?.toStringAsFixed(
             _maxDistanceKm != null && _maxDistanceKm! % 1 == 0 ? 0 : 1,
           ) ??
           '',
@@ -5606,12 +6388,14 @@ class _PostsPageState extends State<PostsPage> {
                             ? const SizedBox(
                                 height: 18,
                                 width: 18,
-                                child:
-                                    CircularProgressIndicator(strokeWidth: 2),
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
                               )
                             : null,
                       ),
                       const SizedBox(height: 12),
+
                       TextField(
                         controller: maxDistanceController,
                         decoration: const InputDecoration(
@@ -5651,8 +6435,7 @@ class _PostsPageState extends State<PostsPage> {
                                 label: const Text('Pvt'),
                                 selected: current == 'private',
                                 onSelected: (_) async {
-                                  setSheetState(
-                                      () => businessType = 'private');
+                                  setSheetState(() => businessType = 'private');
                                   await ProfileRepository.instance.update(
                                     businessType: 'private',
                                     setBusinessTypeNull: false,
@@ -5756,9 +6539,12 @@ class _PostsPageState extends State<PostsPage> {
                                 label: Text(m.displayName),
                                 selected: _selectedPostMode == m,
                                 onSelected: (_) => setSheetState(() {
-                                  _selectedPostMode = _selectedPostMode == m ? null : m;
+                                  _selectedPostMode = _selectedPostMode == m
+                                      ? null
+                                      : m;
                                   // Reset deadline filter when changing mode
-                                  if (_selectedPostMode != PostMode.waitForFull) {
+                                  if (_selectedPostMode !=
+                                      PostMode.waitForFull) {
                                     _waitForFullDeadlineHours = null;
                                   }
                                 }),
@@ -5793,10 +6579,11 @@ class _PostsPageState extends State<PostsPage> {
                           Expanded(
                             child: TextField(
                               controller: minPriceController,
-                              decoration: const InputDecoration(
+                              decoration: InputDecoration(
                                 labelText: 'Min Price',
                                 border: OutlineInputBorder(),
-                                prefixIcon: Icon(Icons.currency_rupee),
+                                prefixText:
+                                    AppPreferences.instance.currencySymbol,
                               ),
                               keyboardType: TextInputType.number,
                             ),
@@ -5805,15 +6592,190 @@ class _PostsPageState extends State<PostsPage> {
                           Expanded(
                             child: TextField(
                               controller: maxPriceController,
-                              decoration: const InputDecoration(
+                              decoration: InputDecoration(
                                 labelText: 'Max Price',
                                 border: OutlineInputBorder(),
-                                prefixIcon: Icon(Icons.currency_rupee),
+                                prefixText:
+                                    AppPreferences.instance.currencySymbol,
                               ),
                               keyboardType: TextInputType.number,
                             ),
                           ),
                         ],
+                      ),
+                      const SizedBox(height: 16),
+                      // Currency Filter
+                      const Text(
+                        'Currency',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      DropdownButtonFormField<String>(
+                        decoration: const InputDecoration(
+                          labelText: 'Filter by currency',
+                          border: OutlineInputBorder(),
+                          prefixIcon: Icon(Icons.attach_money),
+                        ),
+                        initialValue: _selectedCurrency,
+                        items: const [
+                          DropdownMenuItem(
+                            value: null,
+                            child: Text('All currencies'),
+                          ),
+                          // Asia
+                          DropdownMenuItem(
+                            value: 'INR',
+                            child: Text('🇮🇳 INR - Indian Rupee'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'AED',
+                            child: Text('🇦🇪 AED - UAE Dirham'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'SGD',
+                            child: Text('🇸🇬 SGD - Singapore Dollar'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'JPY',
+                            child: Text('🇯🇵 JPY - Japanese Yen'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'CNY',
+                            child: Text('🇨🇳 CNY - Chinese Yuan'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'HKD',
+                            child: Text('🇭🇰 HKD - Hong Kong Dollar'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'KRW',
+                            child: Text('🇰🇷 KRW - Korean Won'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'MYR',
+                            child: Text('🇲🇾 MYR - Malaysian Ringgit'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'THB',
+                            child: Text('🇹🇭 THB - Thai Baht'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'IDR',
+                            child: Text('🇮� IDR - Indonesian Rupiah'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'PHP',
+                            child: Text('🇵🇭 PHP - Philippine Peso'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'PKR',
+                            child: Text('🇵🇰 PKR - Pakistani Rupee'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'BDT',
+                            child: Text('🇧🇩 BDT - Bangladeshi Taka'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'LKR',
+                            child: Text('🇱🇰 LKR - Sri Lankan Rupee'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'NPR',
+                            child: Text('🇳🇵 NPR - Nepalese Rupee'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'SAR',
+                            child: Text('🇸🇦 SAR - Saudi Riyal'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'QAR',
+                            child: Text('🇶🇦 QAR - Qatari Riyal'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'KWD',
+                            child: Text('🇰🇼 KWD - Kuwaiti Dinar'),
+                          ),
+                          // Americas
+                          DropdownMenuItem(
+                            value: 'USD',
+                            child: Text('🇺🇸 USD - US Dollar'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'CAD',
+                            child: Text('�� CAD - Canadian Dollar'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'MXN',
+                            child: Text('🇲🇽 MXN - Mexican Peso'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'BRL',
+                            child: Text('🇧🇷 BRL - Brazilian Real'),
+                          ),
+                          // Europe
+                          DropdownMenuItem(
+                            value: 'EUR',
+                            child: Text('🇪🇺 EUR - Euro'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'GBP',
+                            child: Text('�� GBP - British Pound'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'CHF',
+                            child: Text('🇨🇭 CHF - Swiss Franc'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'SEK',
+                            child: Text('🇸� SEK - Swedish Krona'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'NOK',
+                            child: Text('🇳🇴 NOK - Norwegian Krone'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'DKK',
+                            child: Text('🇩🇰 DKK - Danish Krone'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'PLN',
+                            child: Text('🇵🇱 PLN - Polish Zloty'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'CZK',
+                            child: Text('🇨🇿 CZK - Czech Koruna'),
+                          ),
+                          // Oceania
+                          DropdownMenuItem(
+                            value: 'AUD',
+                            child: Text('🇦🇺 AUD - Australian Dollar'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'NZD',
+                            child: Text('🇳🇿 NZD - New Zealand Dollar'),
+                          ),
+                          // Africa
+                          DropdownMenuItem(
+                            value: 'ZAR',
+                            child: Text('�🇦 ZAR - South African Rand'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'NGN',
+                            child: Text('🇳🇬 NGN - Nigerian Naira'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'KES',
+                            child: Text('🇰🇪 KES - Kenyan Shilling'),
+                          ),
+                        ],
+                        onChanged: (value) {
+                          setSheetState(() {
+                            _selectedCurrency = value;
+                          });
+                        },
                       ),
                       const SizedBox(height: 16),
                       // Rating Filter (Min and Max)
@@ -5835,7 +6797,10 @@ class _PostsPageState extends State<PostsPage> {
                                 border: OutlineInputBorder(),
                                 prefixIcon: Icon(Icons.star),
                               ),
-                              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                              keyboardType:
+                                  const TextInputType.numberWithOptions(
+                                    decimal: true,
+                                  ),
                               controller: TextEditingController(
                                 text: _minRating?.toStringAsFixed(1) ?? '',
                               ),
@@ -5874,7 +6839,10 @@ class _PostsPageState extends State<PostsPage> {
                                 border: OutlineInputBorder(),
                                 prefixIcon: Icon(Icons.star),
                               ),
-                              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                              keyboardType:
+                                  const TextInputType.numberWithOptions(
+                                    decimal: true,
+                                  ),
                               controller: TextEditingController(
                                 text: _maxRating?.toStringAsFixed(1) ?? '',
                               ),
@@ -6000,8 +6968,9 @@ class _PostsPageState extends State<PostsPage> {
                         contentPadding: EdgeInsets.zero,
                         leading: const Icon(Icons.calendar_month),
                         title: const Text('From date/time'),
-                        subtitle:
-                            Text(from == null ? 'Any' : _fmtDateTime(from!)),
+                        subtitle: Text(
+                          from == null ? 'Any' : _fmtDateTime(from!),
+                        ),
                         trailing: TextButton(
                           onPressed: () async {
                             final pickedDate = await showDatePicker(
@@ -6018,8 +6987,9 @@ class _PostsPageState extends State<PostsPage> {
                                 from ?? DateTime.now(),
                               ),
                               builder: (ctx, child) => MediaQuery(
-                                data: MediaQuery.of(ctx).copyWith(
-                                    alwaysUse24HourFormat: true),
+                                data: MediaQuery.of(
+                                  ctx,
+                                ).copyWith(alwaysUse24HourFormat: true),
                                 child: child!,
                               ),
                             );
@@ -6055,11 +7025,13 @@ class _PostsPageState extends State<PostsPage> {
                             if (pickedDate == null) return;
                             final pickedTime = await showTimePicker(
                               context: context,
-                              initialTime:
-                                  TimeOfDay.fromDateTime(to ?? DateTime.now()),
+                              initialTime: TimeOfDay.fromDateTime(
+                                to ?? DateTime.now(),
+                              ),
                               builder: (ctx, child) => MediaQuery(
-                                data: MediaQuery.of(ctx).copyWith(
-                                    alwaysUse24HourFormat: true),
+                                data: MediaQuery.of(
+                                  ctx,
+                                ).copyWith(alwaysUse24HourFormat: true),
                                 child: child!,
                               ),
                             );
@@ -6079,10 +7051,65 @@ class _PostsPageState extends State<PostsPage> {
                         ),
                       ),
                       const SizedBox(height: 12),
-                      if (_selectedServiceType == ServiceType.lease) ...[
+                      // Security Deposit Filter (available for all service types)
+                      const Text(
+                        'Security Deposit',
+                        style: TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                      const SizedBox(height: 8),
+                      // Toggle: With / Without / Both
+                      Row(
+                        children: [
+                          Expanded(
+                            child: FilterChip(
+                              label: const Text('With Deposit'),
+                              selected: _requiresSecurityDeposit == true,
+                              onSelected: (selected) {
+                                setState(() {
+                                  _requiresSecurityDeposit = selected
+                                      ? true
+                                      : null;
+                                });
+                              },
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: FilterChip(
+                              label: const Text('Without'),
+                              selected: _requiresSecurityDeposit == false,
+                              onSelected: (selected) {
+                                setState(() {
+                                  _requiresSecurityDeposit = selected
+                                      ? false
+                                      : null;
+                                });
+                              },
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: FilterChip(
+                              label: const Text('Both'),
+                              selected: _requiresSecurityDeposit == null,
+                              onSelected: (selected) {
+                                setState(() {
+                                  _requiresSecurityDeposit = null;
+                                });
+                              },
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      // Amount range (only shown when "With Deposit" is selected)
+                      if (_requiresSecurityDeposit == true) ...[
                         const Text(
-                          'Security Deposit',
-                          style: TextStyle(fontWeight: FontWeight.w700),
+                          'Deposit Amount Range',
+                          style: TextStyle(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 14,
+                          ),
                         ),
                         const SizedBox(height: 8),
                         Row(
@@ -6090,10 +7117,11 @@ class _PostsPageState extends State<PostsPage> {
                             Expanded(
                               child: TextField(
                                 controller: minSecurityDepositController,
-                                decoration: const InputDecoration(
+                                decoration: InputDecoration(
                                   labelText: 'Min Deposit',
                                   border: OutlineInputBorder(),
-                                  prefixIcon: Icon(Icons.currency_rupee),
+                                  prefixText:
+                                      AppPreferences.instance.currencySymbol,
                                 ),
                                 keyboardType: TextInputType.number,
                               ),
@@ -6102,18 +7130,19 @@ class _PostsPageState extends State<PostsPage> {
                             Expanded(
                               child: TextField(
                                 controller: maxSecurityDepositController,
-                                decoration: const InputDecoration(
+                                decoration: InputDecoration(
                                   labelText: 'Max Deposit',
                                   border: OutlineInputBorder(),
-                                  prefixIcon: Icon(Icons.currency_rupee),
+                                  prefixText:
+                                      AppPreferences.instance.currencySymbol,
                                 ),
                                 keyboardType: TextInputType.number,
                               ),
                             ),
                           ],
                         ),
-                        const SizedBox(height: 12),
                       ],
+                      const SizedBox(height: 12),
                       if (_selectedServiceType == ServiceType.parcel) ...[
                         const Text(
                           'Parcel Dimensions',
@@ -6130,8 +7159,9 @@ class _PostsPageState extends State<PostsPage> {
                                   border: OutlineInputBorder(),
                                   prefixIcon: Icon(Icons.scale),
                                 ),
-                                keyboardType:
-                                    TextInputType.numberWithOptions(decimal: true),
+                                keyboardType: TextInputType.numberWithOptions(
+                                  decimal: true,
+                                ),
                               ),
                             ),
                             const SizedBox(width: 8),
@@ -6143,8 +7173,9 @@ class _PostsPageState extends State<PostsPage> {
                                   border: OutlineInputBorder(),
                                   prefixIcon: Icon(Icons.scale),
                                 ),
-                                keyboardType:
-                                    TextInputType.numberWithOptions(decimal: true),
+                                keyboardType: TextInputType.numberWithOptions(
+                                  decimal: true,
+                                ),
                               ),
                             ),
                           ],
@@ -6160,8 +7191,9 @@ class _PostsPageState extends State<PostsPage> {
                                   border: OutlineInputBorder(),
                                   prefixIcon: Icon(Icons.straighten),
                                 ),
-                                keyboardType:
-                                    TextInputType.numberWithOptions(decimal: true),
+                                keyboardType: TextInputType.numberWithOptions(
+                                  decimal: true,
+                                ),
                               ),
                             ),
                             const SizedBox(width: 8),
@@ -6173,8 +7205,9 @@ class _PostsPageState extends State<PostsPage> {
                                   border: OutlineInputBorder(),
                                   prefixIcon: Icon(Icons.straighten),
                                 ),
-                                keyboardType:
-                                    TextInputType.numberWithOptions(decimal: true),
+                                keyboardType: TextInputType.numberWithOptions(
+                                  decimal: true,
+                                ),
                               ),
                             ),
                           ],
@@ -6190,8 +7223,9 @@ class _PostsPageState extends State<PostsPage> {
                                   border: OutlineInputBorder(),
                                   prefixIcon: Icon(Icons.width_normal),
                                 ),
-                                keyboardType:
-                                    TextInputType.numberWithOptions(decimal: true),
+                                keyboardType: TextInputType.numberWithOptions(
+                                  decimal: true,
+                                ),
                               ),
                             ),
                             const SizedBox(width: 8),
@@ -6203,8 +7237,9 @@ class _PostsPageState extends State<PostsPage> {
                                   border: OutlineInputBorder(),
                                   prefixIcon: Icon(Icons.width_normal),
                                 ),
-                                keyboardType:
-                                    TextInputType.numberWithOptions(decimal: true),
+                                keyboardType: TextInputType.numberWithOptions(
+                                  decimal: true,
+                                ),
                               ),
                             ),
                           ],
@@ -6220,8 +7255,9 @@ class _PostsPageState extends State<PostsPage> {
                                   border: OutlineInputBorder(),
                                   prefixIcon: Icon(Icons.height),
                                 ),
-                                keyboardType:
-                                    TextInputType.numberWithOptions(decimal: true),
+                                keyboardType: TextInputType.numberWithOptions(
+                                  decimal: true,
+                                ),
                               ),
                             ),
                             const SizedBox(width: 8),
@@ -6233,8 +7269,9 @@ class _PostsPageState extends State<PostsPage> {
                                   border: OutlineInputBorder(),
                                   prefixIcon: Icon(Icons.height),
                                 ),
-                                keyboardType:
-                                    TextInputType.numberWithOptions(decimal: true),
+                                keyboardType: TextInputType.numberWithOptions(
+                                  decimal: true,
+                                ),
                               ),
                             ),
                           ],
@@ -6257,6 +7294,7 @@ class _PostsPageState extends State<PostsPage> {
                                   _toDateTime = null;
                                   _nearestEnabled = false;
                                   _maxDistanceKm = null;
+                                  _requiresSecurityDeposit = null;
                                   _minSecurityDeposit = null;
                                   _maxSecurityDeposit = null;
                                   _selectedSlotType = null;
@@ -6276,6 +7314,7 @@ class _PostsPageState extends State<PostsPage> {
                                   _minParcelHeight = null;
                                   _maxParcelHeight = null;
                                   _selectedServiceType = null;
+                                  _selectedCurrency = null;
                                   _searchController.clear();
                                   _fromSearchController.clear();
                                   _toSearchController.clear();
@@ -6291,12 +7330,14 @@ class _PostsPageState extends State<PostsPage> {
                             child: FilledButton(
                               onPressed: () async {
                                 final parsedMaxDistance = double.tryParse(
-                                    maxDistanceController.text.trim());
-                                final wantsDistance = parsedMaxDistance !=
-                                        null &&
+                                  maxDistanceController.text.trim(),
+                                );
+                                final wantsDistance =
+                                    parsedMaxDistance != null &&
                                     parsedMaxDistance.isFinite &&
                                     parsedMaxDistance > 0;
-                                if (wantsDistance && _currentUserPosition == null) {
+                                if (wantsDistance &&
+                                    _currentUserPosition == null) {
                                   if (context.mounted) {
                                     Navigator.pop(context);
                                   }
@@ -6304,7 +7345,9 @@ class _PostsPageState extends State<PostsPage> {
                                   if (!mounted) return;
                                   if (_currentUserPosition == null) {
                                     if (context.mounted) {
-                                      ScaffoldMessenger.of(context).showSnackBar(
+                                      ScaffoldMessenger.of(
+                                        context,
+                                      ).showSnackBar(
                                         const SnackBar(
                                           content: Text(
                                             'Location permission required for distance filter',
@@ -6316,23 +7359,26 @@ class _PostsPageState extends State<PostsPage> {
                                   }
                                 }
                                 setState(() {
-                                  _minPrice =
-                                      double.tryParse(minPriceController.text);
-                                  _maxPrice =
-                                      double.tryParse(maxPriceController.text);
+                                  _minPrice = double.tryParse(
+                                    minPriceController.text,
+                                  );
+                                  _maxPrice = double.tryParse(
+                                    maxPriceController.text,
+                                  );
                                   _fromDateTime = from;
                                   _toDateTime = to;
                                   _nearestEnabled = nearest;
-                                  _maxDistanceKm =
-                                      wantsDistance ? parsedMaxDistance : null;
-                                  _minSecurityDeposit = _selectedServiceType ==
-                                          ServiceType.lease
+                                  _maxDistanceKm = wantsDistance
+                                      ? parsedMaxDistance
+                                      : null;
+                                  _minSecurityDeposit =
+                                      _selectedServiceType == ServiceType.lease
                                       ? double.tryParse(
                                           minSecurityDepositController.text,
                                         )
                                       : null;
-                                  _maxSecurityDeposit = _selectedServiceType ==
-                                          ServiceType.lease
+                                  _maxSecurityDeposit =
+                                      _selectedServiceType == ServiceType.lease
                                       ? double.tryParse(
                                           maxSecurityDepositController.text,
                                         )
@@ -6341,54 +7387,67 @@ class _PostsPageState extends State<PostsPage> {
                                   _selectedPickupMode = pickupMode;
                                   _filterFromLocation =
                                       fromLocationController.text.trim().isEmpty
-                                          ? null
-                                          : fromLocationController.text.trim();
+                                      ? null
+                                      : fromLocationController.text.trim();
                                   _filterToLocation =
                                       toLocationController.text.trim().isEmpty
-                                          ? null
-                                          : toLocationController.text.trim();
+                                      ? null
+                                      : toLocationController.text.trim();
                                   _filterBaseLocation =
                                       baseLocationController.text.trim().isEmpty
-                                          ? null
-                                          : baseLocationController.text.trim();
+                                      ? null
+                                      : baseLocationController.text.trim();
                                   _fromSearchController.text =
                                       _filterFromLocation ?? '';
-                                  _toSearchController.text = _filterToLocation ?? '';
+                                  _toSearchController.text =
+                                      _filterToLocation ?? '';
                                   _baseSearchController.text =
                                       _filterBaseLocation ?? '';
                                   _filterBaseLatLon = null;
                                   _minParcelWeight =
                                       _selectedServiceType == ServiceType.parcel
-                                          ? double.tryParse(minWeightController.text)
-                                          : null;
+                                      ? double.tryParse(
+                                          minWeightController.text,
+                                        )
+                                      : null;
                                   _maxParcelWeight =
                                       _selectedServiceType == ServiceType.parcel
-                                          ? double.tryParse(maxWeightController.text)
-                                          : null;
+                                      ? double.tryParse(
+                                          maxWeightController.text,
+                                        )
+                                      : null;
                                   _minParcelLength =
                                       _selectedServiceType == ServiceType.parcel
-                                          ? double.tryParse(minLengthController.text)
-                                          : null;
+                                      ? double.tryParse(
+                                          minLengthController.text,
+                                        )
+                                      : null;
                                   _maxParcelLength =
                                       _selectedServiceType == ServiceType.parcel
-                                          ? double.tryParse(maxLengthController.text)
-                                          : null;
+                                      ? double.tryParse(
+                                          maxLengthController.text,
+                                        )
+                                      : null;
                                   _minParcelWidth =
                                       _selectedServiceType == ServiceType.parcel
-                                          ? double.tryParse(minWidthController.text)
-                                          : null;
+                                      ? double.tryParse(minWidthController.text)
+                                      : null;
                                   _maxParcelWidth =
                                       _selectedServiceType == ServiceType.parcel
-                                          ? double.tryParse(maxWidthController.text)
-                                          : null;
+                                      ? double.tryParse(maxWidthController.text)
+                                      : null;
                                   _minParcelHeight =
                                       _selectedServiceType == ServiceType.parcel
-                                          ? double.tryParse(minHeightController.text)
-                                          : null;
+                                      ? double.tryParse(
+                                          minHeightController.text,
+                                        )
+                                      : null;
                                   _maxParcelHeight =
                                       _selectedServiceType == ServiceType.parcel
-                                          ? double.tryParse(maxHeightController.text)
-                                          : null;
+                                      ? double.tryParse(
+                                          maxHeightController.text,
+                                        )
+                                      : null;
                                 });
 
                                 final baseText = _filterBaseLocation;
@@ -6398,8 +7457,10 @@ class _PostsPageState extends State<PostsPage> {
                                           .searchLocations(baseText);
                                   if (results.isNotEmpty && mounted) {
                                     setState(() {
-                                      _filterBaseLatLon =
-                                          (results.first.lat, results.first.lon);
+                                      _filterBaseLatLon = (
+                                        results.first.lat,
+                                        results.first.lon,
+                                      );
                                     });
                                   }
                                 }
@@ -6446,7 +7507,9 @@ class _PostsPageState extends State<PostsPage> {
       fieldViewBuilder: (context, fieldController, focusNode, onSubmitted) {
         // Keep our controller in sync
         fieldController.text = controller.text;
-        fieldController.addListener(() => controller.text = fieldController.text);
+        fieldController.addListener(
+          () => controller.text = fieldController.text,
+        );
         return TextField(
           controller: fieldController,
           focusNode: focusNode,
@@ -6565,7 +7628,8 @@ class _PostsPageState extends State<PostsPage> {
       '? Capacity check passed, looking for vehicle: ${slot.vehicleId}',
     );
 
-    final vehicleToUse = vehicle ?? VehicleRepository.instance.getById(slot.vehicleId);
+    final vehicleToUse =
+        vehicle ?? VehicleRepository.instance.getById(slot.vehicleId);
     if (vehicleToUse == null) {
       debugPrint('? Vehicle not found in VehicleRepository: ${slot.vehicleId}');
       ScaffoldMessenger.of(
@@ -6590,7 +7654,9 @@ class _PostsPageState extends State<PostsPage> {
     if (result == null) {
       // null means either: user cancelled, OR booking was already created inside the sheet (test mode / payment flow)
       // Both cases are fine ? if booking was created, the sheet already navigated to Requests tab
-      debugPrint('?? Sheet closed without result (booking created internally or user cancelled)');
+      debugPrint(
+        '?? Sheet closed without result (booking created internally or user cancelled)',
+      );
       return;
     }
 
@@ -6599,7 +7665,8 @@ class _PostsPageState extends State<PostsPage> {
     // Use fallback provider info if not provided
     // Priority: 1. Operator contact (if assigned), 2. Provided contact, 3. Owner contact
     final finalProviderName = providerName ?? vehicleToUse.userName;
-    final finalProviderPhone = providerPhone ?? 
+    final finalProviderPhone =
+        providerPhone ??
         (vehicleToUse.operatorPhone ?? _providerPhone(vehicleToUse.userId));
 
     debugPrint('=== BOOKING DEBUG ===');
@@ -6643,7 +7710,9 @@ class _PostsPageState extends State<PostsPage> {
         userGender: result.userGenders[i],
         userPhone: result.userPhones[i],
         userEmail: result.userEmails[i],
-        securityDeposit: slot.serviceType.name == 'lease' ? slot.securityDeposit : null,
+        securityDeposit: slot.serviceType.name == 'lease'
+            ? slot.securityDeposit
+            : null,
       );
 
       if (booking == null) {
@@ -6700,7 +7769,10 @@ class _RequestsPageState extends State<RequestsPage> {
   DateTime? _fromDateTime;
   DateTime? _toDateTime;
 
-  Future<DateTime?> _pickDateTime(BuildContext context, {DateTime? initial}) async {
+  Future<DateTime?> _pickDateTime(
+    BuildContext context, {
+    DateTime? initial,
+  }) async {
     final now = DateTime.now();
     final initDate = initial ?? now;
 
@@ -6718,7 +7790,13 @@ class _RequestsPageState extends State<RequestsPage> {
     );
     if (pickedTime == null) return null;
 
-    return DateTime(pickedDate.year, pickedDate.month, pickedDate.day, pickedTime.hour, pickedTime.minute);
+    return DateTime(
+      pickedDate.year,
+      pickedDate.month,
+      pickedDate.day,
+      pickedTime.hour,
+      pickedTime.minute,
+    );
   }
 
   void _showDateTimeRangeFilter() async {
@@ -6732,8 +7810,9 @@ class _RequestsPageState extends State<RequestsPage> {
           builder: (ctx, setDialogState) {
             String fmtDT(DateTime? dt) {
               if (dt == null) return 'Not set';
-              return '${dt.day}/${dt.month}/${dt.year}  ${dt.hour.toString().padLeft(2,'0')}:${dt.minute.toString().padLeft(2,'0')}';
+              return '${dt.day}/${dt.month}/${dt.year}  ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
             }
+
             return AlertDialog(
               title: const Text('Filter by Date & Time'),
               content: Column(
@@ -6741,9 +7820,15 @@ class _RequestsPageState extends State<RequestsPage> {
                 children: [
                   ListTile(
                     contentPadding: EdgeInsets.zero,
-                    leading: const Icon(Icons.calendar_today, color: Colors.blue),
+                    leading: const Icon(
+                      Icons.calendar_today,
+                      color: Colors.blue,
+                    ),
                     title: const Text('From'),
-                    subtitle: Text(fmtDT(from), style: const TextStyle(fontWeight: FontWeight.w600)),
+                    subtitle: Text(
+                      fmtDT(from),
+                      style: const TextStyle(fontWeight: FontWeight.w600),
+                    ),
                     onTap: () async {
                       final picked = await _pickDateTime(ctx, initial: from);
                       if (picked != null) setDialogState(() => from = picked);
@@ -6752,11 +7837,20 @@ class _RequestsPageState extends State<RequestsPage> {
                   const Divider(),
                   ListTile(
                     contentPadding: EdgeInsets.zero,
-                    leading: const Icon(Icons.calendar_today, color: Colors.green),
+                    leading: const Icon(
+                      Icons.calendar_today,
+                      color: Colors.green,
+                    ),
                     title: const Text('To'),
-                    subtitle: Text(fmtDT(to), style: const TextStyle(fontWeight: FontWeight.w600)),
+                    subtitle: Text(
+                      fmtDT(to),
+                      style: const TextStyle(fontWeight: FontWeight.w600),
+                    ),
                     onTap: () async {
-                      final picked = await _pickDateTime(ctx, initial: to ?? from);
+                      final picked = await _pickDateTime(
+                        ctx,
+                        initial: to ?? from,
+                      );
                       if (picked != null) setDialogState(() => to = picked);
                     },
                   ),
@@ -6765,10 +7859,16 @@ class _RequestsPageState extends State<RequestsPage> {
               actions: [
                 TextButton(
                   onPressed: () {
-                    setState(() { _fromDateTime = null; _toDateTime = null; });
+                    setState(() {
+                      _fromDateTime = null;
+                      _toDateTime = null;
+                    });
                     Navigator.pop(ctx);
                   },
-                  child: const Text('Clear', style: TextStyle(color: Colors.red)),
+                  child: const Text(
+                    'Clear',
+                    style: TextStyle(color: Colors.red),
+                  ),
                 ),
                 TextButton(
                   onPressed: () => Navigator.pop(ctx),
@@ -6776,7 +7876,10 @@ class _RequestsPageState extends State<RequestsPage> {
                 ),
                 FilledButton(
                   onPressed: () {
-                    setState(() { _fromDateTime = from; _toDateTime = to; });
+                    setState(() {
+                      _fromDateTime = from;
+                      _toDateTime = to;
+                    });
                     Navigator.pop(ctx);
                   },
                   child: const Text('Apply'),
@@ -6811,11 +7914,14 @@ class _RequestsPageState extends State<RequestsPage> {
             ),
           IconButton(
             icon: Icon(
-              (_fromDateTime != null || _toDateTime != null) ? Icons.filter_alt : Icons.filter_alt_outlined,
-              color: (_fromDateTime != null || _toDateTime != null) ? Colors.blue : null,
+              (_fromDateTime != null || _toDateTime != null)
+                  ? Icons.filter_alt
+                  : Icons.filter_alt_outlined,
+              color: (_fromDateTime != null || _toDateTime != null)
+                  ? Colors.blue
+                  : null,
             ),
             tooltip: 'Filter by date & time range',
-            
 
             onPressed: _showDateTimeRangeFilter,
           ),
@@ -6829,7 +7935,7 @@ class _RequestsPageState extends State<RequestsPage> {
 class _RequestsBody extends StatefulWidget {
   final DateTime? fromDateTime;
   final DateTime? toDateTime;
-  
+
   const _RequestsBody({this.fromDateTime, this.toDateTime});
 
   @override
@@ -6842,7 +7948,10 @@ class _RequestsBodyState extends State<_RequestsBody> {
 
   // Helper to build a filter chip that toggles a group of statuses
   Widget _buildFilterChip(
-      String label, Color color, Set<BookingStatus> statuses) {
+    String label,
+    Color color,
+    Set<BookingStatus> statuses,
+  ) {
     final isSelected = statuses.any((s) => _statusFilters.contains(s));
     return FilterChip(
       label: Text(label, style: const TextStyle(fontSize: 12)),
@@ -6864,6 +7973,7 @@ class _RequestsBodyState extends State<_RequestsBody> {
       ),
     );
   }
+
   final TextEditingController _searchController = TextEditingController();
   String _query = '';
   final Set<BookingStatus> _statusFilters = {}; // Empty = show all
@@ -6872,8 +7982,14 @@ class _RequestsBodyState extends State<_RequestsBody> {
   @override
   void initState() {
     super.initState();
-    // Wait a bit for repositories to initialize
-    Future.delayed(const Duration(milliseconds: 500), () {
+    // Force refresh bookings from Supabase when screen opens
+    Future.delayed(const Duration(milliseconds: 100), () async {
+      debugPrint('🔄 Requests screen: Refreshing bookings from Supabase...');
+      await BookingRepository.instance.refreshFromSupabase();
+      debugPrint(
+        '✅ Bookings refreshed: ${BookingRepository.instance.bookings.value.length} bookings',
+      );
+
       if (mounted) {
         setState(() {
           _isLoading = false;
@@ -6899,7 +8015,7 @@ class _RequestsBodyState extends State<_RequestsBody> {
   }
 
   String _formatDateTime(DateTime dt) {
-    return '${dt.day}/${dt.month}/${dt.year} ${dt.hour.toString().padLeft(2,'0')}:${dt.minute.toString().padLeft(2,'0')}';
+    return '${dt.day}/${dt.month}/${dt.year} ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
   }
 
   @override
@@ -7061,197 +8177,262 @@ class _RequestsBodyState extends State<_RequestsBody> {
               ),
             ),
           ),
-        if (widget.fromDateTime != null || widget.toDateTime != null) const SizedBox(height: 8),
+        if (widget.fromDateTime != null || widget.toDateTime != null)
+          const SizedBox(height: 8),
         Expanded(
           child: _isLoading
               ? const Center(child: CircularProgressIndicator())
               : ValueListenableBuilder<List<Booking>>(
-            valueListenable: BookingRepository.instance.bookings,
-            builder: (context, bookings, _) {
-              return ValueListenableBuilder<List<UserPostAcceptance>>(
-                valueListenable: UserPostAcceptanceRepository.instance.acceptances,
-                builder: (context, acceptances, _) {
-                  final currentUser = AuthRepository.instance.currentUser;
-                  if (currentUser == null) {
-                    return const Center(
-                      child: Padding(
-                        padding: EdgeInsets.all(24.0),
-                        child: Text('Please login to view requests'),
-                      ),
-                    );
-                  }
-
-                  final filteredBookings = bookings
-                      .where((b) {
-                        if (_isRiderView) {
-                          if (b.userId != currentUser.id) return false;
-                        } else {
-                          if (b.providerId != currentUser.id && b.providerId != 'user1') return false;
-                        }
-                        
-                        // Status filter
-                        if (_statusFilters.isNotEmpty && !_statusFilters.contains(b.status)) {
-                          return false;
-                        }
-                        
-                        // Date & time range filter
-                        if (widget.fromDateTime != null || widget.toDateTime != null) {
-                          final bookingDate = b.createdAt;
-                          if (widget.fromDateTime != null && bookingDate.isBefore(widget.fromDateTime!)) return false;
-                          if (widget.toDateTime != null && bookingDate.isAfter(widget.toDateTime!)) return false;
-                        }
-                        
-                        if (_query.isEmpty) return true;
-                        return (b.providerName ?? '').toLowerCase().contains(_query) ||
-                            (b.userName ?? '').toLowerCase().contains(_query) ||
-                            b.status.name.toLowerCase().contains(_query) ||
-                            b.id.toLowerCase().contains(_query) ||
-                            b.slotId.toLowerCase().contains(_query);
-                      })
-                      .toList(growable: false);
-
-                  final filteredAcceptances = acceptances
-                      .where((a) {
-                        if (_isRiderView) {
-                          if (a.userId != currentUser.id) return false;
-                        } else {
-                          if (a.providerId != currentUser.id) return false;
-                        }
-
-                        // Map AcceptanceStatus → BookingStatus for chip filtering
-                        if (_statusFilters.isNotEmpty) {
-                          final BookingStatus mappedStatus;
-                          switch (a.status) {
-                            case AcceptanceStatus.pending:
-                              mappedStatus = BookingStatus.pending;
-                            case AcceptanceStatus.otpVerified:
-                            case AcceptanceStatus.paid:
-                              mappedStatus = BookingStatus.completed;
-                            case AcceptanceStatus.cancelled:
-                              mappedStatus = BookingStatus.cancelled;
-                          }
-                          if (!_statusFilters.contains(mappedStatus)) return false;
-                        }
-                        
-                        // Date & time range filter
-                        if (widget.fromDateTime != null || widget.toDateTime != null) {
-                          final acceptanceDate = a.createdAt;
-                          if (widget.fromDateTime != null && acceptanceDate.isBefore(widget.fromDateTime!)) return false;
-                          if (widget.toDateTime != null && acceptanceDate.isAfter(widget.toDateTime!)) return false;
-                        }
-                        
-                        if (_query.isEmpty) return true;
-                        return a.status.name.toLowerCase().contains(_query);
-                      })
-                      .toList(growable: false);
-
-                  if (filteredBookings.isEmpty && filteredAcceptances.isEmpty) {
-                    return Center(
-                      child: Padding(
-                        padding: const EdgeInsets.all(24.0),
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Text(
-                              _isRiderView
-                                  ? 'No bookings yet'
-                                  : 'No provider bookings yet',
-                              textAlign: TextAlign.center,
-                              style: const TextStyle(fontSize: 16),
+                  valueListenable: BookingRepository.instance.bookings,
+                  builder: (context, bookings, _) {
+                    return ValueListenableBuilder<List<UserPostAcceptance>>(
+                      valueListenable:
+                          UserPostAcceptanceRepository.instance.acceptances,
+                      builder: (context, acceptances, _) {
+                        final currentUser = AuthRepository.instance.currentUser;
+                        if (currentUser == null) {
+                          return const Center(
+                            child: Padding(
+                              padding: EdgeInsets.all(24.0),
+                              child: Text('Please login to view requests'),
                             ),
-                            if (bookings.isNotEmpty) ...[
-                              const SizedBox(height: 16),
-                              ElevatedButton.icon(
-                                onPressed: () async {
-                                  final confirm = await showDialog<bool>(
-                                    context: context,
-                                    builder: (context) => AlertDialog(
-                                      title: const Text('Clear All Bookings?'),
-                                      content: const Text(
-                                        'This will delete all bookings. This action cannot be undone.',
-                                      ),
-                                      actions: [
-                                        TextButton(
-                                          onPressed: () =>
-                                              Navigator.pop(context, false),
-                                          child: const Text('Cancel'),
-                                        ),
-                                        FilledButton(
-                                          onPressed: () =>
-                                              Navigator.pop(context, true),
-                                          child: const Text('Clear All'),
-                                        ),
-                                      ],
+                          );
+                        }
+
+                        final filteredBookings = bookings
+                            .where((b) {
+                              if (_isRiderView) {
+                                if (b.userId != currentUser.id) return false;
+                              } else {
+                                if (b.providerId != currentUser.id &&
+                                    b.providerId != 'user1') {
+                                  return false;
+                                }
+                              }
+
+                              // Status filter
+                              if (_statusFilters.isNotEmpty &&
+                                  !_statusFilters.contains(b.status)) {
+                                return false;
+                              }
+
+                              // Date & time range filter
+                              if (widget.fromDateTime != null ||
+                                  widget.toDateTime != null) {
+                                final bookingDate = b.createdAt;
+                                if (widget.fromDateTime != null &&
+                                    bookingDate.isBefore(
+                                      widget.fromDateTime!,
+                                    )) {
+                                  return false;
+                                }
+                                if (widget.toDateTime != null &&
+                                    bookingDate.isAfter(widget.toDateTime!)) {
+                                  return false;
+                                }
+                              }
+
+                              if (_query.isEmpty) return true;
+                              return (b.providerName ?? '')
+                                      .toLowerCase()
+                                      .contains(_query) ||
+                                  (b.userName ?? '').toLowerCase().contains(
+                                    _query,
+                                  ) ||
+                                  b.status.name.toLowerCase().contains(
+                                    _query,
+                                  ) ||
+                                  b.id.toLowerCase().contains(_query) ||
+                                  b.slotId.toLowerCase().contains(_query);
+                            })
+                            .toList(growable: false);
+
+                        final filteredAcceptances = acceptances
+                            .where((a) {
+                              if (_isRiderView) {
+                                if (a.userId != currentUser.id) return false;
+                              } else {
+                                if (a.providerId != currentUser.id) {
+                                  return false;
+                                }
+                              }
+
+                              // Map AcceptanceStatus → BookingStatus for chip filtering
+                              if (_statusFilters.isNotEmpty) {
+                                final BookingStatus mappedStatus;
+                                switch (a.status) {
+                                  case AcceptanceStatus.pending:
+                                    mappedStatus = BookingStatus.pending;
+                                  case AcceptanceStatus.otpVerified:
+                                  case AcceptanceStatus.paid:
+                                    mappedStatus = BookingStatus.completed;
+                                  case AcceptanceStatus.cancelled:
+                                    mappedStatus = BookingStatus.cancelled;
+                                }
+                                if (!_statusFilters.contains(mappedStatus)) {
+                                  return false;
+                                }
+                              }
+
+                              // Date & time range filter
+                              if (widget.fromDateTime != null ||
+                                  widget.toDateTime != null) {
+                                final acceptanceDate = a.createdAt;
+                                if (widget.fromDateTime != null &&
+                                    acceptanceDate.isBefore(
+                                      widget.fromDateTime!,
+                                    )) {
+                                  return false;
+                                }
+                                if (widget.toDateTime != null &&
+                                    acceptanceDate.isAfter(
+                                      widget.toDateTime!,
+                                    )) {
+                                  return false;
+                                }
+                              }
+
+                              if (_query.isEmpty) return true;
+                              return a.status.name.toLowerCase().contains(
+                                _query,
+                              );
+                            })
+                            .toList(growable: false);
+
+                        if (filteredBookings.isEmpty &&
+                            filteredAcceptances.isEmpty) {
+                          return Center(
+                            child: Padding(
+                              padding: const EdgeInsets.all(24.0),
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Text(
+                                    _isRiderView
+                                        ? 'No bookings yet'
+                                        : 'No provider bookings yet',
+                                    textAlign: TextAlign.center,
+                                    style: const TextStyle(fontSize: 16),
+                                  ),
+                                  if (bookings.isNotEmpty) ...[
+                                    const SizedBox(height: 16),
+                                    ElevatedButton.icon(
+                                      onPressed: () async {
+                                        final confirm = await showDialog<bool>(
+                                          context: context,
+                                          builder: (context) => AlertDialog(
+                                            title: const Text(
+                                              'Clear All Bookings?',
+                                            ),
+                                            content: const Text(
+                                              'This will delete all bookings. This action cannot be undone.',
+                                            ),
+                                            actions: [
+                                              TextButton(
+                                                onPressed: () => Navigator.pop(
+                                                  context,
+                                                  false,
+                                                ),
+                                                child: const Text('Cancel'),
+                                              ),
+                                              FilledButton(
+                                                onPressed: () => Navigator.pop(
+                                                  context,
+                                                  true,
+                                                ),
+                                                child: const Text('Clear All'),
+                                              ),
+                                            ],
+                                          ),
+                                        );
+
+                                        if (confirm == true) {
+                                          BookingRepository
+                                                  .instance
+                                                  .bookings
+                                                  .value =
+                                              [];
+                                          BookingRepository
+                                                  .instance
+                                                  .remainingCapacityBySlotId
+                                                  .value =
+                                              {};
+                                          final prefs =
+                                              await SharedPreferences.getInstance();
+                                          await prefs.remove('bookings_data');
+                                          await prefs.remove(
+                                            'remaining_capacity',
+                                          );
+                                          if (context.mounted) {
+                                            ScaffoldMessenger.of(
+                                              context,
+                                            ).showSnackBar(
+                                              const SnackBar(
+                                                content: Text(
+                                                  'All bookings cleared',
+                                                ),
+                                              ),
+                                            );
+                                          }
+                                        }
+                                      },
+                                      icon: const Icon(Icons.delete_sweep),
+                                      label: const Text('Clear All Bookings'),
                                     ),
-                                  );
-
-                                  if (confirm == true) {
-                                    BookingRepository.instance.bookings.value = [];
-                                    BookingRepository
-                                            .instance
-                                            .remainingCapacityBySlotId
-                                            .value = {};
-                                    final prefs =
-                                        await SharedPreferences.getInstance();
-                                    await prefs.remove('bookings_data');
-                                    await prefs.remove('remaining_capacity');
-                                    if (context.mounted) {
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        const SnackBar(
-                                          content: Text('All bookings cleared'),
-                                        ),
-                                      );
-                                    }
-                                  }
-                                },
-                                icon: const Icon(Icons.delete_sweep),
-                                label: const Text('Clear All Bookings'),
+                                  ],
+                                ],
                               ),
-                            ],
-                          ],
-                        ),
-                      ),
-                    );
-                  }
+                            ),
+                          );
+                        }
 
-                  // Combine both lists: slot bookings first, then post acceptances
-                  final totalCount = filteredBookings.length + filteredAcceptances.length;
+                        // Combine both lists: slot bookings first, then post acceptances
+                        final totalCount =
+                            filteredBookings.length +
+                            filteredAcceptances.length;
 
-                  return ListView.separated(
-                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-                    itemCount: totalCount,
-                    separatorBuilder: (_, _) => const SizedBox(height: 12),
-                    itemBuilder: (context, index) {
-                      if (index < filteredBookings.length) {
-                        return _buildBookingCard(
-                          context,
-                          filteredBookings[index],
-                          isRiderView: _isRiderView,
+                        return ListView.separated(
+                          padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                          itemCount: totalCount,
+                          separatorBuilder: (_, _) =>
+                              const SizedBox(height: 12),
+                          itemBuilder: (context, index) {
+                            if (index < filteredBookings.length) {
+                              return _buildBookingCard(
+                                context,
+                                filteredBookings[index],
+                                isRiderView: _isRiderView,
+                              );
+                            } else {
+                              final acceptance =
+                                  filteredAcceptances[index -
+                                      filteredBookings.length];
+                              return _buildAcceptanceCard(context, acceptance);
+                            }
+                          },
                         );
-                      } else {
-                        final acceptance = filteredAcceptances[index - filteredBookings.length];
-                        return _buildAcceptanceCard(context, acceptance);
-                      }
-                    },
-                  );
-                },
-              );
-            },
-          ),
+                      },
+                    );
+                  },
+                ),
         ),
       ],
     );
   }
 
-  Widget _buildAcceptanceCard(BuildContext context, UserPostAcceptance acceptance) {
+  Widget _buildAcceptanceCard(
+    BuildContext context,
+    UserPostAcceptance acceptance,
+  ) {
     final currentUser = AuthRepository.instance.currentUser;
     final isUserView = currentUser?.id == acceptance.userId;
 
     // Look up the related post for details
     UserPost? post;
     try {
-      post = UserPostRepository.instance.posts.value
-          .firstWhere((p) => p.id == acceptance.postId);
+      post = UserPostRepository.instance.posts.value.firstWhere(
+        (p) => p.id == acceptance.postId,
+      );
     } catch (_) {}
 
     Color statusColor;
@@ -7284,18 +8465,28 @@ class _RequestsBodyState extends State<_RequestsBody> {
           children: [
             Row(
               children: [
-                const Icon(Icons.assignment_turned_in_outlined, size: 16, color: Colors.purple),
+                const Icon(
+                  Icons.assignment_turned_in_outlined,
+                  size: 16,
+                  color: Colors.purple,
+                ),
                 const SizedBox(width: 6),
                 Expanded(
                   child: Text(
                     'Post Request #${acceptance.postId.length > 8 ? acceptance.postId.substring(0, 8) : acceptance.postId}',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                    style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                 ),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 6,
+                  ),
                   decoration: BoxDecoration(
                     color: statusColor.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(999),
@@ -7331,7 +8522,10 @@ class _RequestsBodyState extends State<_RequestsBody> {
                 Icon(Icons.currency_rupee, size: 14, color: Colors.grey[600]),
                 Text(
                   acceptance.amount.toStringAsFixed(0),
-                  style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 15,
+                  ),
                 ),
                 const Spacer(),
                 Text(
@@ -7353,14 +8547,23 @@ class _RequestsBodyState extends State<_RequestsBody> {
                   ),
                   child: Row(
                     children: [
-                      const Icon(Icons.lock_outline, size: 18, color: Colors.blue),
+                      const Icon(
+                        Icons.lock_outline,
+                        size: 18,
+                        color: Colors.blue,
+                      ),
                       const SizedBox(width: 10),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text('Share this OTP with the provider',
-                                style: TextStyle(fontSize: 12, color: Colors.black54)),
+                            const Text(
+                              'Share this OTP with the provider',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.black54,
+                              ),
+                            ),
                             const SizedBox(height: 4),
                             Text(
                               acceptance.otp ?? '------',
@@ -7378,7 +8581,9 @@ class _RequestsBodyState extends State<_RequestsBody> {
                           icon: const Icon(Icons.copy, size: 18),
                           tooltip: 'Copy OTP',
                           onPressed: () {
-                            Clipboard.setData(ClipboardData(text: acceptance.otp!));
+                            Clipboard.setData(
+                              ClipboardData(text: acceptance.otp!),
+                            );
                             ScaffoldMessenger.of(context).showSnackBar(
                               const SnackBar(content: Text('OTP copied')),
                             );
@@ -7410,16 +8615,23 @@ class _RequestsBodyState extends State<_RequestsBody> {
                         final otpText = _otpControllerFor(acceptance.id).text;
                         if (otpText.length != 6) {
                           messenger.showSnackBar(
-                            const SnackBar(content: Text('Please enter 6-digit OTP')),
+                            const SnackBar(
+                              content: Text('Please enter 6-digit OTP'),
+                            ),
                           );
                           return;
                         }
                         final ok = await UserPostAcceptanceRepository.instance
-                            .verifyOTP(acceptanceId: acceptance.id, enteredOTP: otpText);
+                            .verifyOTP(
+                              acceptanceId: acceptance.id,
+                              enteredOTP: otpText,
+                            );
                         if (!context.mounted) return;
                         messenger.showSnackBar(
                           SnackBar(
-                            content: Text(ok ? '? OTP verified' : 'Invalid OTP'),
+                            content: Text(
+                              ok ? '? OTP verified' : 'Invalid OTP',
+                            ),
                             backgroundColor: ok ? Colors.green : Colors.red,
                           ),
                         );
@@ -7443,7 +8655,10 @@ class _RequestsBodyState extends State<_RequestsBody> {
                   children: [
                     Icon(Icons.verified, size: 16, color: Colors.blue),
                     SizedBox(width: 8),
-                    Text('OTP verified ? awaiting payment', style: TextStyle(fontSize: 13)),
+                    Text(
+                      'OTP verified ? awaiting payment',
+                      style: TextStyle(fontSize: 13),
+                    ),
                   ],
                 ),
               ),
@@ -7461,7 +8676,13 @@ class _RequestsBodyState extends State<_RequestsBody> {
                   children: [
                     Icon(Icons.check_circle, size: 16, color: Colors.green),
                     SizedBox(width: 8),
-                    Text('Payment completed', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                    Text(
+                      'Payment completed',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -7500,7 +8721,8 @@ class _RequestsBodyState extends State<_RequestsBody> {
         }
       }
     }
-    final Slot? slotForMap = bookingSlot; // Show map for all bookings, not just accepted
+    final Slot? slotForMap =
+        bookingSlot; // Show map for all bookings, not just accepted
 
     return Card(
       elevation: 2,
@@ -7593,20 +8815,21 @@ class _RequestsBodyState extends State<_RequestsBody> {
                     }
                   }
                   if (vehicle == null) {
-                    for (final e in CustomerVehicleRepository.instance.allVehicles) {
+                    for (final e
+                        in CustomerVehicleRepository.instance.allVehicles) {
                       if (e.id == bookingSlot!.vehicleId) {
                         vehicle = e;
                         break;
                       }
                     }
                   }
-                  
+
                   if (vehicle == null) return const SizedBox.shrink();
-                  
+
                   final IconData gpsIcon;
                   final String gpsLabel;
                   final Color gpsColor;
-                  
+
                   switch (vehicle.gpsMode) {
                     case VehicleGpsMode.deviceLive:
                       gpsIcon = Icons.gps_fixed;
@@ -7624,10 +8847,10 @@ class _RequestsBodyState extends State<_RequestsBody> {
                       gpsColor = Colors.orange;
                       break;
                   }
-                  
+
                   double? lat;
                   double? lng;
-                  
+
                   if (vehicle.gpsMode == VehicleGpsMode.manual) {
                     lat = vehicle.manualLat;
                     lng = vehicle.manualLng;
@@ -7635,7 +8858,7 @@ class _RequestsBodyState extends State<_RequestsBody> {
                     lat = vehicle.lastKnownLat;
                     lng = vehicle.lastKnownLng;
                   }
-                  
+
                   return Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -7657,25 +8880,41 @@ class _RequestsBodyState extends State<_RequestsBody> {
                         const SizedBox(height: 4),
                         Row(
                           children: [
-                            const Icon(Icons.location_on, size: 14, color: Colors.grey),
+                            const Icon(
+                              Icons.location_on,
+                              size: 14,
+                              color: Colors.grey,
+                            ),
                             const SizedBox(width: 6),
                             Expanded(
                               child: Text(
                                 'Lat: ${lat.toStringAsFixed(6)}, Lng: ${lng.toStringAsFixed(6)}',
-                                style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.grey[600],
+                                ),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                               ),
                             ),
                             IconButton(
-                              icon: const Icon(Icons.map, size: 18, color: Colors.blue),
-                              tooltip: 'Open in Google Maps',
+                              icon: const Icon(
+                                Icons.map,
+                                size: 18,
+                                color: Colors.blue,
+                              ),
+                              tooltip: 'Open in OpenStreetMap',
                               padding: EdgeInsets.zero,
                               constraints: const BoxConstraints(),
-                              onPressed: () => _openGoogleMapsLatLng(context, lat!, lng!),
+                              onPressed: () =>
+                                  _openGoogleMapsLatLng(context, lat!, lng!),
                             ),
                             IconButton(
-                              icon: const Icon(Icons.navigation, size: 18, color: Colors.green),
+                              icon: const Icon(
+                                Icons.navigation,
+                                size: 18,
+                                color: Colors.green,
+                              ),
                               tooltip: 'Track on Map',
                               padding: EdgeInsets.zero,
                               constraints: const BoxConstraints(),
@@ -7687,7 +8926,9 @@ class _RequestsBodyState extends State<_RequestsBody> {
                                       booking: b,
                                       slot: bookingSlot,
                                       vehicle: vehicle,
-                                      isProviderView: isRiderView ? false : true,
+                                      isProviderView: isRiderView
+                                          ? false
+                                          : true,
                                     ),
                                   ),
                                 );
@@ -7715,36 +8956,201 @@ class _RequestsBodyState extends State<_RequestsBody> {
                   const SizedBox(height: 8),
                   // Show provider info for customer (rider) view
                   if (isRiderView) ...[
-                    Container(
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                        color: Colors.grey[50],
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: Colors.grey.shade200),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Provider: ${b.providerName ?? _providerName(b.providerId)}',
-                            style: const TextStyle(fontWeight: FontWeight.w600),
+                    // Fetch vehicle to show operator details
+                    Builder(
+                      builder: (context) {
+                        // Find the vehicle to get operator details
+                        Vehicle? bookingVehicle;
+                        if (bookingSlot != null) {
+                          for (final e
+                              in VehicleRepository.instance.allVehicles) {
+                            if (e.id == bookingSlot.vehicleId) {
+                              bookingVehicle = e;
+                              break;
+                            }
+                          }
+                          if (bookingVehicle == null) {
+                            for (final e
+                                in CustomerVehicleRepository
+                                    .instance
+                                    .allVehicles) {
+                              if (e.id == bookingSlot.vehicleId) {
+                                bookingVehicle = e;
+                                break;
+                              }
+                            }
+                          }
+                        }
+
+                        final hasOperator =
+                            bookingVehicle?.operatorName != null &&
+                            bookingVehicle!.operatorName!.isNotEmpty;
+
+                        return Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: Colors.grey[50],
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.grey.shade200),
                           ),
-                          if (b.providerPhone != null && b.providerPhone!.isNotEmpty) ...[
-                            const SizedBox(height: 4),
-                            Text(
-                              'Contact: ${b.providerPhone}',
-                              style: TextStyle(color: Colors.grey[700]),
-                            ),
-                          ],
-                          if (b.providerEmail != null && b.providerEmail!.isNotEmpty) ...[
-                            const SizedBox(height: 4),
-                            Text(
-                              'Email: ${b.providerEmail}',
-                              style: TextStyle(color: Colors.grey[700]),
-                            ),
-                          ],
-                        ],
-                      ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              // Profile owner info
+                              Row(
+                                children: [
+                                  if (b.providerAvatar != null &&
+                                      b.providerAvatar!.isNotEmpty)
+                                    Padding(
+                                      padding: const EdgeInsets.only(right: 8),
+                                      child: CircleAvatar(
+                                        radius: 16,
+                                        backgroundImage: NetworkImage(
+                                          b.providerAvatar!,
+                                        ),
+                                        onBackgroundImageError: (_, _) {},
+                                        child: b.providerAvatar!.isEmpty
+                                            ? const Icon(Icons.person, size: 16)
+                                            : null,
+                                      ),
+                                    ),
+                                  Expanded(
+                                    child: Text(
+                                      'Provider: ${b.providerName ?? _providerName(b.providerId)}',
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+
+                              // Operator details (if different from owner)
+                              if (hasOperator) ...[
+                                const SizedBox(height: 8),
+                                const Divider(height: 1),
+                                const SizedBox(height: 8),
+                                Row(
+                                  children: [
+                                    Icon(
+                                      Icons.local_taxi,
+                                      size: 14,
+                                      color: Colors.blue[700],
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      'Operator: ${bookingVehicle.operatorName}',
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.w600,
+                                        fontSize: 13,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                if (bookingVehicle.operatorPhone != null &&
+                                    bookingVehicle
+                                        .operatorPhone!
+                                        .isNotEmpty) ...[
+                                  const SizedBox(height: 4),
+                                  Row(
+                                    children: [
+                                      Icon(
+                                        Icons.phone,
+                                        size: 12,
+                                        color: Colors.grey[600],
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Text(
+                                        bookingVehicle.operatorPhone!,
+                                        style: TextStyle(
+                                          color: Colors.grey[700],
+                                          fontSize: 13,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                                if (bookingVehicle.operatorGender != null) ...[
+                                  const SizedBox(height: 4),
+                                  Row(
+                                    children: [
+                                      Icon(
+                                        bookingVehicle.operatorGender == 'male'
+                                            ? Icons.male
+                                            : Icons.female,
+                                        size: 12,
+                                        color:
+                                            bookingVehicle.operatorGender ==
+                                                'male'
+                                            ? Colors.blue[700]
+                                            : Colors.pink[700],
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Text(
+                                        bookingVehicle.operatorGender!
+                                            .toUpperCase(),
+                                        style: TextStyle(
+                                          color: Colors.grey[700],
+                                          fontSize: 13,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ],
+
+                              // Vehicle info
+                              if (bookingVehicle != null) ...[
+                                const SizedBox(height: 8),
+                                const Divider(height: 1),
+                                const SizedBox(height: 8),
+                                Row(
+                                  children: [
+                                    Icon(
+                                      Icons.directions_car,
+                                      size: 14,
+                                      color: Colors.green[700],
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Expanded(
+                                      child: Text(
+                                        '${bookingVehicle.name}${bookingVehicle.year != null ? " (${bookingVehicle.year})" : ""}',
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.w500,
+                                          fontSize: 13,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                if (bookingVehicle.registrationNumber != null &&
+                                    bookingVehicle
+                                        .registrationNumber!
+                                        .isNotEmpty) ...[
+                                  const SizedBox(height: 4),
+                                  Row(
+                                    children: [
+                                      Icon(
+                                        Icons.numbers,
+                                        size: 12,
+                                        color: Colors.grey[600],
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Text(
+                                        bookingVehicle.registrationNumber!,
+                                        style: TextStyle(
+                                          color: Colors.grey[700],
+                                          fontSize: 13,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ],
+                            ],
+                          ),
+                        );
+                      },
                     ),
                   ] else ...[
                     // Provider view — show customer info
@@ -7762,7 +9168,8 @@ class _RequestsBodyState extends State<_RequestsBody> {
                             'User: ${b.userName ?? 'N/A'}',
                             style: const TextStyle(fontWeight: FontWeight.w600),
                           ),
-                          if (b.userPhone != null && b.userPhone!.isNotEmpty) ...[
+                          if (b.userPhone != null &&
+                              b.userPhone!.isNotEmpty) ...[
                             const SizedBox(height: 4),
                             Text(
                               'Contact: ${b.userPhone}',
@@ -7920,7 +9327,7 @@ class _RequestsBodyState extends State<_RequestsBody> {
                   ),
                 ),
                 const SizedBox(height: 10),
-                
+
                 // Track Vehicle Button (for active bookings with GPS)
                 Builder(
                   builder: (context) {
@@ -7931,11 +9338,13 @@ class _RequestsBodyState extends State<_RequestsBody> {
                         .firstOrNull;
                     final vehicle = slotEntry?.vehicle;
                     final slot = slotEntry?.slot;
-                    
+
                     // Only show for active bookings with vehicle GPS data
-                    if (vehicle != null && 
-                        (b.status == BookingStatus.accepted || b.status == BookingStatus.pending) &&
-                        (vehicle.lastKnownLat != null || vehicle.manualLat != null)) {
+                    if (vehicle != null &&
+                        (b.status == BookingStatus.accepted ||
+                            b.status == BookingStatus.pending) &&
+                        (vehicle.lastKnownLat != null ||
+                            vehicle.manualLat != null)) {
                       return Column(
                         children: [
                           SizedBox(
@@ -7966,11 +9375,14 @@ class _RequestsBodyState extends State<_RequestsBody> {
                                     : 'View Vehicle Location',
                               ),
                               style: ElevatedButton.styleFrom(
-                                backgroundColor: vehicle.gpsMode == VehicleGpsMode.deviceLive
+                                backgroundColor:
+                                    vehicle.gpsMode == VehicleGpsMode.deviceLive
                                     ? Colors.green
                                     : Colors.blue,
                                 foregroundColor: Colors.white,
-                                padding: const EdgeInsets.symmetric(vertical: 12),
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 12,
+                                ),
                               ),
                             ),
                           ),
@@ -7981,7 +9393,7 @@ class _RequestsBodyState extends State<_RequestsBody> {
                     return const SizedBox.shrink();
                   },
                 ),
-                
+
                 Container(
                   width: double.infinity,
                   padding: const EdgeInsets.all(12),
@@ -8005,20 +9417,24 @@ class _RequestsBodyState extends State<_RequestsBody> {
                               b.status == BookingStatus.completed
                                   ? 'Trip completed'
                                   : (b.paymentHeldInEscrow
-                                      ? 'Payment Held in Escrow'
-                                      : 'Booking Confirmed'),
+                                        ? 'Payment Held in Escrow'
+                                        : 'Booking Confirmed'),
                               style: const TextStyle(
                                 fontSize: 14,
                                 fontWeight: FontWeight.w700,
                               ),
                             ),
-                            if (b.otp != null && b.status != BookingStatus.completed) ...[
+                            if (b.otp != null &&
+                                b.status != BookingStatus.completed) ...[
                               const SizedBox(height: 6),
                               Row(
                                 children: [
                                   Text(
                                     'OTP: ',
-                                    style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: Colors.grey[600],
+                                    ),
                                   ),
                                   Text(
                                     b.otp!,
@@ -8037,12 +9453,18 @@ class _RequestsBodyState extends State<_RequestsBody> {
                       ),
                       if (b.otp != null && b.status != BookingStatus.completed)
                         IconButton(
-                          icon: const Icon(Icons.copy, size: 20, color: Colors.blue),
+                          icon: const Icon(
+                            Icons.copy,
+                            size: 20,
+                            color: Colors.blue,
+                          ),
                           tooltip: 'Copy OTP',
                           onPressed: () {
                             Clipboard.setData(ClipboardData(text: b.otp!));
                             ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('OTP copied to clipboard')),
+                              const SnackBar(
+                                content: Text('OTP copied to clipboard'),
+                              ),
                             );
                           },
                         ),
@@ -8059,28 +9481,56 @@ class _RequestsBodyState extends State<_RequestsBody> {
                   ),
                 ],
                 // Refund section ? shown regardless of bookingSlot
-                if (bookingSlot == null && b.tripEndTime != null && DateTime.now().isAfter(b.tripEndTime!)) ...[
+                if (bookingSlot == null &&
+                    b.tripEndTime != null &&
+                    DateTime.now().isAfter(b.tripEndTime!)) ...[
                   const SizedBox(height: 6),
                   Row(
                     children: [
-                      Icon(Icons.timer_off_outlined, size: 12, color: Colors.grey[600]),
+                      Icon(
+                        Icons.timer_off_outlined,
+                        size: 12,
+                        color: Colors.grey[600],
+                      ),
                       const SizedBox(width: 4),
-                      Expanded(child: Text('Trip time over', style: TextStyle(fontSize: 11, color: Colors.grey[600]))),
+                      Expanded(
+                        child: Text(
+                          'Trip time over',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: Colors.grey[600],
+                          ),
+                        ),
+                      ),
                       GestureDetector(
                         onTap: () async {
                           await BookingRepository.instance.markRefunded(b.id);
                           if (context.mounted) {
                             ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('? Refunded'), backgroundColor: Colors.orange),
+                              const SnackBar(
+                                content: Text('? Refunded'),
+                                backgroundColor: Colors.orange,
+                              ),
                             );
                           }
                         },
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Icon(Icons.currency_rupee, size: 12, color: Colors.red[700]),
+                            Icon(
+                              Icons.currency_rupee,
+                              size: 12,
+                              color: Colors.red[700],
+                            ),
                             const SizedBox(width: 4),
-                            Text('Refund', style: TextStyle(fontSize: 11, color: Colors.red[700], fontWeight: FontWeight.w600)),
+                            Text(
+                              'Refund',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: Colors.red[700],
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
                           ],
                         ),
                       ),
@@ -8099,7 +9549,10 @@ class _RequestsBodyState extends State<_RequestsBody> {
                     booking: b,
                     isProvider: !isRiderView,
                     onUpdated: (updated) async {
-                      await BookingRepository.instance.updateTripMedia(b.id, updated);
+                      await BookingRepository.instance.updateTripMedia(
+                        b.id,
+                        updated,
+                      );
                     },
                   ),
                 ],
@@ -8134,7 +9587,8 @@ class _RequestsBodyState extends State<_RequestsBody> {
                           MaterialPageRoute(
                             builder: (_) => ReviewsScreen(
                               userId: b.providerId,
-                              userName: b.providerName ?? _providerName(b.providerId),
+                              userName:
+                                  b.providerName ?? _providerName(b.providerId),
                             ),
                           ),
                         );
@@ -8146,7 +9600,8 @@ class _RequestsBodyState extends State<_RequestsBody> {
                             bookingId: b.id,
                             reviewerId: currentUser.id,
                             revieweeId: b.providerId,
-                            revieweeName: b.providerName ?? _providerName(b.providerId),
+                            revieweeName:
+                                b.providerName ?? _providerName(b.providerId),
                             type: ReviewType.userToProvider,
                           ),
                         );
@@ -8154,16 +9609,22 @@ class _RequestsBodyState extends State<_RequestsBody> {
                     },
                     icon: Icon(
                       ReviewRepository.instance.hasReviewed(
-                        bookingId: b.id,
-                        reviewerId: AuthRepository.instance.currentUser?.id ?? '',
-                      ) ? Icons.star : Icons.star_border,
+                            bookingId: b.id,
+                            reviewerId:
+                                AuthRepository.instance.currentUser?.id ?? '',
+                          )
+                          ? Icons.star
+                          : Icons.star_border,
                       size: 18,
                     ),
                     label: Text(
                       ReviewRepository.instance.hasReviewed(
-                        bookingId: b.id,
-                        reviewerId: AuthRepository.instance.currentUser?.id ?? '',
-                      ) ? 'View Reviews' : 'Leave Review',
+                            bookingId: b.id,
+                            reviewerId:
+                                AuthRepository.instance.currentUser?.id ?? '',
+                          )
+                          ? 'View Reviews'
+                          : 'Leave Review',
                     ),
                   ),
                 ],
@@ -8291,19 +9752,28 @@ class _RequestsBodyState extends State<_RequestsBody> {
                       ],
                     ),
                   )
-                else if (bookingSlot != null && DateTime.now().isAfter(bookingSlot.endTime) && !b.otpVerified)
+                else if (bookingSlot != null &&
+                    DateTime.now().isAfter(bookingSlot.endTime) &&
+                    !b.otpVerified)
                   // After end time: OTP entry for provider
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       Row(
                         children: [
-                          Icon(Icons.timer_off_outlined, size: 12, color: Colors.grey[600]),
+                          Icon(
+                            Icons.timer_off_outlined,
+                            size: 12,
+                            color: Colors.grey[600],
+                          ),
                           const SizedBox(width: 4),
                           Expanded(
                             child: Text(
                               'Trip time over - Ask extension from user',
-                              style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: Colors.grey[600],
+                              ),
                             ),
                           ),
                         ],
@@ -8329,55 +9799,108 @@ class _RequestsBodyState extends State<_RequestsBody> {
                               final messenger = ScaffoldMessenger.of(context);
                               final otpText = _otpControllerFor(b.id).text;
                               if (otpText.length != 6) {
-                                messenger.showSnackBar(const SnackBar(content: Text('Please enter 6-digit OTP')));
+                                messenger.showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Please enter 6-digit OTP'),
+                                  ),
+                                );
                                 return;
                               }
-                              showDialog(context: context, barrierDismissible: false, builder: (_) => const Center(child: CircularProgressIndicator()));
+                              showDialog(
+                                context: context,
+                                barrierDismissible: false,
+                                builder: (_) => const Center(
+                                  child: CircularProgressIndicator(),
+                                ),
+                              );
                               try {
-                                if (b.paymentHeldInEscrow && b.stripePaymentIntentId != null) {
-                                  final success = await StripeService.instance.verifyOtpAndRelease(bookingId: b.id, otp: otpText);
+                                if (b.paymentHeldInEscrow &&
+                                    b.stripePaymentIntentId != null) {
+                                  final success = await StripeService.instance
+                                      .verifyOtpAndRelease(
+                                        bookingId: b.id,
+                                        otp: otpText,
+                                      );
                                   if (!context.mounted) return;
                                   Navigator.pop(context);
                                   if (success) {
-                                    await BookingRepository.instance.updateBookingAfterPayment(bookingId: b.id, status: BookingStatus.completed, otpVerified: true);
+                                    await BookingRepository.instance
+                                        .updateBookingAfterPayment(
+                                          bookingId: b.id,
+                                          status: BookingStatus.completed,
+                                          otpVerified: true,
+                                        );
                                     if (context.mounted) {
-                                      messenger.showSnackBar(const SnackBar(content: Text('? Payment released!'), backgroundColor: Colors.green));
-                                      _promptForReview(context, b, isProvider: true);
+                                      messenger.showSnackBar(
+                                        const SnackBar(
+                                          content: Text('? Payment released!'),
+                                          backgroundColor: Colors.green,
+                                        ),
+                                      );
+                                      _promptForReview(
+                                        context,
+                                        b,
+                                        isProvider: true,
+                                      );
                                     }
                                   } else {
-                                    messenger.showSnackBar(const SnackBar(content: Text('Invalid OTP'), backgroundColor: Colors.red));
+                                    messenger.showSnackBar(
+                                      const SnackBar(
+                                        content: Text('Invalid OTP'),
+                                        backgroundColor: Colors.red,
+                                      ),
+                                    );
                                   }
                                 } else {
                                   // Use repository verifyOtp (has local OTP fallback)
-                                  final success = await BookingRepository.instance.verifyOtp(
-                                    bookingId: b.id,
-                                    otp: otpText,
-                                  );
+                                  final success = await BookingRepository
+                                      .instance
+                                      .verifyOtp(bookingId: b.id, otp: otpText);
                                   if (!context.mounted) return;
                                   Navigator.pop(context);
-                                  
+
                                   if (success) {
-                                    await BookingRepository.instance.updateBookingAfterPayment(
-                                      bookingId: b.id,
-                                      status: BookingStatus.completed,
-                                      otpVerified: true,
+                                    await BookingRepository.instance
+                                        .updateBookingAfterPayment(
+                                          bookingId: b.id,
+                                          status: BookingStatus.completed,
+                                          otpVerified: true,
+                                        );
+                                    messenger.showSnackBar(
+                                      const SnackBar(
+                                        content: Text(
+                                          '? OTP verified! Trip completed.',
+                                        ),
+                                        backgroundColor: Colors.green,
+                                      ),
                                     );
-                                    messenger.showSnackBar(const SnackBar(
-                                      content: Text('? OTP verified! Trip completed.'),
-                                      backgroundColor: Colors.green,
-                                    ));
-                                    if (context.mounted) _promptForReview(context, b, isProvider: true);
+                                    if (context.mounted) {
+                                      _promptForReview(
+                                        context,
+                                        b,
+                                        isProvider: true,
+                                      );
+                                    }
                                   } else {
-                                    messenger.showSnackBar(const SnackBar(
-                                      content: Text('Incorrect OTP. Please try again.'),
-                                      backgroundColor: Colors.red,
-                                    ));
+                                    messenger.showSnackBar(
+                                      const SnackBar(
+                                        content: Text(
+                                          'Incorrect OTP. Please try again.',
+                                        ),
+                                        backgroundColor: Colors.red,
+                                      ),
+                                    );
                                   }
                                 }
                               } catch (e) {
                                 if (!context.mounted) return;
                                 Navigator.pop(context);
-                                messenger.showSnackBar(SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red));
+                                messenger.showSnackBar(
+                                  SnackBar(
+                                    content: Text('Error: $e'),
+                                    backgroundColor: Colors.red,
+                                  ),
+                                );
                               }
                             },
                             child: const Text('Verify'),
@@ -8409,7 +9932,9 @@ class _RequestsBodyState extends State<_RequestsBody> {
 
                           if (otpText.length != 6) {
                             messenger.showSnackBar(
-                              const SnackBar(content: Text('Please enter 6-digit OTP')),
+                              const SnackBar(
+                                content: Text('Please enter 6-digit OTP'),
+                              ),
                             );
                             return;
                           }
@@ -8425,26 +9950,31 @@ class _RequestsBodyState extends State<_RequestsBody> {
 
                           try {
                             // If payment is held in escrow, verify with Stripe backend
-                            if (b.paymentHeldInEscrow && b.stripePaymentIntentId != null) {
-                              final success = await StripeService.instance.verifyOtpAndRelease(
-                                bookingId: b.id,
-                                otp: otpText,
-                              );
+                            if (b.paymentHeldInEscrow &&
+                                b.stripePaymentIntentId != null) {
+                              final success = await StripeService.instance
+                                  .verifyOtpAndRelease(
+                                    bookingId: b.id,
+                                    otp: otpText,
+                                  );
 
                               if (!context.mounted) return;
                               Navigator.pop(context); // Close loading
 
                               if (success) {
                                 // Update local booking status
-                                await BookingRepository.instance.updateBookingAfterPayment(
-                                  bookingId: b.id,
-                                  status: BookingStatus.completed,
-                                  otpVerified: true,
-                                );
+                                await BookingRepository.instance
+                                    .updateBookingAfterPayment(
+                                      bookingId: b.id,
+                                      status: BookingStatus.completed,
+                                      otpVerified: true,
+                                    );
 
                                 messenger.showSnackBar(
                                   const SnackBar(
-                                    content: Text('? Payment released! Funds transferred to your account.'),
+                                    content: Text(
+                                      '? Payment released! Funds transferred to your account.',
+                                    ),
                                     backgroundColor: Colors.green,
                                     duration: Duration(seconds: 4),
                                   ),
@@ -8452,34 +9982,40 @@ class _RequestsBodyState extends State<_RequestsBody> {
 
                                 // Prompt for review
                                 if (context.mounted) {
-                                  _promptForReview(context, b, isProvider: true);
+                                  _promptForReview(
+                                    context,
+                                    b,
+                                    isProvider: true,
+                                  );
                                 }
                               } else {
                                 messenger.showSnackBar(
                                   const SnackBar(
-                                    content: Text('Invalid OTP. Please try again.'),
+                                    content: Text(
+                                      'Invalid OTP. Please try again.',
+                                    ),
                                     backgroundColor: Colors.red,
                                   ),
                                 );
                               }
                             } else {
                               // Use repository verifyOtp (has local OTP fallback)
-                              final success = await BookingRepository.instance.verifyOtp(
-                                bookingId: b.id,
-                                otp: otpText,
-                              );
+                              final success = await BookingRepository.instance
+                                  .verifyOtp(bookingId: b.id, otp: otpText);
 
                               if (!context.mounted) return;
                               Navigator.pop(context);
 
                               if (success) {
-                                await BookingRepository.instance.updateBookingAfterPayment(
-                                  bookingId: b.id,
-                                  status: BookingStatus.completed,
-                                  otpVerified: true,
-                                );
+                                await BookingRepository.instance
+                                    .updateBookingAfterPayment(
+                                      bookingId: b.id,
+                                      status: BookingStatus.completed,
+                                      otpVerified: true,
+                                    );
 
-                                if (b.securityDeposit != null && b.securityDeposit! > 0) {
+                                if (b.securityDeposit != null &&
+                                    b.securityDeposit! > 0) {
                                   messenger.showSnackBar(
                                     SnackBar(
                                       content: Text(
@@ -8490,20 +10026,32 @@ class _RequestsBodyState extends State<_RequestsBody> {
                                     ),
                                   );
                                 } else {
-                                  messenger.showSnackBar(const SnackBar(
-                                    content: Text('? OTP verified! Trip completed.'),
-                                    backgroundColor: Colors.green,
-                                  ));
+                                  messenger.showSnackBar(
+                                    const SnackBar(
+                                      content: Text(
+                                        '? OTP verified! Trip completed.',
+                                      ),
+                                      backgroundColor: Colors.green,
+                                    ),
+                                  );
                                 }
 
                                 if (context.mounted) {
-                                  _promptForReview(context, b, isProvider: true);
+                                  _promptForReview(
+                                    context,
+                                    b,
+                                    isProvider: true,
+                                  );
                                 }
                               } else {
-                                messenger.showSnackBar(const SnackBar(
-                                  content: Text('Incorrect OTP. Please try again.'),
-                                  backgroundColor: Colors.red,
-                                ));
+                                messenger.showSnackBar(
+                                  const SnackBar(
+                                    content: Text(
+                                      'Incorrect OTP. Please try again.',
+                                    ),
+                                    backgroundColor: Colors.red,
+                                  ),
+                                );
                               }
                             }
                           } catch (e) {
@@ -8572,16 +10120,22 @@ class _RequestsBodyState extends State<_RequestsBody> {
                     },
                     icon: Icon(
                       ReviewRepository.instance.hasReviewed(
-                        bookingId: b.id,
-                        reviewerId: AuthRepository.instance.currentUser?.id ?? '',
-                      ) ? Icons.star : Icons.star_border,
+                            bookingId: b.id,
+                            reviewerId:
+                                AuthRepository.instance.currentUser?.id ?? '',
+                          )
+                          ? Icons.star
+                          : Icons.star_border,
                       size: 18,
                     ),
                     label: Text(
                       ReviewRepository.instance.hasReviewed(
-                        bookingId: b.id,
-                        reviewerId: AuthRepository.instance.currentUser?.id ?? '',
-                      ) ? 'View Reviews' : 'Leave Review',
+                            bookingId: b.id,
+                            reviewerId:
+                                AuthRepository.instance.currentUser?.id ?? '',
+                          )
+                          ? 'View Reviews'
+                          : 'Leave Review',
                     ),
                   ),
                 ],
@@ -8597,7 +10151,10 @@ class _RequestsBodyState extends State<_RequestsBody> {
                     booking: b,
                     isProvider: !isRiderView,
                     onUpdated: (updated) async {
-                      await BookingRepository.instance.updateTripMedia(b.id, updated);
+                      await BookingRepository.instance.updateTripMedia(
+                        b.id,
+                        updated,
+                      );
                     },
                   ),
                 ],
@@ -8619,13 +10176,20 @@ class _RequestsBodyState extends State<_RequestsBody> {
                     children: [
                       Row(
                         children: [
-                          Icon(Icons.timer_off, size: 16, color: Colors.grey[600]),
+                          Icon(
+                            Icons.timer_off,
+                            size: 16,
+                            color: Colors.grey[600],
+                          ),
                           const SizedBox(width: 6),
-                          Text('Booking Expired',
-                              style: TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.grey[700],
-                                  fontSize: 13)),
+                          Text(
+                            'Booking Expired',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: Colors.grey[700],
+                              fontSize: 13,
+                            ),
+                          ),
                         ],
                       ),
                       const SizedBox(height: 4),
@@ -8655,19 +10219,29 @@ class _RequestsBodyState extends State<_RequestsBody> {
                     children: [
                       Row(
                         children: [
-                          Icon(Icons.gavel, size: 16, color: Colors.deepOrange[700]),
+                          Icon(
+                            Icons.gavel,
+                            size: 16,
+                            color: Colors.deepOrange[700],
+                          ),
                           const SizedBox(width: 6),
-                          Text('Dispute Raised',
-                              style: TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.deepOrange[700],
-                                  fontSize: 13)),
+                          Text(
+                            'Dispute Raised',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: Colors.deepOrange[700],
+                              fontSize: 13,
+                            ),
+                          ),
                         ],
                       ),
                       const SizedBox(height: 4),
                       Text(
                         'This booking is under review by support. Payment is held until resolved.',
-                        style: TextStyle(fontSize: 12, color: Colors.deepOrange[600]),
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.deepOrange[600],
+                        ),
                       ),
                     ],
                   ),
@@ -8708,168 +10282,7 @@ class _RequestsBodyState extends State<_RequestsBody> {
 
   static String _statusLabel(BookingStatus status) => status.label;
 
-  Future<void> _showRaiseDisputeDialog(BuildContext context, Booking b) async {
-    final reasonCtrl = TextEditingController();
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Row(
-          children: [
-            Icon(Icons.smart_toy, color: Colors.deepOrange[700]),
-            const SizedBox(width: 8),
-            const Text('AI Dispute Resolution'),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.blue.shade50,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.blue.shade200),
-              ),
-              child: Row(
-                children: [
-                  Icon(Icons.auto_awesome, color: Colors.blue[700], size: 20),
-                  const SizedBox(width: 8),
-                  const Expanded(
-                    child: Text(
-                      '🤖 AI Mediator will resolve this fairly by analyzing evidence from both sides',
-                      style: TextStyle(fontSize: 12, color: Colors.black87),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 12),
-            const Text(
-              'Briefly describe the issue (optional):',
-              style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 8),
-            TextField(
-              controller: reasonCtrl,
-              maxLines: 3,
-              maxLength: 200,
-              decoration: const InputDecoration(
-                hintText: 'e.g. Provider no-show, vehicle issue, wrong route...',
-                border: OutlineInputBorder(),
-                contentPadding: EdgeInsets.all(10),
-                helperText: 'You can provide more details in the AI chat',
-                helperMaxLines: 2,
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.deepOrange,
-              foregroundColor: Colors.white,
-            ),
-            child: const Text('Start AI Mediation'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirmed != true || !context.mounted) return;
-    final reason = reasonCtrl.text.trim().isEmpty ? null : reasonCtrl.text.trim();
-
-    final messenger = ScaffoldMessenger.of(context);
-    
-    // Show loading dialog
-    if (context.mounted) {
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (context) => const Center(
-          child: Card(
-            child: Padding(
-              padding: EdgeInsets.all(24),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  CircularProgressIndicator(),
-                  SizedBox(height: 16),
-                  Text('🤖 Creating dispute mediation...'),
-                ],
-              ),
-            ),
-          ),
-        ),
-      );
-    }
-    
-    try {
-      // Create AI-powered dispute with 2 separate chat threads
-      final customerConversationId = await DisputeService.instance.createDispute(
-        bookingId: b.id,
-        disputeReason: reason,
-      );
-
-      // Update booking status
-      await Supabase.instance.client
-          .from('bookings')
-          .update({
-            'status': BookingStatus.disputed.dbValue,
-            'dispute_reason': reason ?? 'Customer raised a dispute',
-            'disputed_at': DateTime.now().toUtc().toIso8601String(),
-          })
-          .eq('id', int.parse(b.id));
-
-      await BookingRepository.instance.updateBookingAfterPayment(
-        bookingId: b.id,
-        status: BookingStatus.disputed,
-      );
-
-      // Close loading
-      if (context.mounted) Navigator.pop(context);
-
-      // Open customer's dispute chat
-      if (context.mounted) {
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => AIChatPage(
-              conversationId: customerConversationId,
-              isDisputeMode: true,
-            ),
-          ),
-        );
-      }
-
-      messenger.showSnackBar(
-        const SnackBar(
-          content: Text('🤖 AI Mediation started! Talk to the AI to resolve this dispute.'),
-          backgroundColor: Colors.green,
-          duration: Duration(seconds: 4),
-        ),
-      );
-    } catch (e) {
-      // Close loading if still open
-      if (context.mounted) {
-        Navigator.of(context, rootNavigator: true).pop();
-      }
-      
-      debugPrint('❌ Failed to create dispute: $e');
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text('Failed to submit: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
-    }
-  }
+  // Removed _showRaiseDisputeDialog - disputes are now handled via AI chat directly
 
   static Color _statusColor(BookingStatus status) {
     switch (status) {
@@ -8905,7 +10318,9 @@ class _RequestsBodyState extends State<_RequestsBody> {
 
   String _providerName(String providerId) {
     // Try ProfileNameRegistry first
-    final registryName = ProfileNameRegistry.instance.getNameForUser(providerId);
+    final registryName = ProfileNameRegistry.instance.getNameForUser(
+      providerId,
+    );
     if (registryName != null && registryName.isNotEmpty) return registryName;
     // Try vehicle repos
     try {
@@ -8915,9 +10330,8 @@ class _RequestsBodyState extends State<_RequestsBody> {
       return vehicle.userName;
     } catch (_) {
       try {
-        final vehicle = CustomerVehicleRepository.instance.allVehicles.firstWhere(
-          (v) => v.userId == providerId,
-        );
+        final vehicle = CustomerVehicleRepository.instance.allVehicles
+            .firstWhere((v) => v.userId == providerId);
         return vehicle.userName;
       } catch (_) {
         return 'Provider';
@@ -8927,13 +10341,19 @@ class _RequestsBodyState extends State<_RequestsBody> {
 
   String _providerPhone(String providerId) {
     final currentUser = AuthRepository.instance.currentUser;
-    if (currentUser != null && (providerId == currentUser.id || providerId == 'user1')) {
-      return ProfileRepository.instance.profile.value.phone ?? '+91 90000 00000';
+    if (currentUser != null &&
+        (providerId == currentUser.id || providerId == 'user1')) {
+      return ProfileRepository.instance.profile.value.phone ??
+          '+91 90000 00000';
     }
     return '+91 90000 00000';
   }
 
-  void _promptForReview(BuildContext context, Booking booking, {required bool isProvider}) {
+  void _promptForReview(
+    BuildContext context,
+    Booking booking, {
+    required bool isProvider,
+  }) {
     final currentUser = AuthRepository.instance.currentUser;
     if (currentUser == null) return;
 
@@ -8958,7 +10378,7 @@ class _RequestsBodyState extends State<_RequestsBody> {
     // Show review dialog after a short delay
     Future.delayed(const Duration(milliseconds: 500), () {
       if (!context.mounted) return;
-      
+
       showDialog(
         context: context,
         builder: (context) => ReviewDialog(
@@ -8985,7 +10405,8 @@ class _RequestsBodyState extends State<_RequestsBody> {
   String _userPhone(String userId) {
     final currentUser = AuthRepository.instance.currentUser;
     if (currentUser != null && userId == currentUser.id) {
-      return ProfileRepository.instance.profile.value.phone ?? '+91 90000 00000';
+      return ProfileRepository.instance.profile.value.phone ??
+          '+91 90000 00000';
     }
     return '+91 90000 00000';
   }
@@ -9018,13 +10439,22 @@ class _ExtendTimeDialogState extends State<_ExtendTimeDialog> {
             children: [
               IconButton(
                 icon: const Icon(Icons.remove_circle_outline),
-                onPressed: _extraHours > 1 ? () => setState(() => _extraHours--) : null,
+                onPressed: _extraHours > 1
+                    ? () => setState(() => _extraHours--)
+                    : null,
               ),
-              Text('$_extraHours hr${_extraHours > 1 ? 's' : ''}',
-                  style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+              Text(
+                '$_extraHours hr${_extraHours > 1 ? 's' : ''}',
+                style: const TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
               IconButton(
                 icon: const Icon(Icons.add_circle_outline),
-                onPressed: _extraHours < 12 ? () => setState(() => _extraHours++) : null,
+                onPressed: _extraHours < 12
+                    ? () => setState(() => _extraHours++)
+                    : null,
               ),
             ],
           ),
@@ -9036,13 +10466,18 @@ class _ExtendTimeDialogState extends State<_ExtendTimeDialog> {
         ],
       ),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
         FilledButton(
           onPressed: () {
             Navigator.pop(context);
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
-                content: Text('Extension request sent to provider (+$_extraHours hr${_extraHours > 1 ? 's' : ''})'),
+                content: Text(
+                  'Extension request sent to provider (+$_extraHours hr${_extraHours > 1 ? 's' : ''})',
+                ),
                 backgroundColor: Colors.blue,
               ),
             );
@@ -9095,92 +10530,152 @@ class _AutoRefundSectionState extends State<_AutoRefundSection> {
 
   @override
   Widget build(BuildContext context) {
-    final now = DateTime.now();
-    final hasEnded = now.isAfter(widget.slot.endTime);
-    final booking = widget.booking;
+    // Listen to booking updates
+    return ValueListenableBuilder<List<Booking>>(
+      valueListenable: BookingRepository.instance.bookings,
+      builder: (context, bookings, _) {
+        // Get the latest booking status
+        final booking = bookings.firstWhere(
+          (b) => b.id == widget.booking.id,
+          orElse: () => widget.booking,
+        );
 
-    // Don't show if already completed, refunded, or rejected
-    if (booking.status == BookingStatus.completed ||
-        booking.status == BookingStatus.refunded ||
-        booking.status == BookingStatus.rejected) {
-      return const SizedBox.shrink();
-    }
+        final now = DateTime.now();
+        final hasEnded = now.isAfter(widget.slot.endTime);
 
-    // Only show after end time
-    if (!hasEnded) {
-      return const SizedBox.shrink();
-    }
+        // Don't show if already completed, refunded, or rejected
+        if (booking.status == BookingStatus.completed ||
+            booking.status == BookingStatus.refunded ||
+            booking.status == BookingStatus.rejected) {
+          return const SizedBox.shrink();
+        }
 
-    // Provider view: Show refund option too
-    if (!widget.isRiderView) {
-      return Row(
-        children: [
-          Icon(Icons.timer_off_outlined, size: 12, color: Colors.grey[600]),
-          const SizedBox(width: 4),
-          Expanded(
-            child: Text(
-              'Trip time over - Ask extension from user',
-              style: TextStyle(fontSize: 11, color: Colors.grey[600]),
-            ),
-          ),
-          const SizedBox(width: 8),
-          GestureDetector(
-            onTap: () async {
-              await BookingRepository.instance.markRefunded(booking.id);
-              if (context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('? Refunded'), backgroundColor: Colors.orange),
-                );
-              }
-            },
+        // Only show after end time
+        if (!hasEnded) {
+          return const SizedBox.shrink();
+        }
+
+        // No-show detection: lease + deposit + OTP never verified
+        final deposit = booking.securityDeposit ?? 0.0;
+        final isNoShow =
+            !booking.otpVerified &&
+            deposit > 0 &&
+            widget.slot.serviceType == ServiceType.lease;
+
+        if (isNoShow) {
+          return Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4),
             child: Row(
-              mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(Icons.currency_rupee, size: 12, color: Colors.red[700]),
+                Icon(
+                  Icons.warning_amber_rounded,
+                  size: 14,
+                  color: Colors.orange[700],
+                ),
                 const SizedBox(width: 4),
-                Text('Refund', style: TextStyle(fontSize: 11, color: Colors.red[700], fontWeight: FontWeight.w600)),
+                Expanded(
+                  child: Text(
+                    widget.isRiderView
+                        ? 'No-show: ride price will be refunded. Security deposit kept by provider.'
+                        : 'Customer no-show: security deposit (${AppPreferences.instance.formatMoney(deposit.toInt())}) kept.',
+                    style: TextStyle(fontSize: 11, color: Colors.orange[700]),
+                  ),
+                ),
               ],
             ),
-          ),
-        ],
-      );
-    }
+          );
+        }
 
-    // User view: Show refund option
-    return Row(
-      children: [
-        Icon(Icons.timer_off_outlined, size: 12, color: Colors.grey[600]),
-        const SizedBox(width: 4),
-        Text(
-          'Service time ended',
-          style: TextStyle(fontSize: 11, color: Colors.grey[600]),
-        ),
-        const Spacer(),
-        InkWell(
-          onTap: () async {
-            await BookingRepository.instance.markRefunded(booking.id);
-            if (context.mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('? Refunded'),
-                  backgroundColor: Colors.orange,
-                ),
-              );
-            }
-          },
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
+        // Provider view: Show refund option
+        if (!widget.isRiderView) {
+          return Row(
             children: [
-              Icon(Icons.undo, size: 12, color: Colors.red[700]),
+              Icon(Icons.timer_off_outlined, size: 12, color: Colors.grey[600]),
               const SizedBox(width: 4),
-              Text(
-                'Refund',
-                style: TextStyle(fontSize: 11, color: Colors.red[700], fontWeight: FontWeight.w600),
+              Expanded(
+                child: Text(
+                  'Trip time over - Ask extension from user',
+                  style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+                ),
+              ),
+              const SizedBox(width: 8),
+              GestureDetector(
+                onTap: () async {
+                  await BookingRepository.instance.markRefunded(booking.id);
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('💰 Refunded'),
+                        backgroundColor: Colors.orange,
+                      ),
+                    );
+                  }
+                },
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.currency_rupee,
+                      size: 12,
+                      color: Colors.red[700],
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      'Refund',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Colors.red[700],
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ],
-          ),
-        ),
-      ],
+          );
+        }
+
+        // User view: Show refund option
+        return Row(
+          children: [
+            Icon(Icons.timer_off_outlined, size: 12, color: Colors.grey[600]),
+            const SizedBox(width: 4),
+            Text(
+              'Service time ended',
+              style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+            ),
+            const Spacer(),
+            InkWell(
+              onTap: () async {
+                await BookingRepository.instance.markRefunded(booking.id);
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('💰 Refunded'),
+                      backgroundColor: Colors.orange,
+                    ),
+                  );
+                }
+              },
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.undo, size: 12, color: Colors.red[700]),
+                  const SizedBox(width: 4),
+                  Text(
+                    'Refund',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: Colors.red[700],
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 }
@@ -9262,21 +10757,25 @@ class _BookingTimeBannerState extends State<_BookingTimeBanner> {
     // Deadline
     if (b.deadlineTime != null) {
       if (b.isOverdue) {
-        rows.add(_timeRow(
-          Icons.warning_amber_rounded,
-          'OVERDUE ? deadline was ${_fmtDate(b.deadlineTime!)}',
-          Colors.red,
-          bold: true,
-        ));
+        rows.add(
+          _timeRow(
+            Icons.warning_amber_rounded,
+            'OVERDUE ? deadline was ${_fmtDate(b.deadlineTime!)}',
+            Colors.red,
+            bold: true,
+          ),
+        );
       } else {
         final remaining = b.deadlineTime!.difference(now);
         final isUrgent = remaining.inHours < 1;
-        rows.add(_timeRow(
-          Icons.hourglass_bottom,
-          'Deadline in ${_fmt(remaining)}  (${_fmtDate(b.deadlineTime!)})',
-          isUrgent ? Colors.orange : Colors.grey.shade600,
-          bold: isUrgent,
-        ));
+        rows.add(
+          _timeRow(
+            Icons.hourglass_bottom,
+            'Deadline in ${_fmt(remaining)}  (${_fmtDate(b.deadlineTime!)})',
+            isUrgent ? Colors.orange : Colors.grey.shade600,
+            bold: isUrgent,
+          ),
+        );
       }
     }
 
@@ -9291,8 +10790,12 @@ class _BookingTimeBannerState extends State<_BookingTimeBanner> {
     );
   }
 
-  Widget _timeRow(IconData icon, String label, Color color,
-      {bool bold = false}) {
+  Widget _timeRow(
+    IconData icon,
+    String label,
+    Color color, {
+    bool bold = false,
+  }) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 2),
       child: Row(
@@ -9401,7 +10904,10 @@ class _CountdownTextState extends State<CountdownText> {
 
     // Expired
     if (_remaining == Duration.zero && now.isAfter(widget.endTime)) {
-      return Text('Auto-refunded', style: TextStyle(fontSize: 11, color: Colors.red[400]));
+      return Text(
+        'Auto-refunded',
+        style: TextStyle(fontSize: 11, color: Colors.red[400]),
+      );
     }
 
     // Before start
@@ -9451,17 +10957,19 @@ class _SpendingPageState extends State<SpendingPage> {
           final userBookings = allBookings
               .where((b) => b.userId == currentUser.id)
               .toList();
-          
+
           // Separate completed vs pending
           final completedBookings = userBookings
               .where((b) => b.status == BookingStatus.completed)
               .toList();
           final pendingBookings = userBookings
-              .where((b) => 
-                  b.status == BookingStatus.pending ||
-                  b.status == BookingStatus.accepted ||
-                  b.status == BookingStatus.confirmed ||
-                  b.status == BookingStatus.inProgress)
+              .where(
+                (b) =>
+                    b.status == BookingStatus.pending ||
+                    b.status == BookingStatus.accepted ||
+                    b.status == BookingStatus.confirmed ||
+                    b.status == BookingStatus.inProgress,
+              )
               .toList();
 
           // Calculate total spending (completed only for accurate spending)
@@ -9469,7 +10977,7 @@ class _SpendingPageState extends State<SpendingPage> {
             0,
             (sum, booking) => sum + booking.price,
           );
-          
+
           // Calculate total committed (pending + completed)
           final totalCommitted = userBookings.fold<double>(
             0,
@@ -9543,7 +11051,10 @@ class _SpendingPageState extends State<SpendingPage> {
                       if (pendingBookings.isNotEmpty) ...[
                         const SizedBox(height: 8),
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 6,
+                          ),
                           decoration: BoxDecoration(
                             color: Colors.orange.shade100,
                             borderRadius: BorderRadius.circular(20),
@@ -9687,7 +11198,11 @@ class _SpendingPageState extends State<SpendingPage> {
               children: [
                 CircleAvatar(
                   backgroundColor: Colors.blue.withValues(alpha: 0.1),
-                  child: const Icon(Icons.payment, color: Colors.blue, size: 20),
+                  child: const Icon(
+                    Icons.payment,
+                    color: Colors.blue,
+                    size: 20,
+                  ),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -9695,12 +11210,17 @@ class _SpendingPageState extends State<SpendingPage> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        slot != null ? '${slot.serviceType.displayName} Service' : 'Service',
+                        slot != null
+                            ? '${slot.serviceType.displayName} Service'
+                            : 'Service',
                         style: const TextStyle(fontWeight: FontWeight.w500),
                       ),
                       Text(
                         '${booking.createdAt.day}/${booking.createdAt.month}/${booking.createdAt.year}',
-                        style: const TextStyle(fontSize: 12, color: Colors.grey),
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey,
+                        ),
                       ),
                     ],
                   ),
@@ -9709,7 +11229,9 @@ class _SpendingPageState extends State<SpendingPage> {
                   valueListenable: AppPreferences.instance.currencyCode,
                   builder: (context, _, _) {
                     return Text(
-                      AppPreferences.instance.formatMoney(booking.price.toInt()),
+                      AppPreferences.instance.formatMoney(
+                        booking.price.toInt(),
+                      ),
                       style: const TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.bold,
@@ -9760,11 +11282,18 @@ class _ProfilePageState extends State<ProfilePage> {
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Icon(Icons.person_outline, size: 100, color: Colors.grey[400]),
+                    Icon(
+                      Icons.person_outline,
+                      size: 100,
+                      color: Colors.grey[400],
+                    ),
                     const SizedBox(height: 24),
                     const Text(
                       'Login to access your profile',
-                      style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                      ),
                       textAlign: TextAlign.center,
                     ),
                     const SizedBox(height: 12),
@@ -9781,7 +11310,10 @@ class _ProfilePageState extends State<ProfilePage> {
                       icon: const Icon(Icons.login),
                       label: const Text('Login'),
                       style: ElevatedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 32,
+                          vertical: 16,
+                        ),
                         textStyle: const TextStyle(fontSize: 16),
                       ),
                     ),
@@ -9878,7 +11410,8 @@ class _ProfilePageState extends State<ProfilePage> {
                         ),
                         const SizedBox(height: 8),
                         // Rating Display
-                        if (info.providerTotalReviews > 0 || info.customerTotalReviews > 0) ...[
+                        if (info.providerTotalReviews > 0 ||
+                            info.customerTotalReviews > 0) ...[
                           Wrap(
                             spacing: 12,
                             runSpacing: 4,
@@ -9887,9 +11420,17 @@ class _ProfilePageState extends State<ProfilePage> {
                                 Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    const Icon(Icons.business, size: 14, color: Colors.blue),
+                                    const Icon(
+                                      Icons.business,
+                                      size: 14,
+                                      color: Colors.blue,
+                                    ),
                                     const SizedBox(width: 4),
-                                    const Icon(Icons.star, size: 14, color: Colors.amber),
+                                    const Icon(
+                                      Icons.star,
+                                      size: 14,
+                                      color: Colors.amber,
+                                    ),
                                     const SizedBox(width: 2),
                                     Text(
                                       info.providerRating.toStringAsFixed(1),
@@ -9912,9 +11453,17 @@ class _ProfilePageState extends State<ProfilePage> {
                                 Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    const Icon(Icons.person, size: 14, color: Colors.green),
+                                    const Icon(
+                                      Icons.person,
+                                      size: 14,
+                                      color: Colors.green,
+                                    ),
                                     const SizedBox(width: 4),
-                                    const Icon(Icons.star, size: 14, color: Colors.amber),
+                                    const Icon(
+                                      Icons.star,
+                                      size: 14,
+                                      color: Colors.amber,
+                                    ),
                                     const SizedBox(width: 2),
                                     Text(
                                       info.customerRating.toStringAsFixed(1),
@@ -9974,7 +11523,9 @@ class _ProfilePageState extends State<ProfilePage> {
                             'Customer',
                             textAlign: TextAlign.center,
                             style: TextStyle(
-                              color: _isCustomerMode ? Colors.white : Colors.grey,
+                              color: _isCustomerMode
+                                  ? Colors.white
+                                  : Colors.grey,
                               fontWeight: FontWeight.bold,
                             ),
                           ),
@@ -10000,7 +11551,9 @@ class _ProfilePageState extends State<ProfilePage> {
                             'Provider',
                             textAlign: TextAlign.center,
                             style: TextStyle(
-                              color: !_isCustomerMode ? Colors.white : Colors.grey,
+                              color: !_isCustomerMode
+                                  ? Colors.white
+                                  : Colors.grey,
                               fontWeight: FontWeight.bold,
                             ),
                           ),
@@ -10100,9 +11653,85 @@ class _ProfilePageState extends State<ProfilePage> {
                   );
                 },
               ),
-              const ListTile(
-                leading: Icon(Icons.help_outline),
-                title: Text('Help & Support'),
+              ListTile(
+                leading: const Icon(Icons.help_outline),
+                title: const Text('Help & Support'),
+                onTap: () async {
+                  // Show support dialog with contact email
+                  showDialog(
+                    context: context,
+                    builder: (context) => AlertDialog(
+                      title: const Row(
+                        children: [
+                          Icon(Icons.support_agent, color: Colors.blue),
+                          SizedBox(width: 8),
+                          Text('Help & Support'),
+                        ],
+                      ),
+                      content: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Need help? We\'re here for you!',
+                            style: TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                          const SizedBox(height: 16),
+                          const Text('📧 Email Support:'),
+                          const SizedBox(height: 4),
+                          SelectableText(
+                            'vaultwheelsin@gmail.com',
+                            style: TextStyle(
+                              color: Colors.blue[700],
+                              fontSize: 16,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          Text(
+                            '⏱️ Response Time: Within 24 hours',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey[600],
+                            ),
+                          ),
+                        ],
+                      ),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(context),
+                          child: const Text('Close'),
+                        ),
+                        FilledButton.icon(
+                          onPressed: () async {
+                            final email = 'vaultwheelsin@gmail.com';
+                            final subject = 'Support Request';
+                            final uri = Uri(
+                              scheme: 'mailto',
+                              path: email,
+                              query: 'subject=$subject',
+                            );
+                            if (await canLaunchUrl(uri)) {
+                              await launchUrl(uri);
+                            } else {
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text(
+                                      'Could not open email app. Please email: vaultwheelsin@gmail.com',
+                                    ),
+                                  ),
+                                );
+                              }
+                            }
+                          },
+                          icon: const Icon(Icons.email),
+                          label: const Text('Send Email'),
+                        ),
+                      ],
+                    ),
+                  );
+                },
               ),
               ListTile(
                 leading: const Icon(Icons.logout),
@@ -10161,7 +11790,9 @@ class _ProfilePageState extends State<ProfilePage> {
         // Use LayoutBuilder to adapt to screen size, and SingleChildScrollView for small screens
         return LayoutBuilder(
           builder: (context, constraints) {
-            final double sheetHeight = constraints.maxHeight < 420 ? constraints.maxHeight * 0.95 : 400;
+            final double sheetHeight = constraints.maxHeight < 420
+                ? constraints.maxHeight * 0.95
+                : 400;
             return SizedBox(
               height: sheetHeight,
               child: SingleChildScrollView(
@@ -10183,15 +11814,24 @@ class _ProfilePageState extends State<ProfilePage> {
                       ),
                       const SizedBox(height: 20),
                       const Center(
-                        child: Text('Create Post', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+                        child: Text(
+                          'Create Post',
+                          style: TextStyle(
+                            fontSize: 24,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
                       ),
                       const SizedBox(height: 8),
                       Center(
                         child: Text(
-                          _isCustomerMode 
-                            ? 'Select a vehicle you need, then create posts'
-                            : 'Select your vehicle, then create posts',
-                          style: const TextStyle(fontSize: 16, color: Colors.grey),
+                          _isCustomerMode
+                              ? 'Select a vehicle you need, then create posts'
+                              : 'Select your vehicle, then create posts',
+                          style: const TextStyle(
+                            fontSize: 16,
+                            color: Colors.grey,
+                          ),
                           textAlign: TextAlign.center,
                         ),
                       ),
@@ -10202,29 +11842,44 @@ class _ProfilePageState extends State<ProfilePage> {
                           onPressed: () {
                             Navigator.pop(ctx);
                             Navigator.push(
-                              context, 
+                              context,
                               MaterialPageRoute(
-                                builder: (_) => VehicleListScreen(isUserMode: _isCustomerMode)
-                              )
+                                builder: (_) => VehicleListScreen(
+                                  isUserMode: _isCustomerMode,
+                                ),
+                              ),
                             );
                           },
-                          icon: Icon(_isCustomerMode ? Icons.search : Icons.directions_car),
+                          icon: Icon(
+                            _isCustomerMode
+                                ? Icons.search
+                                : Icons.directions_car,
+                          ),
                           label: Text(
-                            _isCustomerMode ? 'Choose Needed Vehicle' : 'Choose Your Vehicle',
-                            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)
+                            _isCustomerMode
+                                ? 'Choose Needed Vehicle'
+                                : 'Choose Your Vehicle',
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                            ),
                           ),
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: _isCustomerMode ? Colors.orange : Colors.blue,
+                            backgroundColor: _isCustomerMode
+                                ? Colors.orange
+                                : Colors.blue,
                             foregroundColor: Colors.white,
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
                           ),
                         ),
                       ),
                       const SizedBox(height: 16),
                       Text(
-                        _isCustomerMode 
-                          ? '1. Select a vehicle type you need\n2. Open the vehicle\n3. Create posts for that vehicle'
-                          : '1. Select one of your vehicles\n2. Open the vehicle details\n3. Create posts for that vehicle',
+                        _isCustomerMode
+                            ? '1. Select a vehicle type you need\n2. Open the vehicle\n3. Create posts for that vehicle'
+                            : '1. Select one of your vehicles\n2. Open the vehicle details\n3. Create posts for that vehicle',
                         style: TextStyle(fontSize: 14, color: Colors.grey[600]),
                         textAlign: TextAlign.center,
                       ),
@@ -10441,75 +12096,191 @@ class _PaymentSuccessScreenState extends State<PaymentSuccessScreen> {
   bool _loading = true;
   Booking? _booking;
   SlotEntry? _slotEntry;
+  bool _isProcessing = false; // Prevent double processing
+  String? _errorMessage;
 
   @override
   void initState() {
     super.initState();
-    _extractBookingIdAndLoadDetails();
+    // Defer the async work to avoid build conflicts
+    Future.microtask(() => _extractBookingIdAndLoadDetails());
   }
 
   Map<String, String> _routeQueryParameters() {
-    final uri = Uri.base;
-    if (uri.queryParameters.isNotEmpty) return uri.queryParameters;
+    try {
+      final uri = Uri.base;
+      if (uri.queryParameters.isNotEmpty) return uri.queryParameters;
 
-    final queryStart = uri.fragment.indexOf('?');
-    if (queryStart < 0 || queryStart == uri.fragment.length - 1) {
+      final queryStart = uri.fragment.indexOf('?');
+      if (queryStart < 0 || queryStart == uri.fragment.length - 1) {
+        return const {};
+      }
+      return Uri.splitQueryString(uri.fragment.substring(queryStart + 1));
+    } catch (e) {
+      debugPrint('Error parsing URL parameters: $e');
       return const {};
     }
-    return Uri.splitQueryString(uri.fragment.substring(queryStart + 1));
   }
 
   Future<void> _extractBookingIdAndLoadDetails() async {
-    // Extract booking_id from URL query parameters
-    final params = _routeQueryParameters();
-    _bookingId = params['booking_id'];
-    _paymentType = params['type'];
-    final planName = params['plan'];
+    if (_isProcessing || !mounted) return; // Prevent re-entry and check mounted
+    _isProcessing = true;
 
-    if (_paymentType == 'subscription' && planName != null) {
-      _activatedPlan = SubscriptionPlan.values.firstWhere(
-        (p) => p.name == planName.toLowerCase(),
-        orElse: () => SubscriptionPlan.basic,
-      );
-      if (_activatedPlan != SubscriptionPlan.basic) {
-        await AppPreferences.instance.setSubscriptionPlan(_activatedPlan!);
-      }
-    }
-    
-    if (_bookingId != null) {
-      // Try to find the booking in local storage
-      _booking = BookingRepository.instance.getBookingById(_bookingId!);
+    try {
+      // Extract booking_id from URL query parameters
+      final params = _routeQueryParameters();
+      debugPrint('🔍 Payment success params: $params');
 
-      // Try to find the slot details
-      if (_booking != null) {
-        final allSlots = SlotRepository.instance.allSlots;
-        try {
-          _slotEntry = allSlots.firstWhere(
-            (s) => s.slot.id == _booking!.slotId,
-          );
-        } catch (_) {
-          // Slot not found in provider slots, try user slots
-          final allUserSlots = CustomerSlotRepository.instance.allSlots;
+      _bookingId = params['booking_id'];
+      _paymentType = params['type'];
+      final planName = params['plan'];
+      final sessionId = params['session_id']; // Stripe session ID
+      final slotId = params['slot_id'];
+      final postId = params['post_id'];
+      final providerId = params['provider_id'];
+
+      // ─────────────────────────────────────────────────────────────────────
+      // If we have a Stripe session but no booking, create the booking now
+      // ─────────────────────────────────────────────────────────────────────
+      if (sessionId != null &&
+          _bookingId == null &&
+          (slotId != null || postId != null)) {
+        debugPrint('📦 Creating booking from Stripe session: $sessionId');
+
+        final currentUser = AuthRepository.instance.currentUser;
+        if (currentUser != null && providerId != null) {
           try {
-            _slotEntry = allUserSlots.firstWhere(
-              (s) => s.slot.id == _booking!.slotId,
-            );
-          } catch (_) {
-            // Slot not found
+            // Get slot details to create booking
+            final slot = SlotRepository.instance.allSlots
+                .where((s) => s.slot.id == slotId)
+                .firstOrNull
+                ?.slot;
+
+            if (slot != null) {
+              // Create booking with Stripe payment intent
+              final booking = await BookingRepository.instance.createBooking(
+                slotId: slotId!,
+                providerId: providerId,
+                providerName: slot.providerName,
+                userId: currentUser.id,
+                defaultCapacity: slot.capacity,
+                price: slot.price, // double, not int
+                stripePaymentIntentId:
+                    sessionId, // Use session ID as payment intent
+                countdownEndTime: DateTime.now().add(const Duration(hours: 1)),
+                paymentMethod: 'stripe',
+                // slot details
+                serviceType: slot.serviceType,
+                postMode: slot.postMode,
+                bookingMode: slot.bookingMode.name == 'full'
+                    ? booking_types.BookingMode.full
+                    : booking_types.BookingMode.shared,
+                vehicleId: slot.vehicleId,
+                slotStartTime: slot.startTime,
+                slotEndTime: slot.endTime,
+                slotCapacity: slot.capacity,
+                pickupOption: slot.pickupOption.name,
+                withOperator: slot.withOperator,
+                // location
+                routeType: slot.slotType.name == 'fromTo'
+                    ? 'from_to'
+                    : 'base_range',
+                fromAddress: slot.fromLocation?.split('|').first,
+                toAddress: slot.toLocation?.split('|').first,
+                baseAddress: slot.baseLocation?.split('|').first,
+                rangeKm: slot.radius,
+              );
+
+              if (booking != null) {
+                _bookingId = booking.id;
+                debugPrint(
+                  '✅ Created booking ${booking.id} from Stripe payment',
+                );
+              }
+            }
+          } catch (e) {
+            debugPrint('❌ Error creating booking from Stripe session: $e');
           }
         }
       }
+
+      if (_paymentType == 'subscription' && planName != null) {
+        _activatedPlan = SubscriptionPlan.values.firstWhere(
+          (p) => p.name == planName.toLowerCase(),
+          orElse: () => SubscriptionPlan.basic,
+        );
+        if (_activatedPlan != SubscriptionPlan.basic) {
+          // Save to local preferences (for quick access)
+          await AppPreferences.instance.setSubscriptionPlan(_activatedPlan!);
+
+          // ✅ CRITICAL: Save to backend database (source of truth)
+          try {
+            final expiresAt = DateTime.now().add(const Duration(days: 30));
+            final paymentId =
+                params['payment_id'] ??
+                params['razorpay_payment_id'] ??
+                sessionId ??
+                'unknown';
+
+            await ProfileRepository.instance.updateSubscription(
+              plan: _activatedPlan!.name,
+              expiresAt: expiresAt,
+              paymentId: paymentId,
+            );
+
+            debugPrint(
+              '✅ Subscription saved to backend: ${_activatedPlan!.name}',
+            );
+          } catch (e) {
+            debugPrint('❌ Failed to save subscription to backend: $e');
+            // Don't fail the whole flow, but log the error
+          }
+        }
+      }
+
+      if (_bookingId != null) {
+        // Try to find the booking in local storage
+        _booking = BookingRepository.instance.getBookingById(_bookingId!);
+
+        // Try to find the slot details
+        if (_booking != null) {
+          final allSlots = SlotRepository.instance.allSlots;
+          try {
+            _slotEntry = allSlots.firstWhere(
+              (s) => s.slot.id == _booking!.slotId,
+            );
+          } catch (_) {
+            // Slot not found in provider slots, try user slots
+            final allUserSlots = CustomerSlotRepository.instance.allSlots;
+            try {
+              _slotEntry = allUserSlots.firstWhere(
+                (s) => s.slot.id == _booking!.slotId,
+              );
+            } catch (_) {
+              // Slot not found
+            }
+          }
+        }
+      }
+
+      // Safety check: only setState if widget is still mounted
+    } catch (e, stackTrace) {
+      debugPrint('❌ Error in payment success screen: $e');
+      debugPrint('Stack trace: $stackTrace');
+      _errorMessage = e.toString();
+    } finally {
+      if (mounted) {
+        setState(() {
+          _loading = false;
+        });
+      }
     }
-    
-    setState(() {
-      _loading = false;
-    });
   }
 
   String _formatDateTime(DateTime dateTime) {
     final now = DateTime.now();
     final difference = dateTime.difference(now);
-    
+
     if (difference.inDays == 0) {
       return 'Today at ${dateTime.hour.toString().padLeft(2, '0')}:${dateTime.minute.toString().padLeft(2, '0')}';
     } else if (difference.inDays == 1) {
@@ -10522,9 +12293,7 @@ class _PaymentSuccessScreenState extends State<PaymentSuccessScreen> {
   @override
   Widget build(BuildContext context) {
     if (_loading) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
     return Scaffold(
@@ -10546,29 +12315,20 @@ class _PaymentSuccessScreenState extends State<PaymentSuccessScreen> {
                   color: Colors.green,
                   shape: BoxShape.circle,
                 ),
-                child: const Icon(
-                  Icons.check,
-                  size: 60,
-                  color: Colors.white,
-                ),
+                child: const Icon(Icons.check, size: 60, color: Colors.white),
               ),
               const SizedBox(height: 24),
               const Text(
                 'Payment Successful!',
-                style: TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
-                ),
+                style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
               ),
+
               const SizedBox(height: 12),
               Text(
                 _paymentType == 'subscription'
                     ? '${(_activatedPlan?.name ?? 'premium').toUpperCase()} plan activated.'
                     : 'Your booking has been confirmed.',
-                style: const TextStyle(
-                  fontSize: 16,
-                  color: Colors.grey,
-                ),
+                style: const TextStyle(fontSize: 16, color: Colors.grey),
                 textAlign: TextAlign.center,
               ),
               if (_bookingId != null) ...[
@@ -10584,14 +12344,15 @@ class _PaymentSuccessScreenState extends State<PaymentSuccessScreen> {
                     children: [
                       Row(
                         children: [
-                          const Icon(Icons.confirmation_number, size: 16, color: Colors.grey),
+                          const Icon(
+                            Icons.confirmation_number,
+                            size: 16,
+                            color: Colors.grey,
+                          ),
                           const SizedBox(width: 8),
                           const Text(
                             'Booking ID',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.grey,
-                            ),
+                            style: TextStyle(fontSize: 12, color: Colors.grey),
                           ),
                         ],
                       ),
@@ -10607,7 +12368,11 @@ class _PaymentSuccessScreenState extends State<PaymentSuccessScreen> {
                         const Divider(height: 24),
                         Row(
                           children: [
-                            const Icon(Icons.access_time, size: 16, color: Colors.grey),
+                            const Icon(
+                              Icons.access_time,
+                              size: 16,
+                              color: Colors.grey,
+                            ),
                             const SizedBox(width: 8),
                             const Text(
                               'Trip Start Time',
@@ -10629,7 +12394,11 @@ class _PaymentSuccessScreenState extends State<PaymentSuccessScreen> {
                         const SizedBox(height: 12),
                         Row(
                           children: [
-                            const Icon(Icons.event_available, size: 16, color: Colors.grey),
+                            const Icon(
+                              Icons.event_available,
+                              size: 16,
+                              color: Colors.grey,
+                            ),
                             const SizedBox(width: 8),
                             const Text(
                               'Trip End Time',
@@ -10651,7 +12420,11 @@ class _PaymentSuccessScreenState extends State<PaymentSuccessScreen> {
                         const Divider(height: 24),
                         Row(
                           children: [
-                            const Icon(Icons.directions_car, size: 16, color: Colors.grey),
+                            const Icon(
+                              Icons.directions_car,
+                              size: 16,
+                              color: Colors.grey,
+                            ),
                             const SizedBox(width: 8),
                             const Text(
                               'Vehicle',
@@ -10686,7 +12459,11 @@ class _PaymentSuccessScreenState extends State<PaymentSuccessScreen> {
                   ),
                   child: Row(
                     children: [
-                      Icon(Icons.info_outline, color: Colors.blue[700], size: 20),
+                      Icon(
+                        Icons.info_outline,
+                        color: Colors.blue[700],
+                        size: 20,
+                      ),
                       const SizedBox(width: 12),
                       Expanded(
                         child: Text(
@@ -10783,9 +12560,7 @@ class _PaymentCancelScreenState extends State<PaymentCancelScreen> {
   @override
   Widget build(BuildContext context) {
     if (_loading) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
     return Scaffold(
@@ -10807,37 +12582,24 @@ class _PaymentCancelScreenState extends State<PaymentCancelScreen> {
                   color: Colors.orange,
                   shape: BoxShape.circle,
                 ),
-                child: const Icon(
-                  Icons.close,
-                  size: 60,
-                  color: Colors.white,
-                ),
+                child: const Icon(Icons.close, size: 60, color: Colors.white),
               ),
               const SizedBox(height: 24),
               const Text(
                 'Payment Cancelled',
-                style: TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
-                ),
+                style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 12),
               const Text(
                 'Your payment was not completed.',
-                style: TextStyle(
-                  fontSize: 16,
-                  color: Colors.grey,
-                ),
+                style: TextStyle(fontSize: 16, color: Colors.grey),
                 textAlign: TextAlign.center,
               ),
               if (_bookingId != null) ...[
                 const SizedBox(height: 16),
                 const Text(
                   'The booking has been cancelled and no charges were made.',
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: Colors.grey,
-                  ),
+                  style: TextStyle(fontSize: 14, color: Colors.grey),
                   textAlign: TextAlign.center,
                 ),
               ],
@@ -10874,6 +12636,3 @@ class _PaymentCancelScreenState extends State<PaymentCancelScreen> {
     );
   }
 }
-
-
-

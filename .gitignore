@@ -56,3 +56,21 @@ functions/.env.*
 *service-account*.json
 *serviceAccount*.json
 firebase-adminsdk*.json
+
+# 🔒 SECURITY: Firebase & Google Services Configuration
+# These files contain API keys and should NEVER be committed
+firebase_options.dart
+lib/firebase_options.dart
+android/app/google-services.json
+ios/Runner/GoogleService-Info.plist
+
+# 🔒 SECURITY: Supabase Configuration
+# Contains database URLs and API keys
+lib/config/supabase_config.dart
+
+# 🔒 SECURITY: Backend Functions (contains payment logic & API keys)
+functions/
+firebase_functions/
+
+# 🔒 SECURITY: Supabase backend
+supabase/

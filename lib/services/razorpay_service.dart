@@ -1,7 +1,8 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:razorpay_flutter/razorpay_flutter.dart';
-import 'razorpay_web_interop.dart' if (dart.library.io) 'razorpay_web_interop_stub.dart';
+import 'razorpay_web_interop.dart'
+    if (dart.library.io) 'razorpay_web_interop_stub.dart';
 
 /// Razorpay payment service for Indian transactions (INR).
 /// Uses native SDK on mobile, Checkout.js on web.
@@ -13,17 +14,17 @@ class RazorpayService {
   // 🔑 PAYMENT MODE CONFIGURATION
   // ═══════════════════════════════════════════════════════════
   // Set to true for TEST mode, false for PRODUCTION mode
-  static const bool USE_TEST_MODE = true; // ← CHANGE THIS TO false FOR PRODUCTION
-  
+  static const bool useTestMode = true; // ← TEST MODE
+
   // TEST MODE KEYS (for development/testing)
-  static const String _testKeyId = 'rzp_test_SvBetsinxdM1dN';
-  
-  // PRODUCTION MODE KEYS (get from dashboard.razorpay.com in LIVE mode)
-  // ⚠️ IMPORTANT: Add your live keys before going to production!
-  static const String _liveKeyId = 'rzp_live_XXXXXXXXXXXX'; // ← Replace with your LIVE key
-  
+  static const String _testKeyId = 'rzp_test_T80cMBJ4aXNbpM';
+
+  // PRODUCTION MODE KEYS (from dashboard.razorpay.com in LIVE mode)
+  static const String _liveKeyId =
+      'YOUR_LIVE_KEY_HERE'; // ← ADD YOUR LIVE KEY WHEN READY
+
   // Active key based on mode
-  static String get keyId => USE_TEST_MODE ? _testKeyId : _liveKeyId;
+  static String get keyId => useTestMode ? _testKeyId : _liveKeyId;
 
   Razorpay? _razorpay;
 
@@ -76,15 +77,20 @@ class RazorpayService {
     String? orderId,
   }) async {
     // Log payment mode
-    debugPrint('🔑 Razorpay Mode: ${USE_TEST_MODE ? "TEST 🧪" : "PRODUCTION 🚀"}');
+    debugPrint(
+      '🔑 Razorpay Mode: ${RazorpayService.useTestMode ? "TEST 🧪" : "PRODUCTION 🚀"}',
+    );
     debugPrint('🔑 Using Key: ${keyId.substring(0, 12)}...');
-    
+
     // Dev/placeholder key → skip payment
-    if (keyId.contains('YourRazorpay') || keyId.isEmpty || keyId.contains('XXXXXXXXXXXX')) {
+    if (keyId.contains('YourRazorpay') ||
+        keyId.isEmpty ||
+        keyId.contains('XXXXXXXXXXXX')) {
       debugPrint('[RazorpayService] ⚠️ Placeholder key — bypassing payment');
       return {
         'payment_id': 'dev_${DateTime.now().millisecondsSinceEpoch}',
-        'order_id': orderId ?? 'dev_order_${DateTime.now().millisecondsSinceEpoch}',
+        'order_id':
+            orderId ?? 'dev_order_${DateTime.now().millisecondsSinceEpoch}',
       };
     }
 
@@ -107,15 +113,15 @@ class RazorpayService {
     final completer = _PaymentCompleter();
 
     _onSuccess = (res) => completer.complete({
-          'payment_id': res.paymentId,
-          'order_id': res.orderId,
-          'signature': res.signature,
-        });
+      'payment_id': res.paymentId,
+      'order_id': res.orderId,
+      'signature': res.signature,
+    });
 
     _onFailure = (res) => completer.complete({
-          'error': res.message ?? 'Payment failed',
-          'code': res.code,
-        });
+      'error': res.message ?? 'Payment failed',
+      'code': res.code,
+    });
 
     final options = <String, dynamic>{
       'key': keyId,
@@ -123,13 +129,11 @@ class RazorpayService {
       'currency': 'INR',
       'name': 'VaultWheels',
       'description': description,
-      'prefill': {
-        'contact': userPhone,
-        'email': userEmail,
-        'name': userName,
-      },
+      'prefill': {'contact': userPhone, 'email': userEmail, 'name': userName},
       'theme': {'color': '#1976D2'},
-      'order_id': ?orderId,
+      'order_id': orderId,
+      // Enable all payment methods (cards, netbanking, UPI, wallets)
+      // No restrictions - user can choose any available method
     };
 
     try {
@@ -153,6 +157,3 @@ class _PaymentCompleter {
 
   Future<Map<String, dynamic>> get future => _completer.future;
 }
-
-
-

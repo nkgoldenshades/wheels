@@ -175,6 +175,7 @@ class SeatLayoutController extends ChangeNotifier {
     required int col,
     required String? seatName,
     required int? price,
+    int? securityDeposit,
     SeatKind seatKind = SeatKind.seat,
     SeatGender gender = SeatGender.any,
     bool locked = false,
@@ -208,6 +209,7 @@ class SeatLayoutController extends ChangeNotifier {
       type: CellType.seat,
       seatName: unique,
       price: resolvedPrice,
+      securityDeposit: securityDeposit,
       seatKind: seatKind,
       gender: gender,
       isLocked: locked,
@@ -322,6 +324,3 @@ class SeatLayoutController extends ChangeNotifier {
     }
   }
 }
-
-
-

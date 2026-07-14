@@ -41,61 +41,71 @@ class VehicleRepository {
     await _loadVehicles();
     await _loadOnlineStatus();
     _initialized = true;
-    debugPrint('✅ VehicleRepository initialized with ${_vehicles.value.length} vehicles');
+    debugPrint(
+      '✅ VehicleRepository initialized with ${_vehicles.value.length} vehicles',
+    );
   }
 
   Future<void> _loadVehicles() async {
-    debugPrint('🔍 VehicleRepository: Starting to load vehicles from vehicles table...');
+    debugPrint(
+      '🔍 VehicleRepository: Starting to load vehicles from vehicles table...',
+    );
     try {
-      // Load provider vehicles from Supabase (vehicles users are offering)
-      // Query vehicles table directly - NO FILTER to test RLS
+      // Load provider vehicles from Supabase (vehicles users are offering).
+      // Customer vehicles are loaded by CustomerVehicleRepository.
       final response = await _supabase
-          .from('vehicles')  // ✅ Query vehicles table directly
+          .from('vehicles')
           .select('''
             *,
             profiles_public (
               full_name,
               profile_photo_url
             )
-          ''')  // Join with profiles_public - PostgREST auto-detects FK
-          // .eq('is_active', true)  // Temporarily removed to test
+          ''')
+          .eq('vehicle_owner', 'provider')
           .order('created_at', ascending: false);
 
-      debugPrint('🔍 VehicleRepository: Query completed, processing ${(response as List).length} vehicles');
-      
-      _vehicles.value = (response as List)
-          .map((json) {
-            // 🔍 DEBUG: Print raw JSON (truncate large fields)
-            if (kDebugMode) {
-              final debugJson = Map<String, dynamic>.from(json);
-              // Truncate base64 images to avoid huge logs
-              if (debugJson['vehicle_photo_url'] != null && debugJson['vehicle_photo_url'].toString().length > 100) {
-                debugJson['vehicle_photo_url'] = '${debugJson['vehicle_photo_url'].toString().substring(0, 50)}... [TRUNCATED]';
-              }
-              if (debugJson['gallery_images'] is List) {
-                debugJson['gallery_images'] = '[${(debugJson['gallery_images'] as List).length} images]';
-              }
-              // Removed excessive debug logging - only log errors
-            }
-            
-            // Flatten the profiles data into the vehicle object
-            final vehicleData = Map<String, dynamic>.from(json);
-            if (json['profiles_public'] != null) {
-              vehicleData['profile_name'] = json['profiles_public']['full_name'];
-              vehicleData['profile_avatar'] = json['profiles_public']['profile_photo_url'];
-            } else {
-              if (kDebugMode) {
-                debugPrint('❌ profiles_public is NULL for vehicle: ${json['id']}');
-              }
-            }
-            return Vehicle.fromJson(vehicleData);
-          })
-          .toList();
+      debugPrint(
+        '🔍 VehicleRepository: Query completed, processing ${(response as List).length} vehicles',
+      );
+
+      _vehicles.value = (response as List).map((json) {
+        // 🔍 DEBUG: Print raw JSON (truncate large fields)
+        if (kDebugMode) {
+          final debugJson = Map<String, dynamic>.from(json);
+          // Truncate base64 images to avoid huge logs
+          if (debugJson['vehicle_photo_url'] != null &&
+              debugJson['vehicle_photo_url'].toString().length > 100) {
+            debugJson['vehicle_photo_url'] =
+                '${debugJson['vehicle_photo_url'].toString().substring(0, 50)}... [TRUNCATED]';
+          }
+          if (debugJson['gallery_images'] is List) {
+            debugJson['gallery_images'] =
+                '[${(debugJson['gallery_images'] as List).length} images]';
+          }
+          // Removed excessive debug logging - only log errors
+        }
+
+        // Flatten the profiles data into the vehicle object
+        final vehicleData = Map<String, dynamic>.from(json);
+        if (json['profiles_public'] != null) {
+          vehicleData['profile_name'] = json['profiles_public']['full_name'];
+          vehicleData['profile_avatar'] =
+              json['profiles_public']['profile_photo_url'];
+        } else {
+          if (kDebugMode) {
+            debugPrint('❌ profiles_public is NULL for vehicle: ${json['id']}');
+          }
+        }
+        return Vehicle.fromJson(vehicleData);
+      }).toList();
 
       debugPrint('✅ Loaded ${_vehicles.value.length} vehicles from Supabase');
       if (_vehicles.value.isNotEmpty) {
         final firstVehicle = _vehicles.value[0];
-        debugPrint('🔍 First vehicle: id=${firstVehicle.id}, userName=${firstVehicle.userName}, name=${firstVehicle.name}');
+        debugPrint(
+          '🔍 First vehicle: id=${firstVehicle.id}, userName=${firstVehicle.userName}, name=${firstVehicle.name}',
+        );
       } else {
         debugPrint('⚠️ No vehicles returned - RLS is blocking ALL vehicles!');
       }
@@ -183,16 +193,18 @@ class VehicleRepository {
         'profile_id': vehicle.userId,
         'vehicle_type': vehicle.type,
         'vehicle_name': vehicle.name,
-        'registration_number': vehicle.registrationNumber ?? 'TEMP-${vehicle.id.substring(0, 8)}',
+        'registration_number':
+            vehicle.registrationNumber ?? 'TEMP-${vehicle.id.substring(0, 8)}',
         'seating_capacity': vehicle.seatingCapacity ?? 4,
         'vehicle_photo_url': vehicle.profileImage,
-        'gallery_images': vehicle.galleryImages.where((e) => e.trim().isNotEmpty).toList(),
+        'gallery_images': vehicle.galleryImages
+            .where((e) => e.trim().isNotEmpty)
+            .toList(),
         'video_url': vehicle.videoUrl,
         'created_at': vehicle.createdAt.toIso8601String(),
         'updated_at': DateTime.now().toIso8601String(),
         'is_online': true, // Vehicle is online by default when created
         'vehicle_owner': 'provider', // Enum: provider or customer
-        
         // Statistics
         'total_trips': vehicle.totalBookings,
         'total_reviews': vehicle.totalRatings,
@@ -213,18 +225,40 @@ class VehicleRepository {
         'profile_id': vehicle.userId,
         if (vehicle.rcFrontUrl != null) 'rc_front_url': vehicle.rcFrontUrl,
         if (vehicle.rcBackUrl != null) 'rc_back_url': vehicle.rcBackUrl,
-        if (vehicle.insuranceNumber != null) 'insurance_number': vehicle.insuranceNumber,
-        if (vehicle.insuranceExpiry != null) 'insurance_expiry': vehicle.insuranceExpiry!.toIso8601String().split('T').first,
-        if (vehicle.insuranceDocumentUrl != null) 'insurance_document_url': vehicle.insuranceDocumentUrl,
-        if (vehicle.pollutionCertificateUrl != null) 'pollution_certificate_url': vehicle.pollutionCertificateUrl,
-        if (vehicle.pollutionExpiry != null) 'pollution_expiry': vehicle.pollutionExpiry!.toIso8601String().split('T').first,
-        if (vehicle.fitnessCertificateUrl != null) 'fitness_certificate_url': vehicle.fitnessCertificateUrl,
-        if (vehicle.fitnessExpiry != null) 'fitness_expiry': vehicle.fitnessExpiry!.toIso8601String().split('T').first,
+        if (vehicle.insuranceNumber != null)
+          'insurance_number': vehicle.insuranceNumber,
+        if (vehicle.insuranceExpiry != null)
+          'insurance_expiry': vehicle.insuranceExpiry!
+              .toIso8601String()
+              .split('T')
+              .first,
+        if (vehicle.insuranceDocumentUrl != null)
+          'insurance_document_url': vehicle.insuranceDocumentUrl,
+        if (vehicle.pollutionCertificateUrl != null)
+          'pollution_certificate_url': vehicle.pollutionCertificateUrl,
+        if (vehicle.pollutionExpiry != null)
+          'pollution_expiry': vehicle.pollutionExpiry!
+              .toIso8601String()
+              .split('T')
+              .first,
+        if (vehicle.fitnessCertificateUrl != null)
+          'fitness_certificate_url': vehicle.fitnessCertificateUrl,
+        if (vehicle.fitnessExpiry != null)
+          'fitness_expiry': vehicle.fitnessExpiry!
+              .toIso8601String()
+              .split('T')
+              .first,
         if (vehicle.operatorName != null) 'operator_name': vehicle.operatorName,
-        if (vehicle.operatorPhone != null) 'operator_phone': vehicle.operatorPhone,
-        if (vehicle.operatorPhoto != null) 'operator_profile_photo_url': vehicle.operatorPhoto,
+        if (vehicle.operatorPhone != null)
+          'operator_phone': vehicle.operatorPhone,
+        if (vehicle.operatorGender != null)
+          'operator_gender': vehicle.operatorGender,
+        if (vehicle.operatorPhoto != null)
+          'operator_profile_photo_url': vehicle.operatorPhoto,
       };
-      await _supabase.from('vehicle_sensitive_info').upsert(sensitivePayload, onConflict: 'vehicle_id');
+      await _supabase
+          .from('vehicle_sensitive_info')
+          .upsert(sensitivePayload, onConflict: 'vehicle_id');
 
       // Update local state
       _vehicles.value = [vehicle, ..._vehicles.value];
@@ -249,7 +283,9 @@ class VehicleRepository {
   Future<void> updateVehicle(Vehicle vehicle) async {
     try {
       // Update in Supabase
-      Map<String, dynamic> payload = Map<String, dynamic>.from(vehicle.toJson());
+      Map<String, dynamic> payload = Map<String, dynamic>.from(
+        vehicle.toJson(),
+      );
       while (true) {
         try {
           await _supabase.from('vehicles').update(payload).eq('id', vehicle.id);
@@ -261,9 +297,9 @@ class VehicleRepository {
             continue;
           }
           if (e.code == 'PGRST204') {
-            final match = RegExp(r"Could not find the '([^']+)' column").firstMatch(
-              e.message,
-            );
+            final match = RegExp(
+              r"Could not find the '([^']+)' column",
+            ).firstMatch(e.message);
             final missingColumn = match?.group(1);
             if (missingColumn == null || !payload.containsKey(missingColumn)) {
               rethrow;
@@ -306,15 +342,15 @@ class VehicleRepository {
           .from('posts')
           .select('id')
           .eq('vehicle_id', vehicleId);
-      
+
       if (posts.isNotEmpty) {
         final postCount = posts.length;
         throw Exception(
           'Cannot delete vehicle: $postCount post${postCount > 1 ? 's' : ''} exist. '
-          'Please delete all posts using this vehicle first.'
+          'Please delete all posts using this vehicle first.',
         );
       }
-      
+
       // Safe to delete - no posts exist
       // Note: Delete from main vehicles table (not the view)
       await _supabase.from('vehicles').delete().eq('id', vehicleId);
@@ -392,6 +428,3 @@ class VehicleRepository {
         .toList();
   }
 }
-
-
-

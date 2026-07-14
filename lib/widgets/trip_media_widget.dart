@@ -33,6 +33,7 @@ class _TripMediaWidgetState extends State<TripMediaWidget> {
   late TripMedia _media;
   bool _uploading = false;
   String? _uploadError;
+  bool _isExpanded = false; // Collapsed by default
 
   @override
   void initState() {
@@ -43,7 +44,8 @@ class _TripMediaWidgetState extends State<TripMediaWidget> {
   @override
   void didUpdateWidget(TripMediaWidget old) {
     super.didUpdateWidget(old);
-    if (old.booking.tripMedia != widget.booking.tripMedia) {
+    // Don't override local state while uploading — prevents rebuild loop
+    if (!_uploading && old.booking.tripMedia != widget.booking.tripMedia) {
       setState(() => _media = widget.booking.tripMedia);
     }
   }
@@ -52,7 +54,9 @@ class _TripMediaWidgetState extends State<TripMediaWidget> {
 
   /// Whether the current user has submitted their start media
   bool get _startSubmitted {
-    final party = widget.isProvider ? _media.start.provider : _media.start.customer;
+    final party = widget.isProvider
+        ? _media.start.provider
+        : _media.start.customer;
     return party.uploadedAt != null;
   }
 
@@ -68,7 +72,9 @@ class _TripMediaWidgetState extends State<TripMediaWidget> {
     try {
       final bytes = await file.readAsBytes();
       final supabase = Supabase.instance.client;
-      await supabase.storage.from('trip_media').uploadBinary(
+      await supabase.storage
+          .from('trip_media')
+          .uploadBinary(
             path,
             bytes,
             fileOptions: FileOptions(
@@ -93,24 +99,41 @@ class _TripMediaWidgetState extends State<TripMediaWidget> {
 
   Future<void> _pickImages(String phase) async {
     final picker = ImagePicker();
-    final picked = await picker.pickImage(
-      source: ImageSource.camera,
-      imageQuality: 80,
-      preferredCameraDevice: CameraDevice.rear,
-    );
-    if (picked == null) return;
 
-    setState(() { _uploading = true; _uploadError = null; });
+    // Allow picking multiple images from gallery
+    final picked = await picker.pickMultiImage(
+      imageQuality: 80,
+      maxWidth: 1920,
+      maxHeight: 1920,
+    );
+
+    if (picked.isEmpty) return;
+
+    setState(() {
+      _uploading = true;
+      _uploadError = null;
+    });
 
     try {
       final urls = <String>[];
-      final ext = picked.name.split('.').last;
-      final url = await _uploadFile(
-        picked,
-        _storagePath(phase, '${DateTime.now().millisecondsSinceEpoch}.$ext'),
-      );
-      if (url != null) urls.add(url);
-      if (urls.isEmpty) { setState(() => _uploadError = 'Upload failed.'); return; }
+
+      // Upload each picked image
+      for (final file in picked) {
+        final ext = file.name.split('.').last;
+        final url = await _uploadFile(
+          file,
+          _storagePath(
+            phase,
+            '${DateTime.now().millisecondsSinceEpoch}_${urls.length}.$ext',
+          ),
+        );
+        if (url != null) urls.add(url);
+      }
+
+      if (urls.isEmpty) {
+        setState(() => _uploadError = 'Upload failed.');
+        return;
+      }
 
       final updated = _addImages(_media, phase, urls);
       await widget.onUpdated(updated);
@@ -129,12 +152,24 @@ class _TripMediaWidgetState extends State<TripMediaWidget> {
     );
     if (file == null) return;
 
-    setState(() { _uploading = true; _uploadError = null; });
+    setState(() {
+      _uploading = true;
+      _uploadError = null;
+    });
 
     try {
       final ext = file.name.split('.').last;
-      final url = await _uploadFile(file, _storagePath(phase, 'video_${DateTime.now().millisecondsSinceEpoch}.$ext'));
-      if (url == null) { setState(() => _uploadError = 'Video upload failed.'); return; }
+      final url = await _uploadFile(
+        file,
+        _storagePath(
+          phase,
+          'video_${DateTime.now().millisecondsSinceEpoch}.$ext',
+        ),
+      );
+      if (url == null) {
+        setState(() => _uploadError = 'Video upload failed.');
+        return;
+      }
 
       final updated = _setVideo(_media, phase, url);
       await widget.onUpdated(updated);
@@ -157,7 +192,9 @@ class _TripMediaWidgetState extends State<TripMediaWidget> {
     final party = _getParty(_media, phase);
     if (!party.hasMedia) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please upload at least one photo before submitting.')),
+        const SnackBar(
+          content: Text('Please upload at least one photo before submitting.'),
+        ),
       );
       return;
     }
@@ -165,23 +202,37 @@ class _TripMediaWidgetState extends State<TripMediaWidget> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text('Submit ${phase == 'start' ? 'Start' : 'End'} Media'),
-        content: Text('Once submitted, you cannot edit your ${phase == 'start' ? 'start' : 'end'} photos. Continue?'),
+        content: Text(
+          'Once submitted, you cannot edit your ${phase == 'start' ? 'start' : 'end'} photos. Continue?',
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Submit')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Submit'),
+          ),
         ],
       ),
     );
     if (confirmed != true) return;
 
-    final updated = _setParty(_media, phase, party.copyWith(uploadedAt: DateTime.now()));
+    final updated = _setParty(
+      _media,
+      phase,
+      party.copyWith(uploadedAt: DateTime.now()),
+    );
     await widget.onUpdated(updated);
     setState(() => _media = updated);
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('✅ ${phase == 'start' ? 'Start' : 'End'} media submitted!'),
+          content: Text(
+            '✅ ${phase == 'start' ? 'Start' : 'End'} media submitted!',
+          ),
           backgroundColor: Colors.green,
         ),
       );
@@ -197,13 +248,17 @@ class _TripMediaWidgetState extends State<TripMediaWidget> {
 
   TripMedia _setParty(TripMedia m, String phase, TripMediaParty p) {
     if (phase == 'start') {
-      return m.copyWith(start: _myParty == 'provider'
-          ? m.start.copyWith(provider: p)
-          : m.start.copyWith(customer: p));
+      return m.copyWith(
+        start: _myParty == 'provider'
+            ? m.start.copyWith(provider: p)
+            : m.start.copyWith(customer: p),
+      );
     } else {
-      return m.copyWith(end: _myParty == 'provider'
-          ? m.end.copyWith(provider: p)
-          : m.end.copyWith(customer: p));
+      return m.copyWith(
+        end: _myParty == 'provider'
+            ? m.end.copyWith(provider: p)
+            : m.end.copyWith(customer: p),
+      );
     }
   }
 
@@ -221,80 +276,147 @@ class _TripMediaWidgetState extends State<TripMediaWidget> {
 
   @override
   Widget build(BuildContext context) {
+    // Count total media items
+    final startMyImages = _getParty(_media, 'start').images.length;
+    final endMyImages = _getParty(_media, 'end').images.length;
+    final startOtherImages =
+        (_myParty == 'provider' ? _media.start.customer : _media.start.provider)
+            .images
+            .length;
+    final endOtherImages =
+        (_myParty == 'provider' ? _media.end.customer : _media.end.provider)
+            .images
+            .length;
+    final totalMedia =
+        startMyImages + endMyImages + startOtherImages + endOtherImages;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          children: [
-            const Icon(Icons.photo_library_outlined, size: 20),
-            const SizedBox(width: 8),
-            const Text('Trip Media', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-            const Spacer(),
-            if (_uploading)
-              const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
-          ],
-        ),
-        if (_uploadError != null) ...[
-          const SizedBox(height: 4),
-          Text(_uploadError!, style: const TextStyle(color: Colors.red, fontSize: 12)),
-        ],
-        const SizedBox(height: 12),
-
-        // ── START phase ───────────────────────────────────────────────────
-        _PhaseCard(
-          phase: 'start',
-          label: 'Start of Trip',
-          icon: Icons.play_circle_outline,
-          color: Colors.green,
-          myParty: _getParty(_media, 'start'),
-          otherParty: _myParty == 'provider' ? _media.start.customer : _media.start.provider,
-          otherLabel: _myParty == 'provider' ? 'Customer' : 'Provider',
-          isSubmitted: _startSubmitted,
-          uploading: _uploading,
-          onPickImages: () => _pickImages('start'),
-          onPickVideo: () => _pickVideo('start'),
-          onRemoveImage: (i) => _removeImage('start', i),
-          onSubmit: () => _submit('start'),
-        ),
-
-        const SizedBox(height: 16),
-
-        // ── END phase — only unlocked after start is submitted ────────────
-        if (_startSubmitted)
-          _PhaseCard(
-            phase: 'end',
-            label: 'End of Trip',
-            icon: Icons.stop_circle_outlined,
-            color: Colors.orange,
-            myParty: _getParty(_media, 'end'),
-            otherParty: _myParty == 'provider' ? _media.end.customer : _media.end.provider,
-            otherLabel: _myParty == 'provider' ? 'Customer' : 'Provider',
-            isSubmitted: _endSubmitted,
-            uploading: _uploading,
-            onPickImages: () => _pickImages('end'),
-            onPickVideo: () => _pickVideo('end'),
-            onRemoveImage: (i) => _removeImage('end', i),
-            onSubmit: () => _submit('end'),
-          )
-        else
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: Colors.grey[100],
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.grey[300]!),
-            ),
+        // ── Header (clickable to expand/collapse) ─────────────────────────
+        InkWell(
+          onTap: () => setState(() => _isExpanded = !_isExpanded),
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
             child: Row(
               children: [
-                Icon(Icons.lock_outline, color: Colors.grey[400]),
-                const SizedBox(width: 12),
-                Text(
-                  'End of Trip — unlocks after Start is submitted',
-                  style: TextStyle(color: Colors.grey[500], fontSize: 13),
+                Icon(
+                  _isExpanded
+                      ? Icons.keyboard_arrow_down
+                      : Icons.keyboard_arrow_right,
+                  size: 24,
+                  color: Colors.grey[600],
                 ),
+                const SizedBox(width: 4),
+                const Icon(Icons.photo_library_outlined, size: 20),
+                const SizedBox(width: 8),
+                const Text(
+                  'Trip Media',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(width: 8),
+                if (totalMedia > 0)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 2,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.blue.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      '$totalMedia',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.blue,
+                      ),
+                    ),
+                  ),
+                const Spacer(),
+                if (_uploading)
+                  const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
               ],
             ),
           ),
+        ),
+        if (_uploadError != null) ...[
+          const SizedBox(height: 4),
+          Text(
+            _uploadError!,
+            style: const TextStyle(color: Colors.red, fontSize: 12),
+          ),
+        ],
+
+        // ── Expandable content ────────────────────────────────────────────
+        if (_isExpanded) ...[
+          const SizedBox(height: 12),
+
+          // ── START phase ───────────────────────────────────────────────────
+          _PhaseCard(
+            phase: 'start',
+            label: 'Start of Trip',
+            icon: Icons.play_circle_outline,
+            color: Colors.green,
+            myParty: _getParty(_media, 'start'),
+            otherParty: _myParty == 'provider'
+                ? _media.start.customer
+                : _media.start.provider,
+            otherLabel: _myParty == 'provider' ? 'Customer' : 'Provider',
+            isSubmitted: _startSubmitted,
+            uploading: _uploading,
+            onPickImages: () => _pickImages('start'),
+            onPickVideo: () => _pickVideo('start'),
+            onRemoveImage: (i) => _removeImage('start', i),
+            onSubmit: () => _submit('start'),
+          ),
+
+          const SizedBox(height: 16),
+
+          // ── END phase — only unlocked after start is submitted ────────────
+          if (_startSubmitted)
+            _PhaseCard(
+              phase: 'end',
+              label: 'End of Trip',
+              icon: Icons.stop_circle_outlined,
+              color: Colors.orange,
+              myParty: _getParty(_media, 'end'),
+              otherParty: _myParty == 'provider'
+                  ? _media.end.customer
+                  : _media.end.provider,
+              otherLabel: _myParty == 'provider' ? 'Customer' : 'Provider',
+              isSubmitted: _endSubmitted,
+              uploading: _uploading,
+              onPickImages: () => _pickImages('end'),
+              onPickVideo: () => _pickVideo('end'),
+              onRemoveImage: (i) => _removeImage('end', i),
+              onSubmit: () => _submit('end'),
+            )
+          else
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.grey[100],
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.grey[300]!),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.lock_outline, color: Colors.grey[400]),
+                  const SizedBox(width: 12),
+                  Text(
+                    'End of Trip — unlocks after Start is submitted',
+                    style: TextStyle(color: Colors.grey[500], fontSize: 13),
+                  ),
+                ],
+              ),
+            ),
+        ],
       ],
     );
   }
@@ -348,20 +470,39 @@ class _PhaseCard extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             decoration: BoxDecoration(
               color: color.withValues(alpha: 0.1),
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(11)),
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(11),
+              ),
             ),
             child: Row(
               children: [
                 Icon(icon, size: 18, color: color),
                 const SizedBox(width: 8),
-                Text(label, style: TextStyle(fontWeight: FontWeight.bold, color: color, fontSize: 14)),
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: color,
+                    fontSize: 14,
+                  ),
+                ),
                 const Spacer(),
                 if (isSubmitted)
                   Row(
                     children: [
-                      const Icon(Icons.check_circle, size: 16, color: Colors.green),
+                      const Icon(
+                        Icons.check_circle,
+                        size: 16,
+                        color: Colors.green,
+                      ),
                       const SizedBox(width: 4),
-                      Text('Submitted', style: TextStyle(fontSize: 12, color: Colors.green[700])),
+                      Text(
+                        'Submitted',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.green[700],
+                        ),
+                      ),
                     ],
                   ),
               ],
@@ -374,7 +515,14 @@ class _PhaseCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 // My uploads
-                Text('Your Photos', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.grey[700])),
+                Text(
+                  'Your Photos',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.grey[700],
+                  ),
+                ),
                 const SizedBox(height: 8),
 
                 if (myParty.images.isNotEmpty) ...[
@@ -386,7 +534,9 @@ class _PhaseCard extends StatelessWidget {
                       separatorBuilder: (_, _) => const SizedBox(width: 8),
                       itemBuilder: (context, i) {
                         if (!isSubmitted && i == myParty.images.length) {
-                          return _AddBtn(onTap: uploading ? null : onPickImages);
+                          return _AddBtn(
+                            onTap: uploading ? null : onPickImages,
+                          );
                         }
                         return _Thumb(
                           url: myParty.images[i],
@@ -399,7 +549,10 @@ class _PhaseCard extends StatelessWidget {
                 ] else if (!isSubmitted) ...[
                   _AddBtn(onTap: uploading ? null : onPickImages),
                 ] else ...[
-                  Text('No photos uploaded', style: TextStyle(fontSize: 12, color: Colors.grey[400])),
+                  Text(
+                    'No photos uploaded',
+                    style: TextStyle(fontSize: 12, color: Colors.grey[400]),
+                  ),
                 ],
 
                 const SizedBox(height: 8),
@@ -410,16 +563,27 @@ class _PhaseCard extends StatelessWidget {
                     children: [
                       const Icon(Icons.videocam, size: 16, color: Colors.blue),
                       const SizedBox(width: 6),
-                      const Expanded(child: Text('Video uploaded', style: TextStyle(fontSize: 12, color: Colors.blue))),
+                      const Expanded(
+                        child: Text(
+                          'Video uploaded',
+                          style: TextStyle(fontSize: 12, color: Colors.blue),
+                        ),
+                      ),
                     ],
                   )
                 else if (!isSubmitted)
                   OutlinedButton.icon(
                     onPressed: uploading ? null : onPickVideo,
                     icon: const Icon(Icons.videocam_outlined, size: 16),
-                    label: const Text('Add Video (max 30s)', style: TextStyle(fontSize: 12)),
+                    label: const Text(
+                      'Add Video (max 30s)',
+                      style: TextStyle(fontSize: 12),
+                    ),
                     style: OutlinedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 6,
+                      ),
                       minimumSize: Size.zero,
                       tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                     ),
@@ -433,7 +597,9 @@ class _PhaseCard extends StatelessWidget {
                     child: ElevatedButton.icon(
                       onPressed: uploading ? null : onSubmit,
                       icon: const Icon(Icons.check, size: 18),
-                      label: Text('Submit ${phase == 'start' ? 'Start' : 'End'} Media'),
+                      label: Text(
+                        'Submit ${phase == 'start' ? 'Start' : 'End'} Media',
+                      ),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: color,
                         foregroundColor: Colors.white,
@@ -446,7 +612,14 @@ class _PhaseCard extends StatelessWidget {
                 // Other party's uploads (read-only)
                 if (otherParty.hasMedia) ...[
                   const Divider(height: 20),
-                  Text('$otherLabel Photos', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.grey[700])),
+                  Text(
+                    '$otherLabel Photos',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.grey[700],
+                    ),
+                  ),
                   const SizedBox(height: 8),
                   if (otherParty.images.isNotEmpty)
                     SizedBox(
@@ -455,7 +628,11 @@ class _PhaseCard extends StatelessWidget {
                         scrollDirection: Axis.horizontal,
                         itemCount: otherParty.images.length,
                         separatorBuilder: (_, _) => const SizedBox(width: 8),
-                        itemBuilder: (_, i) => _Thumb(url: otherParty.images[i], canRemove: false, onRemove: () {}),
+                        itemBuilder: (_, i) => _Thumb(
+                          url: otherParty.images[i],
+                          canRemove: false,
+                          onRemove: () {},
+                        ),
                       ),
                     ),
                 ],
@@ -475,7 +652,11 @@ class _Thumb extends StatelessWidget {
   final bool canRemove;
   final VoidCallback onRemove;
 
-  const _Thumb({required this.url, required this.canRemove, required this.onRemove});
+  const _Thumb({
+    required this.url,
+    required this.canRemove,
+    required this.onRemove,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -488,10 +669,14 @@ class _Thumb extends StatelessWidget {
           child: Stack(
             children: [
               InteractiveViewer(child: Image.network(url, fit: BoxFit.contain)),
-              Positioned(top: 8, right: 8, child: IconButton(
-                icon: const Icon(Icons.close, color: Colors.white),
-                onPressed: () => Navigator.pop(context),
-              )),
+              Positioned(
+                top: 8,
+                right: 8,
+                child: IconButton(
+                  icon: const Icon(Icons.close, color: Colors.white),
+                  onPressed: () => Navigator.pop(context),
+                ),
+              ),
             ],
           ),
         ),
@@ -500,17 +685,30 @@ class _Thumb extends StatelessWidget {
         children: [
           ClipRRect(
             borderRadius: BorderRadius.circular(8),
-            child: Image.network(url, width: 80, height: 80, fit: BoxFit.cover,
-              errorBuilder: (_, a, b) => Container(width: 80, height: 80, color: Colors.grey[200],
-                child: const Icon(Icons.broken_image, color: Colors.grey)),
+            child: Image.network(
+              url,
+              width: 80,
+              height: 80,
+              fit: BoxFit.cover,
+              errorBuilder: (_, a, b) => Container(
+                width: 80,
+                height: 80,
+                color: Colors.grey[200],
+                child: const Icon(Icons.broken_image, color: Colors.grey),
+              ),
             ),
           ),
           if (canRemove)
-            Positioned(top: 2, right: 2,
+            Positioned(
+              top: 2,
+              right: 2,
               child: GestureDetector(
                 onTap: onRemove,
                 child: Container(
-                  decoration: const BoxDecoration(color: Colors.black54, shape: BoxShape.circle),
+                  decoration: const BoxDecoration(
+                    color: Colors.black54,
+                    shape: BoxShape.circle,
+                  ),
                   padding: const EdgeInsets.all(2),
                   child: const Icon(Icons.close, size: 12, color: Colors.white),
                 ),
@@ -533,24 +731,34 @@ class _AddBtn extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        width: 80, height: 80,
+        width: 80,
+        height: 80,
         decoration: BoxDecoration(
           color: Colors.grey[100],
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: onTap != null ? Colors.blue : Colors.grey[300]!),
+          border: Border.all(
+            color: onTap != null ? Colors.blue : Colors.grey[300]!,
+          ),
         ),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.add_photo_alternate_outlined, color: onTap != null ? Colors.blue : Colors.grey[400], size: 24),
+            Icon(
+              Icons.add_photo_alternate_outlined,
+              color: onTap != null ? Colors.blue : Colors.grey[400],
+              size: 24,
+            ),
             const SizedBox(height: 4),
-            Text('Photos', style: TextStyle(fontSize: 10, color: onTap != null ? Colors.blue : Colors.grey[400])),
+            Text(
+              'Photos',
+              style: TextStyle(
+                fontSize: 10,
+                color: onTap != null ? Colors.blue : Colors.grey[400],
+              ),
+            ),
           ],
         ),
       ),
     );
   }
 }
-
-
-

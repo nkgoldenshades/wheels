@@ -1,7 +1,8 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'dart:convert';
-import 'dart:typed_data';
 import 'dart:math';
 
 import '../../models/vehicle.dart';
@@ -677,7 +678,7 @@ class _AddVehicleScreenState extends State<AddVehicleScreen> {
     return true; // Allow other formats for now
   }
 
-  void _onSave() {
+  Future<void> _onSave() async {
     if (!_formKey.currentState!.validate()) return;
 
     // Check if profile image is added
@@ -718,9 +719,60 @@ class _AddVehicleScreenState extends State<AddVehicleScreen> {
     final yearText = _yearController.text.trim();
     final int? year = yearText.isEmpty ? null : int.tryParse(yearText);
 
+    final vehicleId = _uuidV4();
+    final userId = AuthRepository.instance.currentUser?.id ?? '';
+
+    // Upload profile image to Supabase Storage instead of storing base64
+    String? profileImageUrl = _profileImageBase64;
+    if (_profileImageBase64 != null && !_profileImageBase64!.startsWith('http')) {
+      try {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Uploading image...')),
+          );
+        }
+        final bytes = base64Decode(_profileImageBase64!);
+        final path = '$userId/$vehicleId/profile_${DateTime.now().millisecondsSinceEpoch}.jpg';
+        await Supabase.instance.client.storage
+            .from('vehicle_media')
+            .uploadBinary(path, bytes, fileOptions: const FileOptions(contentType: 'image/jpeg'));
+        profileImageUrl = Supabase.instance.client.storage
+            .from('vehicle_media')
+            .getPublicUrl(path);
+      } catch (e) {
+        debugPrint('⚠️ Profile image upload failed, using base64 fallback: $e');
+        // Keep base64 as fallback so vehicle creation doesn't break
+        profileImageUrl = _profileImageBase64;
+      }
+    }
+
+    // Upload gallery images to storage
+    final List<String> galleryUrls = [];
+    for (int i = 0; i < _galleryImagesBase64.length; i++) {
+      final img = _galleryImagesBase64[i];
+      if (img.startsWith('http')) {
+        galleryUrls.add(img);
+        continue;
+      }
+      try {
+        final bytes = base64Decode(img);
+        final path = '$userId/$vehicleId/gallery_${i}_${DateTime.now().millisecondsSinceEpoch}.jpg';
+        await Supabase.instance.client.storage
+            .from('vehicle_media')
+            .uploadBinary(path, bytes, fileOptions: const FileOptions(contentType: 'image/jpeg'));
+        final url = Supabase.instance.client.storage
+            .from('vehicle_media')
+            .getPublicUrl(path);
+        galleryUrls.add(url);
+      } catch (e) {
+        debugPrint('⚠️ Gallery image $i upload failed, using base64: $e');
+        galleryUrls.add(img); // fallback
+      }
+    }
+
     final vehicle = Vehicle(
-      id: _uuidV4(),
-      userId: AuthRepository.instance.currentUser?.id ?? '',
+      id: vehicleId,
+      userId: userId,
       userName: ProfileRepository.instance.profile.value.profileName.isNotEmpty
           ? ProfileRepository.instance.profile.value.profileName
           : (AuthRepository.instance.currentUser?.profileName ?? 'Unknown User'),
@@ -728,13 +780,13 @@ class _AddVehicleScreenState extends State<AddVehicleScreen> {
       type: type,
       year: year,
       capabilities: [], // Empty - capabilities chosen when creating posts
-      profileImage: _profileImageBase64,
-      galleryImages: _galleryImagesBase64,
+      profileImage: profileImageUrl,
+      galleryImages: galleryUrls,
       videoUrl: _videoBase64,
       createdAt: DateTime.now(),
     );
 
-    Navigator.pop(context, vehicle);
+    if (mounted) Navigator.pop(context, vehicle);
   }
 }
 

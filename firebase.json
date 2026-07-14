@@ -1,7 +1,34 @@
 {
+  "hosting": {
+    "public": "build/web",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "rewrites": [
+      {
+        "source": "**",
+        "destination": "/index.html"
+      }
+    ]
+  },
   "functions": {
     "source": "functions",
-    "runtime": "nodejs20"
+    "runtime": "nodejs20",
+    "secretEnvVars": [
+      "RAZORPAY_KEY_ID_TEST",
+      "RAZORPAY_KEY_SECRET_TEST",
+      "RAZORPAY_KEY_ID_LIVE",
+      "RAZORPAY_KEY_SECRET_LIVE",
+      "RAZORPAY_WEBHOOK_SECRET_TEST",
+      "RAZORPAY_WEBHOOK_SECRET_LIVE",
+      "STRIPE_SECRET_KEY_TEST",
+      "STRIPE_SECRET_KEY_LIVE",
+      "USE_LIVE_KEYS",
+      "SUPABASE_URL",
+      "SUPABASE_SERVICE_ROLE_KEY"
+    ]
   },
   "flutter": {
     "platforms": {

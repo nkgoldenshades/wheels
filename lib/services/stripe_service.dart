@@ -5,6 +5,8 @@ import 'package:http/http.dart' as http;
 import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
 import 'package:url_launcher/url_launcher.dart';
 import 'dart:convert';
+import 'dart:async';
+import 'dart:io';
 
 class StripeService {
   StripeService._();
@@ -14,18 +16,20 @@ class StripeService {
   // 🔑 PAYMENT MODE CONFIGURATION
   // ═══════════════════════════════════════════════════════════
   // Set to true for TEST mode, false for PRODUCTION mode
-  static const bool USE_TEST_MODE = true; // ← CHANGE THIS TO false FOR PRODUCTION
-  
+  static const bool useTestMode = true; // ← CHANGE THIS TO false FOR PRODUCTION
+
   // TEST MODE KEYS (for development/testing)
   static const String _testPublishableKey =
       'pk_test_51SvbBRPL6V2gHHHXPuLctk57x8CXjOHVkInRO4ZIxXezQQv6pnQYlgTbg4vcGd5yNh0tqfrZ2ntxq06EzGi2zJqP00w9c4rvqo';
-  
+
   // PRODUCTION MODE KEYS (get from dashboard.stripe.com in LIVE mode)
   // ⚠️ IMPORTANT: Add your live keys before going to production!
-  static const String _livePublishableKey = 'pk_live_XXXXXXXXXXXX'; // ← Replace with your LIVE key
-  
+  static const String _livePublishableKey =
+      'pk_live_XXXXXXXXXXXX'; // ← Replace with your LIVE key
+
   // Active publishable key based on mode
-  static String get publishableKey => USE_TEST_MODE ? _testPublishableKey : _livePublishableKey;
+  static String get publishableKey =>
+      useTestMode ? _testPublishableKey : _livePublishableKey;
 
   // Firebase Cloud Functions base URL
   static const String backendUrl =
@@ -47,7 +51,7 @@ class StripeService {
   Future<void> init() async {
     if (_initialized) return;
 
-    debugPrint('🔑 Stripe Mode: ${USE_TEST_MODE ? "TEST 🧪" : "PRODUCTION 🚀"}');
+    debugPrint('🔑 Stripe Mode: ${useTestMode ? "TEST 🧪" : "PRODUCTION 🚀"}');
     debugPrint('🔑 Using Key: ${publishableKey.substring(0, 15)}...');
 
     if (kIsWeb) {
@@ -81,7 +85,9 @@ class StripeService {
     if (kIsWeb) {
       // On web, payment is handled via Stripe Checkout redirect
       // This method should not be called directly on web
-      debugPrint('⚠️ presentPaymentSheet called on web - use processPayment instead');
+      debugPrint(
+        '⚠️ presentPaymentSheet called on web - use processPayment instead',
+      );
       return false;
     }
     try {
@@ -136,7 +142,8 @@ class StripeService {
       );
       if (booking == null) {
         return {
-          'error': 'Unable to create booking. Please check login and try again.',
+          'error':
+              'Unable to create booking. Please check login and try again.',
         };
       }
 
@@ -201,7 +208,9 @@ class StripeService {
       );
 
       if (!launched) {
-        return {'error': 'Could not open Stripe checkout. Please try on mobile.'};
+        return {
+          'error': 'Could not open Stripe checkout. Please try on mobile.',
+        };
       }
 
       // Return pending — confirmed via Stripe webhook on backend
@@ -228,12 +237,14 @@ class StripeService {
     String? refreshUrl,
   }) async {
     try {
-      debugPrint('[StripeService] createConnectedAccount: email=$email, country=$country, userId=$userId');
-      
+      debugPrint(
+        '[StripeService] createConnectedAccount: email=$email, country=$country, userId=$userId',
+      );
+
       final headers = await _authorizedJsonHeaders();
       debugPrint('[StripeService] Headers: ${headers.keys.join(", ")}');
       debugPrint('[StripeService] Calling: $backendUrl/createConnectedAccount');
-      
+
       final response = await http.post(
         Uri.parse('$backendUrl/createConnectedAccount'),
         headers: headers,
@@ -242,12 +253,13 @@ class StripeService {
           'country': country,
           'user_id': userId,
           'return_url': returnUrl ?? 'https://vervestrideal.com/stripe-return',
-          'refresh_url': refreshUrl ?? 'https://vervestrideal.com/stripe-refresh',
+          'refresh_url':
+              refreshUrl ?? 'https://vervestrideal.com/stripe-refresh',
         }),
       );
 
       debugPrint('[StripeService] Response status: ${response.statusCode}');
-      
+
       if (response.statusCode != 200) {
         debugPrint('[StripeService] Response body: ${response.body}');
         debugPrint(
@@ -257,8 +269,8 @@ class StripeService {
           final data = json.decode(response.body);
           if (data is Map<String, dynamic>) {
             return {
-              'error': data['error']?.toString() ??
-                  'Stripe account setup failed.',
+              'error':
+                  data['error']?.toString() ?? 'Stripe account setup failed.',
             };
           }
         } catch (_) {
@@ -286,28 +298,54 @@ class StripeService {
     required String userId,
   }) async {
     try {
-      final headers = await _authorizedJsonHeaders();
-      final response = await http.post(
-        Uri.parse('$backendUrl/createSubscriptionCheckoutSession'),
-        headers: headers,
-        body: json.encode({
-          'user_id': userId,
-          'plan_name': planName,
-          'amount': amount,
-          'currency': currency,
-        }),
+      debugPrint('[StripeService] processSubscriptionPayment called');
+      debugPrint(
+        '[StripeService] Amount: $amount, Currency: $currency, Plan: $planName',
       );
+
+      // Check internet connectivity first
+      debugPrint('[StripeService] Getting auth headers...');
+      final headers = await _authorizedJsonHeaders();
+      debugPrint(
+        '[StripeService] Headers obtained: ${headers.keys.join(", ")}',
+      );
+
+      final url = '$backendUrl/createSubscriptionCheckoutSession';
+      debugPrint('[StripeService] Calling URL: $url');
+
+      final body = json.encode({
+        'user_id': userId,
+        'plan_name': planName,
+        'amount': amount,
+        'currency': currency,
+      });
+      debugPrint('[StripeService] Request body: $body');
+
+      final response = await http
+          .post(Uri.parse(url), headers: headers, body: body)
+          .timeout(
+            const Duration(seconds: 30),
+            onTimeout: () {
+              debugPrint('[StripeService] Request timed out after 30 seconds');
+              throw TimeoutException('Request timed out');
+            },
+          );
+
+      debugPrint('[StripeService] Response status: ${response.statusCode}');
+      debugPrint('[StripeService] Response body: ${response.body}');
 
       if (response.statusCode != 200) {
         try {
           final data = json.decode(response.body);
           if (data is Map<String, dynamic>) {
-            return {
-              'error': data['error']?.toString() ??
-                  'Could not create Stripe checkout.',
-            };
+            final errorMsg =
+                data['error']?.toString() ??
+                'Could not create Stripe checkout.';
+            debugPrint('[StripeService] Server error: $errorMsg');
+            return {'error': errorMsg};
           }
-        } catch (_) {
+        } catch (e) {
+          debugPrint('[StripeService] Error parsing response: $e');
           // Fall through to generic message below.
         }
         return {
@@ -318,24 +356,48 @@ class StripeService {
       final data = json.decode(response.body) as Map<String, dynamic>;
       final checkoutUrl = data['url'] as String?;
       if (checkoutUrl == null || checkoutUrl.isEmpty) {
+        debugPrint('[StripeService] No checkout URL in response');
         return {'error': 'No checkout URL returned from server.'};
       }
 
+      debugPrint('[StripeService] Opening checkout URL: $checkoutUrl');
       final launched = await launchUrl(
         Uri.parse(checkoutUrl),
         mode: LaunchMode.externalApplication,
       );
       if (!launched) {
+        debugPrint('[StripeService] Failed to launch URL');
         return {'error': 'Could not open Stripe checkout.'};
       }
 
+      debugPrint('[StripeService] Checkout opened successfully');
+      return {...data, 'gateway': 'stripe', 'web_redirect': true};
+    } on http.ClientException catch (e) {
+      debugPrint(
+        '[StripeService] ClientException - Network error: ${e.message}',
+      );
+      debugPrint('[StripeService] This usually means:');
+      debugPrint('[StripeService]   1. No internet connection');
+      debugPrint(
+        '[StripeService]   2. Firebase Functions endpoint unreachable',
+      );
+      debugPrint('[StripeService]   3. DNS resolution failed');
       return {
-        ...data,
-        'gateway': 'stripe',
-        'web_redirect': true,
+        'error':
+            'Network error: Unable to reach payment server. Please check your internet connection.',
       };
-    } catch (e) {
-      return {'error': e.toString()};
+    } on TimeoutException catch (e) {
+      debugPrint('[StripeService] TimeoutException: $e');
+      return {'error': 'Request timed out. Please try again.'};
+    } on SocketException catch (e) {
+      debugPrint('[StripeService] SocketException: $e');
+      return {
+        'error': 'Connection failed. Please check your internet connection.',
+      };
+    } catch (e, stackTrace) {
+      debugPrint('[StripeService] Unexpected error: $e');
+      debugPrint('[StripeService] Stack trace: $stackTrace');
+      return {'error': 'Payment error: ${e.toString()}'};
     }
   }
 
@@ -447,6 +509,3 @@ class StripeService {
     }
   }
 }
-
-
-

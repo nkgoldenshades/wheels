@@ -27,14 +27,12 @@ class PassengerFormData {
   final TextEditingController emailController;
   SeatGender gender;
 
-  PassengerFormData({
-    String? initialName,
-    String? initialPhone,
-  })  : nameController = TextEditingController(text: initialName ?? ''),
-        ageController = TextEditingController(),
-        phoneController = TextEditingController(text: initialPhone ?? ''),
-        emailController = TextEditingController(),
-        gender = SeatGender.any;
+  PassengerFormData({String? initialName, String? initialPhone})
+    : nameController = TextEditingController(text: initialName ?? ''),
+      ageController = TextEditingController(),
+      phoneController = TextEditingController(text: initialPhone ?? ''),
+      emailController = TextEditingController(),
+      gender = SeatGender.any;
 
   void dispose() {
     nameController.dispose();
@@ -85,10 +83,10 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
 
   bool _orderLoadingDialogShown = false;
   bool _isProcessing = false;
-  
+
   // Multiple passenger forms - one per seat
   List<PassengerFormData> _passengerForms = [];
-  
+
   bool _savePassengers = false;
 
   static const double _cellSize = 56;
@@ -99,16 +97,18 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
   void initState() {
     super.initState();
     _selectedSeats = {};
-    _passengerForms = [];
+    _passengerForms = [
+      PassengerFormData(),
+    ]; // Initialize with at least one form
     _quantity = 1;
-    
+
     // Initialize Stripe (no-op for Razorpay/India path)
     try {
       StripeService.instance.init();
     } catch (e) {
       debugPrint('Failed to initialize Stripe: $e');
     }
-    
+
     // Pre-fill first form with profile data (safely)
     try {
       final profile = ProfileRepository.instance.profile.value;
@@ -121,7 +121,7 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
       _addPassengerForm(); // Add empty form as fallback
     }
   }
-  
+
   @override
   void dispose() {
     for (final form in _passengerForms) {
@@ -129,14 +129,11 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
     }
     super.dispose();
   }
-  
+
   void _addPassengerForm({String? initialName, String? initialPhone}) {
     setState(() {
       _passengerForms.add(
-        PassengerFormData(
-          initialName: initialName,
-          initialPhone: initialPhone,
-        ),
+        PassengerFormData(initialName: initialName, initialPhone: initialPhone),
       );
     });
   }
@@ -148,7 +145,9 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
       _syncScheduled = false;
       if (!mounted) return;
 
-      final desired = _selectedSeats.isEmpty ? _quantity : _selectedSeats.length;
+      final desired = _selectedSeats.isEmpty
+          ? _quantity
+          : _selectedSeats.length;
       if (desired <= 0) return;
       if (_passengerForms.length == desired) return;
 
@@ -162,11 +161,13 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
       });
     });
   }
-  
+
   void _updatePassengerFormsCount() {
-    final seatsCount = _selectedSeats.isEmpty ? _quantity : _selectedSeats.length;
+    final seatsCount = _selectedSeats.isEmpty
+        ? _quantity
+        : _selectedSeats.length;
     if (seatsCount <= 0) return;
-    
+
     setState(() {
       // Add or remove forms to match seat count
       while (_passengerForms.length < seatsCount) {
@@ -195,9 +196,7 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
       context: context,
       useRootNavigator: true,
       barrierDismissible: false,
-      builder: (context) => const Center(
-        child: CircularProgressIndicator(),
-      ),
+      builder: (context) => const Center(child: CircularProgressIndicator()),
     );
   }
 
@@ -207,17 +206,17 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
     if (!mounted) return;
     Navigator.of(context, rootNavigator: true).pop();
   }
-  
+
   void _showPassengerFormSelector(Passenger p) {
     if (_passengerForms.isEmpty) return;
-    
+
     if (_passengerForms.length == 1) {
       _selectPassenger(p, 0);
       return;
     }
-    
+
     final seatsList = _selectedSeats.toList();
-    
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -258,9 +257,11 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
     }
 
     // Debug: log layout status
-    debugPrint('🪑 Layout check: ownerId=${slot.seatLayoutOwnerId}, '
-        'structure=${slot.seatLayoutStructure != null ? "present (${slot.seatLayoutStructure!.layout.length} items)" : "null"}, '
-        'layout=${layout != null ? "resolved" : "null → showing capacity"}');
+    debugPrint(
+      '🪑 Layout check: ownerId=${slot.seatLayoutOwnerId}, '
+      'structure=${slot.seatLayoutStructure != null ? "present (${slot.seatLayoutStructure!.layout.length} items)" : "null"}, '
+      'layout=${layout != null ? "resolved" : "null → showing capacity"}',
+    );
 
     final hasSeatLayout = layout != null;
 
@@ -271,7 +272,7 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
 
     // For Full Post mode, force quantity to all remaining slots
     final isFullPostMode = slot.postMode == PostMode.fullPost;
-    
+
     if (!hasSeatLayout) {
       if (isFullPostMode) {
         // Full post mode: must book all remaining slots in this post
@@ -292,10 +293,7 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
 
     final bookedSeatKeys = BookingRepository.instance.bookings.value
         .where(
-          (b) =>
-              b.slotId == slot.id &&
-              b.seatKey != null &&
-              b.status.isActive,
+          (b) => b.slotId == slot.id && b.seatKey != null && b.status.isActive,
         )
         .map((b) => b.seatKey!)
         .toSet();
@@ -304,17 +302,25 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
     if (layout != null) {
       _selectedSeats.removeWhere((seatKey) {
         final selected = layout!.cells[seatKey];
-        if (selected == null || selected.type != CellType.seat || selected.isLocked) return true;
+        if (selected == null ||
+            selected.type != CellType.seat ||
+            selected.isLocked) {
+          return true;
+        }
         if (selected.gender == SeatGender.any) return false;
-        return !_passengerForms.any((form) =>
-          form.gender == SeatGender.any || form.gender == selected.gender);
+        return !_passengerForms.any(
+          (form) =>
+              form.gender == SeatGender.any || form.gender == selected.gender,
+        );
       });
     }
 
     // Calculate total price for all selected seats
     final int totalPrice;
     if (isFullPostMode) {
-      totalPrice = slot.price.toInt() * (remainingCapacity > 0 ? remainingCapacity : slot.capacity);
+      totalPrice =
+          slot.price.toInt() *
+          (remainingCapacity > 0 ? remainingCapacity : slot.capacity);
     } else if (layout != null && _selectedSeats.isNotEmpty) {
       totalPrice = _selectedSeats.fold<int>(
         0,
@@ -351,7 +357,10 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
               // Terms/notes banner
               if (slot.notes != null && slot.notes!.isNotEmpty) ...[
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
                   decoration: BoxDecoration(
                     color: Colors.amber.shade50,
                     borderRadius: BorderRadius.circular(8),
@@ -377,7 +386,10 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
                             const SizedBox(height: 2),
                             Text(
                               slot.notes!,
-                              style: TextStyle(fontSize: 13, color: Colors.grey[800]),
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: Colors.grey[800],
+                              ),
                             ),
                           ],
                         ),
@@ -398,10 +410,12 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
                   }
                   final isLease = slot.serviceType.name == 'lease';
                   final deposit = isLease ? (slot.securityDeposit ?? 0.0) : 0.0;
-                  
+
                   // Full post mode: show breakdown
                   if (isFullPostMode) {
-                    final quantity = remainingCapacity > 0 ? remainingCapacity : slot.capacity;
+                    final quantity = remainingCapacity > 0
+                        ? remainingCapacity
+                        : slot.capacity;
                     final pricePerSeat = slot.price.toInt();
                     return Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -413,29 +427,33 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
                         const SizedBox(height: 4),
                         _Row(
                           icon: Icons.payments,
-                          text: '${AppPreferences.instance.formatMoney(pricePerSeat)} × $quantity = ${AppPreferences.instance.formatMoney(totalPrice)}',
+                          text:
+                              '${AppPreferences.instance.formatMoney(pricePerSeat)} × $quantity = ${AppPreferences.instance.formatMoney(totalPrice)}',
                         ),
                       ],
                     );
                   }
-                  
+
                   if (isLease && deposit > 0) {
                     return Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         _Row(
                           icon: Icons.payments,
-                          text: 'Lease: ${AppPreferences.instance.formatMoney(totalPrice)}',
+                          text:
+                              'Lease: ${AppPreferences.instance.formatMoney(totalPrice)}',
                         ),
                         const SizedBox(height: 4),
                         _Row(
                           icon: Icons.security,
-                          text: 'Security deposit: ${AppPreferences.instance.formatMoney(deposit.toInt())} (refundable on handover)',
+                          text:
+                              'Security deposit: ${AppPreferences.instance.formatMoney(deposit.toInt())} (refundable on handover)',
                         ),
                         const SizedBox(height: 4),
                         _Row(
                           icon: Icons.receipt_long,
-                          text: 'Total: ${AppPreferences.instance.formatMoney((totalPrice + deposit).toInt())}',
+                          text:
+                              'Total: ${AppPreferences.instance.formatMoney((totalPrice + deposit).toInt())}',
                         ),
                       ],
                     );
@@ -447,7 +465,7 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
                 },
               ),
               const Divider(height: 24),
-              
+
               // Seat Layout (show first if available)
               if (layout != null) ...[
                 const Text(
@@ -462,6 +480,7 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
                   selectedSeats: _selectedSeats,
                   remainingCapacity: remainingCapacity,
                   passengerForms: _passengerForms,
+                  slot: slot, // Pass slot for service type
                   onSeatToggled: (key) {
                     setState(() {
                       if (_selectedSeats.contains(key)) {
@@ -474,6 +493,9 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
                     });
                   },
                 ),
+                const SizedBox(height: 12),
+                // Seat legend
+                _SeatLegend(),
                 const SizedBox(height: 16),
                 if (_selectedSeats.isNotEmpty) ...[
                   Container(
@@ -488,11 +510,18 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
                       children: [
                         Row(
                           children: [
-                            Icon(Icons.shopping_cart, size: 16, color: Colors.green.shade700),
+                            Icon(
+                              Icons.shopping_cart,
+                              size: 16,
+                              color: Colors.green.shade700,
+                            ),
                             const SizedBox(width: 8),
                             Text(
                               'Selected: ${_selectedSeats.length} seat(s)',
-                              style: TextStyle(fontWeight: FontWeight.bold, color: Colors.green.shade700),
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                color: Colors.green.shade700,
+                              ),
                             ),
                           ],
                         ),
@@ -502,8 +531,109 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
                           runSpacing: 8,
                           children: _selectedSeats.map((seatKey) {
                             final cell = layout!.cells[seatKey];
+                            final seatName = cell?.seatName ?? seatKey;
+
+                            // For parcels, parse and display dimensions
+                            if (slot.serviceType == ServiceType.parcel &&
+                                seatName.contains('|')) {
+                              final parts = seatName.split('|');
+                              final name = parts[0];
+                              final dimensions = <String>[];
+
+                              for (var i = 1; i < parts.length; i++) {
+                                final part = parts[i];
+                                if (part.startsWith('L:')) {
+                                  dimensions.add('📏 ${part.substring(2)} cm');
+                                } else if (part.startsWith('B:')) {
+                                  dimensions.add('📐 ${part.substring(2)} cm');
+                                } else if (part.startsWith('H:')) {
+                                  dimensions.add('📊 ${part.substring(2)} cm');
+                                } else if (part.startsWith('W:')) {
+                                  dimensions.add('⚖️ ${part.substring(2)} kg');
+                                } else if (part.startsWith('T:')) {
+                                  dimensions.add('📦 ${part.substring(2)}');
+                                }
+                              }
+
+                              return Container(
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: Colors.green.shade100,
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(
+                                    color: Colors.green.shade300,
+                                  ),
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Text(
+                                          name,
+                                          style: const TextStyle(
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        InkWell(
+                                          onTap: () {
+                                            setState(() {
+                                              _selectedSeats.remove(seatKey);
+                                              _updatePassengerFormsCount();
+                                            });
+                                          },
+                                          child: const Icon(
+                                            Icons.close,
+                                            size: 16,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    if (dimensions.isNotEmpty) ...[
+                                      const SizedBox(height: 4),
+                                      ...dimensions.map(
+                                        (dim) => Padding(
+                                          padding: const EdgeInsets.only(
+                                            top: 2,
+                                          ),
+                                          child: Text(
+                                            dim,
+                                            style: TextStyle(
+                                              fontSize: 11,
+                                              color: Colors.grey.shade700,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                    if (cell?.price != null) ...[
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        '💰 ₹${cell!.price}',
+                                        style: const TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w600,
+                                          color: Colors.green,
+                                        ),
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                              );
+                            }
+
+                            // For passengers/lease, show simple chip
                             return Chip(
-                              label: Text(cell?.seatName ?? seatKey),
+                              label: Text(
+                                seatName,
+                                style: const TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
                               deleteIcon: const Icon(Icons.close, size: 16),
                               onDeleted: () {
                                 setState(() {
@@ -512,6 +642,10 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
                                 });
                               },
                               backgroundColor: Colors.green.shade100,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 4,
+                              ),
                             );
                           }).toList(),
                         ),
@@ -522,7 +656,7 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
                 ],
                 const Divider(height: 24),
               ],
-              
+
               // Parcel sender details OR passenger forms
               if (widget.slot.serviceType == ServiceType.parcel) ...[
                 const Text(
@@ -531,7 +665,7 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
                 ),
                 const SizedBox(height: 12),
                 TextField(
-                  controller: _passengerForms.isNotEmpty ? _passengerForms[0].nameController : TextEditingController(),
+                  controller: _passengerForms[0].nameController,
                   decoration: const InputDecoration(
                     labelText: 'Sender name *',
                     border: OutlineInputBorder(),
@@ -541,7 +675,7 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
                 ),
                 const SizedBox(height: 12),
                 TextField(
-                  controller: _passengerForms.isNotEmpty ? _passengerForms[0].phoneController : TextEditingController(),
+                  controller: _passengerForms[0].phoneController,
                   decoration: const InputDecoration(
                     labelText: 'Sender phone *',
                     border: OutlineInputBorder(),
@@ -551,7 +685,7 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
                 ),
                 const SizedBox(height: 12),
                 TextField(
-                  controller: _passengerForms.isNotEmpty ? _passengerForms[0].emailController : TextEditingController(),
+                  controller: _passengerForms[0].emailController,
                   decoration: const InputDecoration(
                     labelText: 'Recipient contact *',
                     border: OutlineInputBorder(),
@@ -561,7 +695,7 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
                 ),
                 const SizedBox(height: 12),
                 TextField(
-                  controller: _passengerForms.isNotEmpty ? _passengerForms[0].ageController : TextEditingController(),
+                  controller: _passengerForms[0].ageController,
                   decoration: const InputDecoration(
                     labelText: 'Parcel description (optional)',
                     hintText: 'e.g. Documents, Electronics, Clothes',
@@ -571,146 +705,158 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
                 ),
                 const SizedBox(height: 8),
               ] else ...[
-              ValueListenableBuilder<List<Passenger>>(
-                valueListenable: PassengerRepository.instance.savedPassengers,
-                builder: (context, saved, _) {
-                  if (saved.isEmpty || _passengerForms.isEmpty) return const SizedBox();
-                  return Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'Saved Passengers (tap to quick-fill)',
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.blue,
+                ValueListenableBuilder<List<Passenger>>(
+                  valueListenable: PassengerRepository.instance.savedPassengers,
+                  builder: (context, saved, _) {
+                    if (saved.isEmpty || _passengerForms.isEmpty) {
+                      return const SizedBox();
+                    }
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Saved Passengers (tap to quick-fill)',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.blue,
+                          ),
                         ),
-                      ),
-                      const SizedBox(height: 8),
-                      SizedBox(
-                        height: 44,
-                        child: ListView.separated(
-                          scrollDirection: Axis.horizontal,
-                          itemCount: saved.length,
-                          separatorBuilder: (_, index) =>
-                              const SizedBox(width: 8),
-                          itemBuilder: (context, index) {
-                            final p = saved[index];
-                            return ActionChip(
-                              avatar: const Icon(
-                                Icons.person_outline,
-                                size: 16,
-                              ),
-                              label: Text(p.name),
-                              onPressed: () {
-                                _showPassengerFormSelector(p);
-                              },
-                            );
+                        const SizedBox(height: 8),
+                        SizedBox(
+                          height: 44,
+                          child: ListView.separated(
+                            scrollDirection: Axis.horizontal,
+                            itemCount: saved.length,
+                            separatorBuilder: (_, index) =>
+                                const SizedBox(width: 8),
+                            itemBuilder: (context, index) {
+                              final p = saved[index];
+                              return ActionChip(
+                                avatar: const Icon(
+                                  Icons.person_outline,
+                                  size: 16,
+                                ),
+                                label: Text(p.name),
+                                onPressed: () {
+                                  _showPassengerFormSelector(p);
+                                },
+                              );
+                            },
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                      ],
+                    );
+                  },
+                ),
+                // Multiple passenger forms
+                if (_passengerForms.isNotEmpty &&
+                    (hasSeatLayout ? _selectedSeats.isNotEmpty : true))
+                  ...List.generate(_passengerForms.length, (index) {
+                    final form = _passengerForms[index];
+                    final seatsList = _selectedSeats.toList();
+                    final seatKey = index < seatsList.length
+                        ? seatsList[index]
+                        : '';
+                    final cell = layout?.cells[seatKey];
+
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (index > 0) const Divider(height: 24),
+                        Text(
+                          hasSeatLayout
+                              ? 'Passenger ${index + 1} - Seat: ${cell?.seatName ?? seatKey}'
+                              : 'Passenger ${index + 1}',
+                          style: const TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.blue,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: form.nameController,
+                          decoration: const InputDecoration(
+                            labelText: 'Passenger name',
+                            border: OutlineInputBorder(),
+                            prefixIcon: Icon(Icons.person),
+                          ),
+                          textCapitalization: TextCapitalization.words,
+                        ),
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: form.ageController,
+                          decoration: const InputDecoration(
+                            labelText: 'Age',
+                            border: OutlineInputBorder(),
+                            prefixIcon: Icon(Icons.cake),
+                          ),
+                          keyboardType: TextInputType.number,
+                        ),
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: form.phoneController,
+                          decoration: const InputDecoration(
+                            labelText: 'Phone number (optional)',
+                            border: OutlineInputBorder(),
+                            prefixIcon: Icon(Icons.phone),
+                          ),
+                          keyboardType: TextInputType.phone,
+                        ),
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: form.emailController,
+                          decoration: const InputDecoration(
+                            labelText: 'Email (optional)',
+                            border: OutlineInputBorder(),
+                            prefixIcon: Icon(Icons.email),
+                          ),
+                          keyboardType: TextInputType.emailAddress,
+                        ),
+                        const SizedBox(height: 12),
+                        DropdownButtonFormField<SeatGender>(
+                          initialValue: form.gender,
+                          decoration: const InputDecoration(
+                            labelText: 'Gender',
+                            border: OutlineInputBorder(),
+                          ),
+                          items: const [
+                            DropdownMenuItem(
+                              value: SeatGender.any,
+                              child: Text('Any'),
+                            ),
+                            DropdownMenuItem(
+                              value: SeatGender.male,
+                              child: Text('Male'),
+                            ),
+                            DropdownMenuItem(
+                              value: SeatGender.female,
+                              child: Text('Female'),
+                            ),
+                          ],
+                          onChanged: (v) {
+                            if (v == null) return;
+                            setState(() {
+                              form.gender = v;
+                            });
                           },
                         ),
-                      ),
-                      const SizedBox(height: 16),
-                    ],
-                  );
-                },
-              ),
-              // Multiple passenger forms
-              if (_passengerForms.isNotEmpty && (hasSeatLayout ? _selectedSeats.isNotEmpty : true))
-                ...List.generate(_passengerForms.length, (index) {
-                  final form = _passengerForms[index];
-                  final seatsList = _selectedSeats.toList();
-                  final seatKey = index < seatsList.length ? seatsList[index] : '';
-                  final cell = layout?.cells[seatKey];
-                  
-                  return Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      if (index > 0) const Divider(height: 24),
-                      Text(
-                        hasSeatLayout
-                            ? 'Passenger ${index + 1} - Seat: ${cell?.seatName ?? seatKey}'
-                            : 'Passenger ${index + 1}',
-                        style: const TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.blue,
-                        ),
-                      ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: form.nameController,
-                      decoration: const InputDecoration(
-                        labelText: 'Passenger name',
-                        border: OutlineInputBorder(),
-                        prefixIcon: Icon(Icons.person),
-                      ),
-                      textCapitalization: TextCapitalization.words,
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: form.ageController,
-                      decoration: const InputDecoration(
-                        labelText: 'Age',
-                        border: OutlineInputBorder(),
-                        prefixIcon: Icon(Icons.cake),
-                      ),
-                      keyboardType: TextInputType.number,
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: form.phoneController,
-                      decoration: const InputDecoration(
-                        labelText: 'Phone number (optional)',
-                        border: OutlineInputBorder(),
-                        prefixIcon: Icon(Icons.phone),
-                      ),
-                      keyboardType: TextInputType.phone,
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: form.emailController,
-                      decoration: const InputDecoration(
-                        labelText: 'Email (optional)',
-                        border: OutlineInputBorder(),
-                        prefixIcon: Icon(Icons.email),
-                      ),
-                      keyboardType: TextInputType.emailAddress,
-                    ),
-                    const SizedBox(height: 12),
-                    DropdownButtonFormField<SeatGender>(
-                      initialValue: form.gender,
-                      decoration: const InputDecoration(
-                        labelText: 'Gender',
-                        border: OutlineInputBorder(),
-                      ),
-                      items: const [
-                        DropdownMenuItem(value: SeatGender.any, child: Text('Any')),
-                        DropdownMenuItem(value: SeatGender.male, child: Text('Male')),
-                        DropdownMenuItem(
-                          value: SeatGender.female,
-                          child: Text('Female'),
-                        ),
                       ],
-                      onChanged: (v) {
-                        if (v == null) return;
-                        setState(() {
-                          form.gender = v;
-                        });
-                      },
-                    ),
-                  ],
-                );
-              }),
-              CheckboxListTile(
-                value: _savePassengers,
-                onChanged: (v) => setState(() => _savePassengers = v ?? false),
-                title: const Text(
-                  'Save all passengers for future use',
-                  style: TextStyle(fontSize: 13),
+                    );
+                  }),
+                CheckboxListTile(
+                  value: _savePassengers,
+                  onChanged: (v) =>
+                      setState(() => _savePassengers = v ?? false),
+                  title: const Text(
+                    'Save all passengers for future use',
+                    style: TextStyle(fontSize: 13),
+                  ),
+                  contentPadding: EdgeInsets.zero,
+                  controlAffinity: ListTileControlAffinity.leading,
                 ),
-                contentPadding: EdgeInsets.zero,
-                controlAffinity: ListTileControlAffinity.leading,
-              ),
               ], // end else (non-parcel)
               if (!hasSeatLayout) ...[
                 const SizedBox(height: 8),
@@ -722,7 +868,10 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
                     ),
                     const Spacer(),
                     IconButton(
-                      onPressed: isFullPostMode || remainingCapacity <= 0 || _quantity <= 1
+                      onPressed:
+                          isFullPostMode ||
+                              remainingCapacity <= 0 ||
+                              _quantity <= 1
                           ? null
                           : () {
                               setState(() {
@@ -734,7 +883,10 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
                     ),
                     Text('$_quantity'),
                     IconButton(
-                      onPressed: isFullPostMode || remainingCapacity <= 0 || _quantity >= remainingCapacity
+                      onPressed:
+                          isFullPostMode ||
+                              remainingCapacity <= 0 ||
+                              _quantity >= remainingCapacity
                           ? null
                           : () {
                               setState(() {
@@ -782,37 +934,52 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
                               bool shouldResetProcessing = true;
 
                               try {
-                                final isParcel = widget.slot.serviceType == ServiceType.parcel;
+                                final isParcel =
+                                    widget.slot.serviceType ==
+                                    ServiceType.parcel;
 
                                 // Validate forms
-                                for (int i = 0; i < _passengerForms.length; i++) {
+                                for (
+                                  int i = 0;
+                                  i < _passengerForms.length;
+                                  i++
+                                ) {
                                   final form = _passengerForms[i];
                                   final name = form.nameController.text.trim();
-                                  
+
                                   if (name.isEmpty) {
                                     ScaffoldMessenger.of(context).showSnackBar(
                                       SnackBar(
-                                        content: Text(isParcel
-                                            ? 'Please enter sender name'
-                                            : 'Please enter name for Passenger ${i + 1}'),
+                                        content: Text(
+                                          isParcel
+                                              ? 'Please enter sender name'
+                                              : 'Please enter name for Passenger ${i + 1}',
+                                        ),
                                       ),
                                     );
                                     return;
                                   }
 
-                                  final phone = form.phoneController.text.trim();
+                                  final phone = form.phoneController.text
+                                      .trim();
                                   if (isParcel && phone.isEmpty) {
                                     ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(content: Text('Please enter sender phone')),
+                                      const SnackBar(
+                                        content: Text(
+                                          'Please enter sender phone',
+                                        ),
+                                      ),
                                     );
                                     return;
                                   }
                                   if (phone.isNotEmpty && phone.length < 8) {
                                     ScaffoldMessenger.of(context).showSnackBar(
                                       SnackBar(
-                                        content: Text(isParcel
-                                            ? 'Invalid sender phone number'
-                                            : 'Invalid phone for Passenger ${i + 1}'),
+                                        content: Text(
+                                          isParcel
+                                              ? 'Invalid sender phone number'
+                                              : 'Invalid phone for Passenger ${i + 1}',
+                                        ),
                                       ),
                                     );
                                     return;
@@ -820,16 +987,29 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
 
                                   // Recipient contact required for parcel
                                   if (isParcel) {
-                                    final recipient = form.emailController.text.trim();
+                                    final recipient = form.emailController.text
+                                        .trim();
                                     if (recipient.isEmpty) {
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        const SnackBar(content: Text('Please enter recipient contact')),
+                                      ScaffoldMessenger.of(
+                                        context,
+                                      ).showSnackBar(
+                                        const SnackBar(
+                                          content: Text(
+                                            'Please enter recipient contact',
+                                          ),
+                                        ),
                                       );
                                       return;
                                     }
                                     if (recipient.length < 8) {
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        const SnackBar(content: Text('Invalid recipient contact number')),
+                                      ScaffoldMessenger.of(
+                                        context,
+                                      ).showSnackBar(
+                                        const SnackBar(
+                                          content: Text(
+                                            'Invalid recipient contact number',
+                                          ),
+                                        ),
                                       );
                                       return;
                                     }
@@ -837,33 +1017,48 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
 
                                   // Skip email/age validation for parcel
                                   if (!isParcel) {
-                                  final email = form.emailController.text.trim();
-                                  if (email.isNotEmpty && !email.contains('@')) {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(
-                                        content: Text('Invalid email for Passenger ${i + 1}'),
-                                      ),
-                                    );
-                                    return;
-                                  }
+                                    final email = form.emailController.text
+                                        .trim();
+                                    if (email.isNotEmpty &&
+                                        !email.contains('@')) {
+                                      ScaffoldMessenger.of(
+                                        context,
+                                      ).showSnackBar(
+                                        SnackBar(
+                                          content: Text(
+                                            'Invalid email for Passenger ${i + 1}',
+                                          ),
+                                        ),
+                                      );
+                                      return;
+                                    }
 
-                                  final ageText = form.ageController.text.trim();
-                                  final age = ageText.isEmpty ? 18 : int.tryParse(ageText);
-                                  if (age == null || age <= 0 || age > 120) {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(
-                                        content: Text('Invalid age for Passenger ${i + 1} (1-120)'),
-                                      ),
-                                    );
-                                    return;
-                                  }
+                                    final ageText = form.ageController.text
+                                        .trim();
+                                    final age = ageText.isEmpty
+                                        ? 18
+                                        : int.tryParse(ageText);
+                                    if (age == null || age <= 0 || age > 120) {
+                                      ScaffoldMessenger.of(
+                                        context,
+                                      ).showSnackBar(
+                                        SnackBar(
+                                          content: Text(
+                                            'Invalid age for Passenger ${i + 1} (1-120)',
+                                          ),
+                                        ),
+                                      );
+                                      return;
+                                    }
                                   } // end if (!isParcel)
                                 }
 
                                 if (hasSeatLayout && _selectedSeats.isEmpty) {
                                   ScaffoldMessenger.of(context).showSnackBar(
                                     const SnackBar(
-                                      content: Text('Please select at least one seat'),
+                                      content: Text(
+                                        'Please select at least one seat',
+                                      ),
                                     ),
                                   );
                                   return;
@@ -881,17 +1076,23 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
                                 // Save all passengers if requested
                                 if (_savePassengers) {
                                   for (final form in _passengerForms) {
-                                    final ageText = form.ageController.text.trim();
-                                    final age = ageText.isEmpty ? 18 : (int.tryParse(ageText) ?? 18);
-                                    await PassengerRepository.instance.savePassenger(
-                                      Passenger(
-                                        id: DateTime.now().millisecondsSinceEpoch
-                                            .toString(),
-                                        name: form.nameController.text.trim(),
-                                        age: age,
-                                        gender: form.gender,
-                                      ),
-                                    );
+                                    final ageText = form.ageController.text
+                                        .trim();
+                                    final age = ageText.isEmpty
+                                        ? 18
+                                        : (int.tryParse(ageText) ?? 18);
+                                    await PassengerRepository.instance
+                                        .savePassenger(
+                                          Passenger(
+                                            id: DateTime.now()
+                                                .millisecondsSinceEpoch
+                                                .toString(),
+                                            name: form.nameController.text
+                                                .trim(),
+                                            age: age,
+                                            gender: form.gender,
+                                          ),
+                                        );
                                   }
                                 }
 
@@ -904,13 +1105,22 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
 
                                 final seatKeysOrdered = hasSeatLayout
                                     ? _selectedSeats.toList(growable: false)
-                                    : List<String?>.filled(_quantity, null, growable: false);
+                                    : List<String?>.filled(
+                                        _quantity,
+                                        null,
+                                        growable: false,
+                                      );
 
                                 final ages = _passengerForms
                                     .map((f) {
-                                      if (isParcel) return 0; // not applicable for parcel
-                                      final ageText = f.ageController.text.trim();
-                                      return ageText.isEmpty ? 18 : (int.tryParse(ageText) ?? 18);
+                                      if (isParcel) {
+                                        return 0; // not applicable for parcel
+                                      }
+                                      final ageText = f.ageController.text
+                                          .trim();
+                                      return ageText.isEmpty
+                                          ? 18
+                                          : (int.tryParse(ageText) ?? 18);
                                     })
                                     .toList(growable: false);
 
@@ -935,13 +1145,18 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
                                 final genders = _passengerForms
                                     .map((f) => f.gender)
                                     .toList(growable: false);
-                                
+
                                 // Calculate total amount
-                                final isLease = widget.slot.serviceType.name == 'lease';
-                                final deposit = isLease ? (widget.slot.securityDeposit ?? 0.0) : 0.0;
-                                final basePrice = _calculateTotalPrice() - deposit;
+                                final isLease =
+                                    widget.slot.serviceType.name == 'lease';
+                                final deposit = isLease
+                                    ? (widget.slot.securityDeposit ?? 0.0)
+                                    : 0.0;
+                                final basePrice =
+                                    _calculateTotalPrice() - deposit;
                                 final totalAmount = _calculateTotalPrice();
-                                final amountInPaise = (totalAmount * 100).toInt();
+                                final amountInPaise = (totalAmount * 100)
+                                    .toInt();
 
                                 if (amountInPaise < 100) {
                                   // Free booking or amount < 1 INR (Razorpay minimum is ₹1)
@@ -958,191 +1173,293 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
                                   );
                                   ScaffoldMessenger.of(context).showSnackBar(
                                     const SnackBar(
-                                      content: Text('✅ Booking confirmed (Free/Coupon applied).'),
+                                      content: Text(
+                                        '✅ Booking confirmed (Free/Coupon applied).',
+                                      ),
                                       backgroundColor: Colors.green,
                                     ),
                                   );
                                   return;
                                 }
-                                
-                                final currentUser = AuthRepository.instance.currentUser;
-                                
+
+                                final currentUser =
+                                    AuthRepository.instance.currentUser;
+
                                 if (currentUser == null) {
                                   ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(content: Text('Please login to continue')),
+                                    const SnackBar(
+                                      content: Text('Please login to continue'),
+                                    ),
                                   );
                                   return;
                                 }
 
                                 _showOrderLoadingDialog();
-                                
+
                                 try {
                                   // Calculate application fee (5% commission - covers gateway fees + profit)
-                                  final commissionAmount = (amountInPaise * 0.05).toInt();
+                                  final commissionAmount =
+                                      (amountInPaise * 0.05).toInt();
 
                                   // Detect country from slot location to route payment gateway
-                                  final slotLocation = (widget.slot.fromLocation?.isNotEmpty ?? false)
+                                  final slotLocation =
+                                      (widget.slot.fromLocation?.isNotEmpty ??
+                                          false)
                                       ? widget.slot.fromLocation
                                       : widget.slot.baseLocation;
-                                  // Default to 'IN' if country can't be detected (India-first app)
-                                  final countryCode = PaymentService.countryCodeFromLocation(slotLocation) ?? 'IN';
-                                  final currency = (countryCode == 'IN') ? 'inr' : 'usd';
+                                  final currency = widget.slot.currencyType.toLowerCase();
+                                  final isINR = currency == 'inr';
+                                  final countryCode =
+                                      PaymentService.countryCodeFromLocation(
+                                        slotLocation,
+                                      ) ??
+                                      (isINR ? 'IN' : 'US');
 
-                                  final profile = ProfileRepository.instance.profile.value;
+                                  final profile =
+                                      ProfileRepository.instance.profile.value;
 
                                   // Always use the real payment gateway (test keys work with real Razorpay test flow)
-                                  final bookingResult = await PaymentService.instance.processPayment(
-                                    amountInPaise: amountInPaise,
-                                    currency: currency,
-                                    countryCode: countryCode,
-                                    providerId: widget.providerId,
-                                    slotId: widget.slot.id,
-                                    userName: names.isNotEmpty ? names.first : 'User',
-                                    userEmail: emails.isNotEmpty && emails.first != null
-                                        ? emails.first!
-                                        : '',
-                                    userPhone: phones.isNotEmpty && phones.first != null
-                                        ? phones.first!
-                                        : (profile.phone ?? ''),
-                                    description: 'Booking: ${(widget.slot.fromLocation?.isNotEmpty ?? false) ? widget.slot.fromLocation! : (widget.slot.baseLocation ?? '')}',
-                                    commissionAmount: commissionAmount,
-                                  );
+                                  final bookingResult = await PaymentService
+                                      .instance
+                                      .processPayment(
+                                        amountInPaise: amountInPaise,
+                                        currency: currency,
+                                        countryCode: countryCode,
+                                        providerId: widget.providerId,
+                                        slotId: widget.slot.id,
+                                        userName: names.isNotEmpty
+                                            ? names.first
+                                            : 'User',
+                                        userEmail:
+                                            emails.isNotEmpty &&
+                                                emails.first != null
+                                            ? emails.first!
+                                            : '',
+                                        userPhone:
+                                            phones.isNotEmpty &&
+                                                phones.first != null
+                                            ? phones.first!
+                                            : (profile.phone ?? ''),
+                                        description:
+                                            'Booking: ${(widget.slot.fromLocation?.isNotEmpty ?? false) ? widget.slot.fromLocation! : (widget.slot.baseLocation ?? '')}',
+                                        commissionAmount: commissionAmount,
+                                      );
 
                                   if (!context.mounted) return;
                                   _closeOrderLoadingDialogIfAny();
 
-                                  if (bookingResult != null && bookingResult['error'] == null) {
+                                  if (bookingResult != null &&
+                                      bookingResult['error'] == null) {
                                     // Extract booking details (works for both Razorpay and Stripe)
-                                    final paymentIntentId = bookingResult['payment_intent_id'] as String?;
-                                    final clientSecret = bookingResult['client_secret'] as String?;
+                                    final paymentIntentId =
+                                        bookingResult['payment_intent_id']
+                                            as String?;
+                                    final clientSecret =
+                                        bookingResult['client_secret']
+                                            as String?;
                                     final otp = bookingResult['otp'] as String?;
-                                    final countdownEndStr = bookingResult['countdown_end_time'] as String?;
-                                    final gateway = bookingResult['gateway'] as String? ?? 'stripe';
-                                    final isWebRedirect = bookingResult['web_redirect'] == true;
+                                    final countdownEndStr =
+                                        bookingResult['countdown_end_time']
+                                            as String?;
+                                    final gateway =
+                                        bookingResult['gateway'] as String? ??
+                                        'stripe';
+                                    final isWebRedirect =
+                                        bookingResult['web_redirect'] == true;
 
-                                    debugPrint('📱 Payment result: gateway=$gateway, webRedirect=$isWebRedirect, otp=$otp');
+                                    debugPrint(
+                                      '📱 Payment result: gateway=$gateway, webRedirect=$isWebRedirect, otp=$otp',
+                                    );
 
                                     // Web redirect: payment is pending, user was sent to checkout
                                     if (isWebRedirect) {
                                       // Don't create local booking yet - wait for payment completion
                                       Navigator.pop(context);
-                                      
+
                                       // Show popup dialog instead of just snackbar
                                       _showWebPaymentPendingDialog(
                                         context,
-                                        gateway.contains('razorpay') ? 'Razorpay' : 'Stripe',
+                                        gateway.contains('razorpay')
+                                            ? 'Razorpay'
+                                            : 'Stripe',
                                       );
                                       return;
                                     }
-                                    
+
                                     DateTime? countdownEnd;
                                     if (countdownEndStr != null) {
                                       try {
-                                        countdownEnd = DateTime.parse(countdownEndStr);
+                                        countdownEnd = DateTime.parse(
+                                          countdownEndStr,
+                                        );
                                       } catch (_) {}
                                     }
 
                                     // Create local booking with payment details
                                     // Get the selected seat's raw display name (e.g. "A2")
-                                    final selectedSeatKey = _selectedSeats.isNotEmpty ? _selectedSeats.first : null;
+                                    final selectedSeatKey =
+                                        _selectedSeats.isNotEmpty
+                                        ? _selectedSeats.first
+                                        : null;
                                     final selectedCell = selectedSeatKey != null
                                         ? SeatLayoutRepository.instance
-                                            .getLayout(widget.slot.seatLayoutOwnerId ?? '')
-                                            ?.cells[selectedSeatKey]
+                                              .getLayout(
+                                                widget.slot.seatLayoutOwnerId ??
+                                                    '',
+                                              )
+                                              ?.cells[selectedSeatKey]
                                         : null;
-                                    final seatKeyRaw = selectedCell?.seatName ?? selectedSeatKey;
+                                    final seatKeyRaw =
+                                        selectedCell?.seatName ??
+                                        selectedSeatKey;
 
-                                    final localBooking = await BookingRepository.instance.createBooking(
-                                      slotId: widget.slot.id,
-                                      providerId: widget.providerId,
-                                      // ── provider snapshot from slot ──────────
-                                      providerName: widget.slot.providerName,
-                                      userId: currentUser.id,
-                                      defaultCapacity: widget.slot.capacity,
-                                      price: basePrice,
-                                      seatKey: selectedSeatKey,
-                                      seatKeyRaw: seatKeyRaw,
-                                      userName: names.isNotEmpty ? names.first : null,
-                                      userAge: ages.isNotEmpty ? ages.first : null,
-                                      userPhone: phones.isNotEmpty ? phones.first : null,
-                                      userEmail: emails.isNotEmpty ? emails.first : null,
-                                      userGender: genders.isNotEmpty ? genders.first : null,
-                                      stripePaymentIntentId: paymentIntentId,
-                                      stripeClientSecret: clientSecret,
-                                      countdownEndTime: countdownEnd,
-                                      otp: otp,
-                                      securityDeposit: deposit > 0 ? deposit : null,
-                                      termsSnapshot: widget.slot.notes?.isNotEmpty == true
-                                          ? widget.slot.notes
-                                          : null,
-                                      // ── slot details snapshot ─────────────────
-                                      serviceType: widget.slot.serviceType,
-                                      postMode: widget.slot.postMode,
-                                      bookingMode: widget.slot.bookingMode.name == 'full'
-                                          ? BookingMode.full
-                                          : BookingMode.shared,
-                                      vehicleId: widget.slot.vehicleId,
-                                      slotStartTime: widget.slot.startTime,
-                                      slotEndTime: widget.slot.endTime,
-                                      slotCapacity: widget.slot.capacity,
-                                      pickupOption: widget.slot.pickupOption.name,
-                                      withOperator: widget.slot.withOperator,
-                                      fuelPolicy: widget.slot.fuelPolicy,
-                                      maxWeight: widget.slot.maxWeight,
-                                      maxLength: widget.slot.maxLength,
-                                      maxWidth: widget.slot.maxWidth,
-                                      maxHeight: widget.slot.maxHeight,
-                                      // lease-specific snapshot
-                                      leaseDuration: widget.slot.leaseDuration,
-                                      insuranceIncluded: widget.slot.insuranceIncluded,
-                                      leaseTerms: widget.slot.leaseTerms,
-                                      waitForFullDeadlineHours: widget.slot.waitForFullDeadlineHours,
-                                      // slot_layout: full layout JSONB snapshot
-                                      slotLayoutSnapshot: widget.slot.seatLayoutStructure?.toJson(),
-                                      // provider vehicle images snapshot
-                                      providerImageUrls: () {
-                                        final v = VehicleRepository.instance
-                                            .getById(widget.slot.vehicleId);
-                                        if (v == null) return <String>[];
-                                        return [
-                                          if (v.profileImage != null &&
-                                              v.profileImage!.isNotEmpty)
-                                            v.profileImage!,
-                                          ...v.galleryImages
-                                              .where((e) => e.isNotEmpty),
-                                        ];
-                                      }(),
-                                      // payment method
-                                      paymentMethod: gateway.contains('razorpay')
-                                          ? 'razorpay'
-                                          : 'stripe',
-                                      // ── location snapshot from slot ──────────
-                                      routeType: widget.slot.slotType.name == 'fromTo'
-                                          ? 'from_to'
-                                          : 'base_range',
-                                      fromAddress: _locName(widget.slot.fromLocation),
-                                      fromLat: _locLat(widget.slot.fromLocation),
-                                      fromLng: _locLng(widget.slot.fromLocation),
-                                      toAddress: _locName(widget.slot.toLocation),
-                                      toLat: _locLat(widget.slot.toLocation),
-                                      toLng: _locLng(widget.slot.toLocation),
-                                      baseAddress: _locName(widget.slot.baseLocation),
-                                      baseLat: _locLat(widget.slot.baseLocation),
-                                      baseLng: _locLng(widget.slot.baseLocation),
-                                      rangeKm: widget.slot.radius,
-                                    );
+                                    final localBooking = await BookingRepository
+                                        .instance
+                                        .createBooking(
+                                          slotId: widget.slot.id,
+                                          providerId: widget.providerId,
+                                          // ── provider snapshot from slot ──────────
+                                          providerName:
+                                              widget.slot.providerName,
+                                          userId: currentUser.id,
+                                          defaultCapacity: widget.slot.capacity,
+                                          price: basePrice,
+                                          seatKey: selectedSeatKey,
+                                          seatKeyRaw: seatKeyRaw,
+                                          userName: names.isNotEmpty
+                                              ? names.first
+                                              : null,
+                                          userAge: ages.isNotEmpty
+                                              ? ages.first
+                                              : null,
+                                          userPhone: phones.isNotEmpty
+                                              ? phones.first
+                                              : null,
+                                          userEmail: emails.isNotEmpty
+                                              ? emails.first
+                                              : null,
+                                          userGender: genders.isNotEmpty
+                                              ? genders.first
+                                              : null,
+                                          stripePaymentIntentId:
+                                              paymentIntentId,
+                                          stripeClientSecret: clientSecret,
+                                          countdownEndTime: countdownEnd,
+                                          otp: otp,
+                                          securityDeposit: deposit > 0
+                                              ? deposit
+                                              : null,
+                                          termsSnapshot:
+                                              widget.slot.notes?.isNotEmpty ==
+                                                  true
+                                              ? widget.slot.notes
+                                              : null,
+                                          // ── slot details snapshot ─────────────────
+                                          serviceType: widget.slot.serviceType,
+                                          postMode: widget.slot.postMode,
+                                          bookingMode:
+                                              widget.slot.bookingMode.name ==
+                                                  'full'
+                                              ? BookingMode.full
+                                              : BookingMode.shared,
+                                          vehicleId: widget.slot.vehicleId,
+                                          slotStartTime: widget.slot.startTime,
+                                          slotEndTime: widget.slot.endTime,
+                                          slotCapacity: widget.slot.capacity,
+                                          pickupOption:
+                                              widget.slot.pickupOption.name,
+                                          withOperator:
+                                              widget.slot.withOperator,
+                                          fuelPolicy: widget.slot.fuelPolicy,
+                                          maxWeight: widget.slot.maxWeight,
+                                          maxLength: widget.slot.maxLength,
+                                          maxWidth: widget.slot.maxWidth,
+                                          maxHeight: widget.slot.maxHeight,
+                                          // lease-specific snapshot
+                                          leaseDuration:
+                                              widget.slot.leaseDuration,
+                                          insuranceIncluded:
+                                              widget.slot.insuranceIncluded,
+                                          leaseTerms: widget.slot.leaseTerms,
+                                          waitForFullDeadlineHours: widget
+                                              .slot
+                                              .waitForFullDeadlineHours,
+                                          // slot_layout: full layout JSONB snapshot
+                                          slotLayoutSnapshot: widget
+                                              .slot
+                                              .seatLayoutStructure
+                                              ?.toJson(),
+                                          // provider vehicle images snapshot
+                                          providerImageUrls: () {
+                                            final v = VehicleRepository.instance
+                                                .getById(widget.slot.vehicleId);
+                                            if (v == null) return <String>[];
+                                            return [
+                                              if (v.profileImage != null &&
+                                                  v.profileImage!.isNotEmpty)
+                                                v.profileImage!,
+                                              ...v.galleryImages.where(
+                                                (e) => e.isNotEmpty,
+                                              ),
+                                            ];
+                                          }(),
+                                          // payment method
+                                          paymentMethod:
+                                              gateway.contains('razorpay')
+                                              ? 'razorpay'
+                                              : 'stripe',
+                                          // ── location snapshot from slot ──────────
+                                          routeType:
+                                              widget.slot.slotType.name ==
+                                                  'fromTo'
+                                              ? 'from_to'
+                                              : 'base_range',
+                                          fromAddress: _locName(
+                                            widget.slot.fromLocation,
+                                          ),
+                                          fromLat: _locLat(
+                                            widget.slot.fromLocation,
+                                          ),
+                                          fromLng: _locLng(
+                                            widget.slot.fromLocation,
+                                          ),
+                                          toAddress: _locName(
+                                            widget.slot.toLocation,
+                                          ),
+                                          toLat: _locLat(
+                                            widget.slot.toLocation,
+                                          ),
+                                          toLng: _locLng(
+                                            widget.slot.toLocation,
+                                          ),
+                                          baseAddress: _locName(
+                                            widget.slot.baseLocation,
+                                          ),
+                                          baseLat: _locLat(
+                                            widget.slot.baseLocation,
+                                          ),
+                                          baseLng: _locLng(
+                                            widget.slot.baseLocation,
+                                          ),
+                                          rangeKm: widget.slot.radius,
+                                        );
 
-                                    if (localBooking != null && context.mounted) {
+                                    if (localBooking != null &&
+                                        context.mounted) {
                                       // Don't return result - booking already created
                                       // Just close the sheet
                                       Navigator.pop(context);
-                                      
+
                                       // Go to Requests tab
                                       mainTabIndex.value = 1;
-                                      Navigator.of(context).popUntil((route) => route.isFirst);
+                                      Navigator.of(
+                                        context,
+                                      ).popUntil((route) => route.isFirst);
 
-                                      final gatewayLabel = gateway == 'razorpay' ? 'Razorpay' : 'Stripe';
-                                      
+                                      final gatewayLabel = gateway == 'razorpay'
+                                          ? 'Razorpay'
+                                          : 'Stripe';
+
                                       // Show success popup dialog with OTP
                                       _showPaymentSuccessDialog(
                                         context,
@@ -1152,8 +1469,10 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
                                       );
                                     }
                                   } else {
-                                    final reason = bookingResult?['error'] as String?;
-                                    final message = (reason != null && reason.isNotEmpty)
+                                    final reason =
+                                        bookingResult?['error'] as String?;
+                                    final message =
+                                        (reason != null && reason.isNotEmpty)
                                         ? reason
                                         : 'Payment cancelled.';
                                     ScaffoldMessenger.of(context).showSnackBar(
@@ -1168,7 +1487,10 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
                                   if (!context.mounted) return;
                                   _closeOrderLoadingDialogIfAny();
                                   ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+                                    SnackBar(
+                                      content: Text('Error: $e'),
+                                      backgroundColor: Colors.red,
+                                    ),
                                   );
                                 }
                               } finally {
@@ -1179,11 +1501,14 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
                                 }
                               }
                             },
-                      child: _isProcessing 
+                      child: _isProcessing
                           ? const SizedBox(
                               width: 20,
                               height: 20,
-                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
                             )
                           : const Text('Pay & Confirm'),
                     ),
@@ -1196,7 +1521,7 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
       ),
     );
   }
-  
+
   /// Convert SimpleSeatLayout (from Supabase) to SeatLayout (for UI display).
   /// Used when the layout is not in the local SeatLayoutRepository.
   SeatLayout _simpleSeatLayoutToSeatLayout(SimpleSeatLayout simple) {
@@ -1216,7 +1541,9 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
         final g = item.allowedGender.toLowerCase();
         if (g == 'male') {
           gender = SeatGender.male;
-        } else if (g == 'female') { gender = SeatGender.female; }
+        } else if (g == 'female') {
+          gender = SeatGender.female;
+        }
       }
 
       cells[key] = LayoutCell(
@@ -1245,12 +1572,15 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
       widget.slot.id,
       widget.slot.capacity,
     );
-    
+
     double basePrice;
-    
+    double seatSecurityDeposit = 0.0;
+
     if (isFullPostMode) {
       // Full post mode: price × remaining capacity
-      final quantity = remainingCapacity > 0 ? remainingCapacity : widget.slot.capacity;
+      final quantity = remainingCapacity > 0
+          ? remainingCapacity
+          : widget.slot.capacity;
       basePrice = widget.slot.price * quantity;
     } else if (_selectedSeats.isEmpty) {
       basePrice = widget.slot.price * _quantity;
@@ -1267,16 +1597,23 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
           final cell = layout.cells[seatKey];
           if (cell != null && cell.price != null) {
             total += cell.price!;
+            // Add security deposit from this seat/compartment
+            if (cell.securityDeposit != null && cell.securityDeposit! > 0) {
+              seatSecurityDeposit += cell.securityDeposit!.toDouble();
+            }
           }
         }
         basePrice = total > 0 ? total : widget.slot.price * _quantity;
       }
     }
 
-    // Add security deposit for lease slots
-    final isLease = widget.slot.serviceType.name == 'lease';
-    final deposit = isLease ? (widget.slot.securityDeposit ?? 0.0) : 0.0;
-    return basePrice + deposit;
+    // Add security deposit - either from slot (simple mode) or from seats (layout mode)
+    final slotDeposit = widget.slot.securityDeposit ?? 0.0;
+    final totalDeposit = seatSecurityDeposit > 0
+        ? seatSecurityDeposit
+        : slotDeposit;
+
+    return basePrice + totalDeposit;
   }
 
   static String _formatTime(DateTime time) {
@@ -1434,7 +1771,10 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
             Expanded(
               child: Text(
                 'Opening $gatewayLabel',
-                style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                style: const TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
             ),
           ],
@@ -1460,7 +1800,11 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
                 children: [
                   Row(
                     children: [
-                      Icon(Icons.info_outline, color: Colors.orange[700], size: 20),
+                      Icon(
+                        Icons.info_outline,
+                        color: Colors.orange[700],
+                        size: 20,
+                      ),
                       const SizedBox(width: 8),
                       const Text(
                         'Important',
@@ -1532,6 +1876,7 @@ class _SeatGrid extends StatelessWidget {
   final int remainingCapacity;
   final List<PassengerFormData> passengerForms;
   final void Function(String key) onSeatToggled;
+  final Slot slot; // Added to access service type
 
   const _SeatGrid({
     required this.layout,
@@ -1541,6 +1886,7 @@ class _SeatGrid extends StatelessWidget {
     required this.remainingCapacity,
     required this.passengerForms,
     required this.onSeatToggled,
+    required this.slot,
   });
 
   @override
@@ -1572,22 +1918,49 @@ class _SeatGrid extends StatelessWidget {
             final isSelected = selectedSeats.contains(key);
             final isLocked = cell?.isLocked ?? false;
             final seatGender = cell?.gender ?? SeatGender.any;
+            final seatKind = cell?.seatKind ?? SeatKind.seat;
 
-            final genderMatch = seatGender == SeatGender.any ||
-                passengerForms.any((f) =>
-                    f.gender == SeatGender.any || f.gender == seatGender);
+            final genderMatch =
+                seatGender == SeatGender.any ||
+                passengerForms.any(
+                  (f) => f.gender == SeatGender.any || f.gender == seatGender,
+                );
 
             Color bgColor;
+            Color borderColor;
+
             if (isBooked) {
               bgColor = Colors.red.shade300;
+              borderColor = Colors.red.shade700;
             } else if (isLocked) {
               bgColor = Colors.grey.shade400;
+              borderColor = Colors.grey.shade700;
             } else if (isSelected) {
-              bgColor = Colors.green;
+              bgColor = Colors.green.shade400;
+              borderColor = Colors.green.shade700;
             } else if (!genderMatch) {
               bgColor = Colors.orange.shade200;
+              borderColor = Colors.orange.shade400;
             } else {
-              bgColor = Colors.blue.shade100;
+              // Gender-specific colors for available seats
+              if (seatGender == SeatGender.male) {
+                bgColor = Colors.blue.shade100;
+                borderColor = Colors.blue.shade300;
+              } else if (seatGender == SeatGender.female) {
+                bgColor = Colors.pink.shade100;
+                borderColor = Colors.pink.shade300;
+              } else {
+                bgColor = Colors.grey.shade100;
+                borderColor = Colors.grey.shade300;
+              }
+            }
+
+            // Seat type indicator
+            String typeIndicator = '';
+            if (seatKind == SeatKind.berth) {
+              typeIndicator = 'B';
+            } else if (seatKind == SeatKind.seat) {
+              typeIndicator = 'S';
             }
 
             return GestureDetector(
@@ -1601,19 +1974,67 @@ class _SeatGrid extends StatelessWidget {
                   color: bgColor,
                   borderRadius: BorderRadius.circular(4),
                   border: Border.all(
-                    color: isSelected ? Colors.green.shade700 : Colors.grey.shade300,
+                    color: borderColor,
                     width: isSelected ? 2 : 1,
                   ),
                 ),
-                child: Center(
-                  child: Text(
-                    cell?.seatName ?? '',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                      color: isBooked || isLocked ? Colors.white : Colors.black87,
+                child: Stack(
+                  children: [
+                    // Seat name
+                    Center(
+                      child: Text(
+                        _cleanSeatName(cell?.seatName ?? '', slot.serviceType),
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: isSelected
+                              ? FontWeight.bold
+                              : FontWeight.normal,
+                          color: isBooked || isLocked
+                              ? Colors.white
+                              : Colors.black87,
+                        ),
+                      ),
                     ),
-                  ),
+                    // Type indicator (S/B) in top-right corner
+                    if (typeIndicator.isNotEmpty)
+                      Positioned(
+                        top: 1,
+                        right: 1,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 2,
+                            vertical: 1,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withValues(alpha: 0.6),
+                            borderRadius: BorderRadius.circular(2),
+                          ),
+                          child: Text(
+                            typeIndicator,
+                            style: const TextStyle(
+                              fontSize: 8,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                      ),
+                    // Gender icon in bottom-left corner
+                    if (seatGender != SeatGender.any && !isBooked && !isLocked)
+                      Positioned(
+                        bottom: 1,
+                        left: 1,
+                        child: Icon(
+                          seatGender == SeatGender.male
+                              ? Icons.male
+                              : Icons.female,
+                          size: 10,
+                          color: seatGender == SeatGender.male
+                              ? Colors.blue.shade700
+                              : Colors.pink.shade700,
+                        ),
+                      ),
+                  ],
                 ),
               ),
             );
@@ -1622,7 +2043,158 @@ class _SeatGrid extends StatelessWidget {
       ),
     );
   }
+
+  /// Clean seat name for display based on service type
+  static String _cleanSeatName(String seatName, ServiceType serviceType) {
+    if (seatName.isEmpty) return '';
+
+    // For parcels, strip the dimension metadata (e.g., "A1|L:1|B:1|H:1|W:1|T:Normal" → "A1")
+    if (serviceType == ServiceType.parcel) {
+      if (seatName.contains('|')) {
+        return seatName.split('|').first; // Return only the parcel name
+      }
+    }
+
+    return seatName; // For passenger/lease, show full name
+  }
 }
 
+/// Legend showing seat status colors and symbols
+class _SeatLegend extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.grey.shade50,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.grey.shade300),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Legend',
+            style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 16,
+            runSpacing: 8,
+            children: [
+              _LegendItem(
+                color: Colors.blue.shade100,
+                border: Colors.blue.shade300,
+                icon: Icons.male,
+                label: 'Male',
+              ),
+              _LegendItem(
+                color: Colors.pink.shade100,
+                border: Colors.pink.shade300,
+                icon: Icons.female,
+                label: 'Female',
+              ),
+              _LegendItem(
+                color: Colors.grey.shade100,
+                border: Colors.grey.shade300,
+                label: 'Any',
+              ),
+              _LegendItem(
+                color: Colors.green.shade400,
+                border: Colors.green.shade700,
+                label: 'Selected',
+              ),
+              _LegendItem(
+                color: Colors.red.shade300,
+                border: Colors.red.shade700,
+                label: 'Booked',
+              ),
+              _LegendItem(
+                color: Colors.grey.shade400,
+                border: Colors.grey.shade700,
+                label: 'Locked',
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          const Divider(height: 1),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.6),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+                child: const Text(
+                  'S',
+                  style: TextStyle(
+                    fontSize: 8,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 4),
+              const Text('= Seat', style: TextStyle(fontSize: 11)),
+              const SizedBox(width: 16),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.6),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+                child: const Text(
+                  'B',
+                  style: TextStyle(
+                    fontSize: 8,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 4),
+              const Text('= Berth', style: TextStyle(fontSize: 11)),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
 
+class _LegendItem extends StatelessWidget {
+  final Color color;
+  final Color border;
+  final IconData? icon;
+  final String label;
 
+  const _LegendItem({
+    required this.color,
+    required this.border,
+    this.icon,
+    required this.label,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 20,
+          height: 20,
+          decoration: BoxDecoration(
+            color: color,
+            borderRadius: BorderRadius.circular(3),
+            border: Border.all(color: border, width: 1),
+          ),
+          child: icon != null ? Icon(icon, size: 12, color: border) : null,
+        ),
+        const SizedBox(width: 4),
+        Text(label, style: const TextStyle(fontSize: 11)),
+      ],
+    );
+  }
+}

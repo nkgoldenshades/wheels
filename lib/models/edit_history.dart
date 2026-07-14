@@ -92,6 +92,19 @@ class EditHistoryEntry {
       return '${(difference.inDays / 7).floor()} ${(difference.inDays / 7).floor() == 1 ? 'week' : 'weeks'} ago';
     }
   }
+
+  /// Get formatted date and time string (e.g., "06/06/2026 at 11:53 AM")
+  String getFormattedDateTime() {
+    final day = timestamp.day.toString().padLeft(2, '0');
+    final month = timestamp.month.toString().padLeft(2, '0');
+    final year = timestamp.year;
+    
+    final hour = timestamp.hour % 12 == 0 ? 12 : timestamp.hour % 12;
+    final minute = timestamp.minute.toString().padLeft(2, '0');
+    final period = timestamp.hour >= 12 ? 'PM' : 'AM';
+    
+    return '$day/$month/$year at $hour:$minute $period';
+  }
 }
 
 /// List of edit history entries

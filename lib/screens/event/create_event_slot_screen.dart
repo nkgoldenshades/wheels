@@ -9,6 +9,7 @@ import '../../models/slot_type.dart';
 import '../../models/seat_layout.dart';
 import '../../services/event_slot_repository.dart';
 import '../../services/seat_layout_repository.dart';
+import '../../services/profile_repository.dart';
 import '../../services/content_filter_service.dart';
 import '../../services/app_preferences.dart';
 import '../../controllers/seat_layout_controller.dart';
@@ -62,6 +63,30 @@ class _CreateEventSlotScreenState extends State<CreateEventSlotScreen> {
     _capacityController.dispose();
     _notesController.dispose();
     super.dispose();
+  }
+
+  /// Get currency symbol from provider's connected payment account
+  String _getProviderCurrencySymbol() {
+    final profile = ProfileRepository.instance.profile.value;
+    final currency = profile.bankCurrency;
+
+    if (currency != null && currency.isNotEmpty) {
+      final currencySymbols = {
+        'INR': '₹',
+        'USD': '\$',
+        'GBP': '£',
+        'EUR': '€',
+        'AED': 'د.إ',
+        'SGD': 'S\$',
+        'AUD': 'A\$',
+        'CAD': 'C\$',
+        'JPY': '¥',
+        'CNY': '¥',
+        'HKD': 'HK\$',
+      };
+      return currencySymbols[currency] ?? currency;
+    }
+    return AppPreferences.instance.currencySymbol;
   }
 
   @override
@@ -452,7 +477,7 @@ class _CreateEventSlotScreenState extends State<CreateEventSlotScreen> {
               TextFormField(
                 controller: _priceController,
                 decoration: InputDecoration(
-                  labelText: 'Price (${AppPreferences.instance.currencySymbol})',
+                  labelText: 'Price (${_getProviderCurrencySymbol()})',
                   border: const OutlineInputBorder(),
                   prefixIcon: const Icon(Icons.currency_rupee),
                 ),
@@ -820,6 +845,3 @@ class _CreateEventSlotScreenState extends State<CreateEventSlotScreen> {
     }
   }
 }
-
-
-

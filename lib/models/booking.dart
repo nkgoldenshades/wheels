@@ -1,6 +1,7 @@
 import 'seat_layout.dart';
 import 'post_mode.dart';
 import 'trip_media.dart';
+import 'location_confirmation.dart';
 
 enum BookingStatus {
   // ── Active (blocks post delete, payment held) ──────────────────────────
@@ -168,6 +169,9 @@ class Booking {
 
   // Trip media — photos/videos uploaded by provider & customer at start/end
   final TripMedia tripMedia;
+  
+  // Automatic GPS location confirmations (separate from manual trip media)
+  final LocationConfirmations locationConfirmations;
 
   // GPS tracking for review verification
   final double? customerArrivalLat;
@@ -227,6 +231,8 @@ class Booking {
     this.rangeKm,
     // trip media
     this.tripMedia = TripMedia.empty,
+    // automatic GPS location confirmations
+    this.locationConfirmations = LocationConfirmations.empty,
     // GPS tracking
     this.customerArrivalLat,
     this.customerArrivalLng,
@@ -266,6 +272,7 @@ class Booking {
     bool? isFullVehicleLocked,
     PostMode? postMode,
     TripMedia? tripMedia,
+    LocationConfirmations? locationConfirmations,
     double? customerArrivalLat,
     double? customerArrivalLng,
     DateTime? customerArrivalTime,
@@ -322,6 +329,7 @@ class Booking {
       rangeKm: rangeKm,
       // trip media
       tripMedia: tripMedia ?? this.tripMedia,
+      locationConfirmations: locationConfirmations ?? this.locationConfirmations,
       // GPS tracking
       customerArrivalLat: customerArrivalLat ?? this.customerArrivalLat,
       customerArrivalLng: customerArrivalLng ?? this.customerArrivalLng,
@@ -436,6 +444,7 @@ class Booking {
       if (tripEndTime != null)   'end_time':   tripEndTime!.toUtc().toIso8601String(),
       // deadline_time not sent — DB uses end_time directly
       'trip_media': tripMedia.toJson(),
+      'location_confirmations': locationConfirmations.toJson(),
       // GPS tracking
       if (customerArrivalLat != null) 'customer_arrival_lat': customerArrivalLat,
       if (customerArrivalLng != null) 'customer_arrival_lng': customerArrivalLng,
@@ -532,6 +541,10 @@ class Booking {
       // trip media — new unified column (falls back to empty)
       tripMedia: TripMedia.fromJson(
         (json['tripMedia'] ?? json['trip_media']) as Map<String, dynamic>?,
+      ),
+      // location confirmations — automatic GPS
+      locationConfirmations: LocationConfirmations.fromJson(
+        (json['locationConfirmations'] ?? json['location_confirmations']) as Map<String, dynamic>?,
       ),
       // GPS tracking
       customerArrivalLat: (json['customerArrivalLat'] ?? json['customer_arrival_lat'] as num?)?.toDouble(),

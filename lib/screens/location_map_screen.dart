@@ -52,11 +52,7 @@ class LocationMapScreen extends StatelessWidget {
                 height: 80,
                 child: Column(
                   children: [
-                    Icon(
-                      Icons.location_on,
-                      color: Colors.red,
-                      size: 40,
-                    ),
+                    Icon(Icons.location_on, color: Colors.red, size: 40),
                   ],
                 ),
               ),
@@ -73,13 +69,17 @@ class LocationMapScreen extends StatelessWidget {
   }
 
   Future<void> _openInMaps(double lat, double lon) async {
-    // Try Google Maps first, fallback to generic geo: URL
-    final googleMapsUrl = Uri.parse('https://www.google.com/maps/search/?api=1&query=$lat,$lon');
+    // OpenStreetMap (free, no API key needed, open source)
+    final openStreetMapUrl = Uri.parse(
+      'https://www.openstreetmap.org/?mlat=$lat&mlon=$lon#map=17/$lat/$lon',
+    );
+
+    // Fallback to generic geo: URL for mobile map apps
     final geoUrl = Uri.parse('geo:$lat,$lon');
 
     try {
-      if (await canLaunchUrl(googleMapsUrl)) {
-        await launchUrl(googleMapsUrl, mode: LaunchMode.externalApplication);
+      if (await canLaunchUrl(openStreetMapUrl)) {
+        await launchUrl(openStreetMapUrl, mode: LaunchMode.externalApplication);
       } else if (await canLaunchUrl(geoUrl)) {
         await launchUrl(geoUrl, mode: LaunchMode.externalApplication);
       }
@@ -88,6 +88,3 @@ class LocationMapScreen extends StatelessWidget {
     }
   }
 }
-
-
-

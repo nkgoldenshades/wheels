@@ -1,18 +1,20 @@
 import 'dart:convert';
-import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'app_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/booking.dart';
+import '../models/slot.dart' hide BookingMode;
 import '../models/seat_layout.dart';
 import '../models/post_mode.dart';
 import '../models/service_type.dart';
 import '../models/trip_media.dart';
+import '../models/location_confirmation.dart';
 import '../utils/gps_verification_helper.dart';
 import 'auth_repository.dart';
 import 'slot_repository.dart';
+import 'customer_slot_repository.dart';
 import 'vehicle_repository.dart';
 import 'otp_service.dart';
 
@@ -62,7 +64,9 @@ class BookingRepository {
         final r2 = await supabase.rpc('auto_deactivate_expired_posts');
         if (r2 != null) {
           final count = (r2 as Map<String, dynamic>)['deactivated_posts'] ?? 0;
-          if (count > 0) debugPrint('📴 Auto-deactivated $count expired post(s)');
+          if (count > 0) {
+            debugPrint('📴 Auto-deactivated $count expired post(s)');
+          }
         }
       } catch (_) {
         // RPC not deployed — silently skip
@@ -75,45 +79,75 @@ class BookingRepository {
   Future<void> _load() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      
+
       // Clear existing bookings before loading (prevent duplicates)
       bookings.value = [];
-      
-      // Try to load from Supabase first (source of truth)
-      bool supabaseSuccess = false;
+
+      debugPrint(
+        '🔄 Loading bookings for user: ${AuthRepository.instance.currentUser?.id}',
+      );
+
+      // ══════════════════════════════════════════════════════════════
+      // ALWAYS MERGE BOTH SOURCES (Supabase + Local Storage)
+      // This prevents data loss if Supabase returns 0 bookings
+      // ══════════════════════════════════════════════════════════════
+
+      // 1. Load from Supabase (source of truth)
+      final supabaseBookings = <String, Booking>{};
       try {
         await _loadFromSupabase();
-        supabaseSuccess = true; // ✅ FIX: Supabase responded without error = success
-        
-        debugPrint('✅ Successfully loaded ${bookings.value.length} bookings from Supabase');
+
+        for (final booking in bookings.value) {
+          supabaseBookings[booking.id] = booking;
+        }
+
+        debugPrint('📥 Supabase: Loaded ${supabaseBookings.length} bookings');
       } catch (e) {
         debugPrint('❌ Supabase load failed: $e');
-        supabaseSuccess = false;
       }
-      
-      // Only load from local storage if Supabase failed
-      if (!supabaseSuccess) {
-        debugPrint('⚠️ Falling back to local storage');
-        
-        final bookingsData = prefs.getString(_storageKey);
-        if (bookingsData != null) {
+
+      // 2. Load from local storage (fallback + cache)
+      final localBookings = <String, Booking>{};
+      final bookingsData = prefs.getString(_storageKey);
+      if (bookingsData != null) {
+        try {
           final List<dynamic> jsonList = jsonDecode(bookingsData);
-          final localBookings = jsonList
+          final parsedBookings = jsonList
               .map((e) => Booking.fromJson(e as Map<String, dynamic>))
               .toList();
-          
-          // Deduplicate local bookings
-          final uniqueLocal = <String, Booking>{};
-          for (final booking in localBookings) {
-            uniqueLocal[booking.id] = booking;
+
+          for (final booking in parsedBookings) {
+            localBookings[booking.id] = booking;
           }
-          bookings.value = uniqueLocal.values.toList();
-          debugPrint('✅ Loaded ${bookings.value.length} bookings from local storage');
-        } else {
-          debugPrint('⚠️ No local bookings found');
+
+          debugPrint(
+            '💾 Local Storage: Loaded ${localBookings.length} bookings',
+          );
+        } catch (e) {
+          debugPrint('❌ Local storage parse failed: $e');
         }
+      } else {
+        debugPrint('⚠️ No local bookings found');
       }
-      
+
+      // 3. Merge both sources (Supabase takes priority as most up-to-date)
+      final merged = <String, Booking>{};
+
+      // Add local bookings first (fallback)
+      for (final entry in localBookings.entries) {
+        merged[entry.key] = entry.value;
+      }
+
+      // Overwrite with Supabase bookings (more up-to-date)
+      for (final entry in supabaseBookings.entries) {
+        merged[entry.key] = entry.value;
+      }
+
+      bookings.value = merged.values.toList();
+      debugPrint(
+        '✅ Final Total: ${bookings.value.length} unique bookings (merged)',
+      );
+
       // Load capacity data (always from local)
       final capacityData = prefs.getString(_capacityKey);
       if (capacityData != null) {
@@ -125,48 +159,53 @@ class BookingRepository {
       // Migrate old bookings if needed
       if (bookings.value.isNotEmpty) {
         bool needsMigration = false;
-        final migratedBookings = bookings.value.map((b) {
-          final providerId = b.providerId.trim();
-          if (providerId.isNotEmpty && providerId != 'user1') {
-            return b;
-          }
+        final migratedBookings = bookings.value
+            .map((b) {
+              final providerId = b.providerId.trim();
+              if (providerId.isNotEmpty && providerId != 'user1') {
+                return b;
+              }
 
-          String? resolvedProviderId;
-          for (final e in SlotRepository.instance.allSlots) {
-            if (e.slot.id == b.slotId) {
-              final vehicle = VehicleRepository.instance.getById(e.slot.vehicleId);
-              resolvedProviderId = vehicle?.userId;
-              break;
-            }
-          }
+              String? resolvedProviderId;
+              for (final e in SlotRepository.instance.allSlots) {
+                if (e.slot.id == b.slotId) {
+                  final vehicle = VehicleRepository.instance.getById(
+                    e.slot.vehicleId,
+                  );
+                  resolvedProviderId = vehicle?.userId;
+                  break;
+                }
+              }
 
-          if (resolvedProviderId == null || resolvedProviderId.trim().isEmpty) {
-            return b;
-          }
+              if (resolvedProviderId == null ||
+                  resolvedProviderId.trim().isEmpty) {
+                return b;
+              }
 
-          needsMigration = true;
-          return Booking(
-            id: b.id,
-            slotId: b.slotId,
-            providerId: resolvedProviderId,
-            providerName: b.providerName,
-            providerPhone: b.providerPhone,
-            providerEmail: b.providerEmail,
-            providerAvatar: b.providerAvatar,
-            userId: b.userId,
-            price: b.price,
-            seatKey: b.seatKey,
-            userGender: b.userGender,
-            userName: b.userName,
-            userAge: b.userAge,
-            userPhone: b.userPhone,
-            userEmail: b.userEmail,
-            status: b.status,
-            otp: b.otp,
-            otpVerified: b.otpVerified,
-            createdAt: b.createdAt,
-          );
-        }).toList(growable: false);
+              needsMigration = true;
+              return Booking(
+                id: b.id,
+                slotId: b.slotId,
+                providerId: resolvedProviderId,
+                providerName: b.providerName,
+                providerPhone: b.providerPhone,
+                providerEmail: b.providerEmail,
+                providerAvatar: b.providerAvatar,
+                userId: b.userId,
+                price: b.price,
+                seatKey: b.seatKey,
+                userGender: b.userGender,
+                userName: b.userName,
+                userAge: b.userAge,
+                userPhone: b.userPhone,
+                userEmail: b.userEmail,
+                status: b.status,
+                otp: b.otp,
+                otpVerified: b.otpVerified,
+                createdAt: b.createdAt,
+              );
+            })
+            .toList(growable: false);
 
         if (needsMigration) {
           bookings.value = migratedBookings;
@@ -181,20 +220,24 @@ class BookingRepository {
   Future<void> _loadFromSupabase() async {
     final supabase = Supabase.instance.client;
     final currentUser = AuthRepository.instance.currentUser;
-    
+
     if (currentUser == null) {
       debugPrint('⚠️ No user logged in - skipping Supabase booking load');
       return;
     }
 
     debugPrint('🔍 Loading bookings for user: ${currentUser.id}');
-    debugPrint('🔑 Current user ID: ${currentUser.id}'); // ✅ FIX: Debug log to confirm user ID
+    debugPrint(
+      '🔑 Current user ID: ${currentUser.id}',
+    ); // ✅ FIX: Debug log to confirm user ID
 
     // Load bookings where user is either customer OR provider (CORRECT field names)
     final response = await supabase
         .from('bookings')
         .select()
-        .or('profile_customer_id.eq.${currentUser.id},profile_provider_id.eq.${currentUser.id}')
+        .or(
+          'profile_customer_id.eq.${currentUser.id},profile_provider_id.eq.${currentUser.id}',
+        )
         .order('created_at', ascending: false);
 
     if (response.isEmpty) {
@@ -202,8 +245,10 @@ class BookingRepository {
       return;
     }
 
-    debugPrint('📥 Received ${(response as List).length} bookings from Supabase');
-    
+    debugPrint(
+      '📥 Received ${(response as List).length} bookings from Supabase',
+    );
+
     // Debug: Print all booking IDs received
     for (var json in response) {
       debugPrint('   - Booking ID: ${json['id']}');
@@ -226,15 +271,17 @@ class BookingRepository {
 
     // Auto-expire overdue bookings
     final expiredBookings = <Booking>[];
-    
+
     for (final booking in uniqueBookings.values) {
       // Check if booking is overdue (active but past deadline)
       if (booking.isOverdue) {
-        debugPrint('⏰ Auto-expiring overdue booking: ${booking.id} (deadline: ${booking.deadlineTime})');
+        debugPrint(
+          '⏰ Auto-expiring overdue booking: ${booking.id} (deadline: ${booking.deadlineTime})',
+        );
         expiredBookings.add(booking);
       }
     }
-    
+
     // Update expired bookings in database
     for (final booking in expiredBookings) {
       try {
@@ -242,9 +289,11 @@ class BookingRepository {
             .from('bookings')
             .update({'status': 'expired'})
             .eq('id', booking.id);
-        
+
         // Update in memory
-        uniqueBookings[booking.id] = booking.copyWith(status: BookingStatus.expired);
+        uniqueBookings[booking.id] = booking.copyWith(
+          status: BookingStatus.expired,
+        );
         debugPrint('✅ Expired booking: ${booking.id}');
       } catch (e) {
         debugPrint('❌ Failed to expire booking ${booking.id}: $e');
@@ -253,11 +302,70 @@ class BookingRepository {
 
     bookings.value = uniqueBookings.values.toList();
     await _persist(); // Save to local storage
-    
-    debugPrint('✅ Loaded ${bookings.value.length} unique bookings from Supabase');
+
+    // Rebuild capacity for all slots based on active bookings
+    await _rebuildAllCapacities();
+
+    debugPrint(
+      '✅ Loaded ${bookings.value.length} unique bookings from Supabase',
+    );
     if (expiredBookings.isNotEmpty) {
       debugPrint('⏰ Auto-expired ${expiredBookings.length} overdue bookings');
     }
+  }
+
+  /// Rebuild remaining capacity for all slots based on current active bookings.
+  /// This ensures capacity is accurate even if local storage is stale.
+  Future<void> _rebuildAllCapacities() async {
+    // Get all unique slot IDs from bookings
+    final slotIds = bookings.value.map((b) => b.slotId).toSet();
+
+    // Get all slots to know their capacities
+    final allSlots = [
+      ...SlotRepository.instance.allSlotsRaw,
+      ...CustomerSlotRepository.instance.allSlotsRaw,
+    ];
+
+    final newCapacities = <String, int>{};
+
+    for (final slotId in slotIds) {
+      // Find the slot to get its capacity
+      final slot = allSlots.cast<Slot?>().firstWhere(
+        (s) => s?.id == slotId,
+        orElse: () => null,
+      );
+
+      if (slot == null) continue;
+
+      // Count active bookings for this slot
+      final activeBookings = bookings.value
+          .where((b) => b.slotId == slotId && b.status.isActive)
+          .length;
+
+      // Calculate remaining capacity
+      final remaining = (slot.capacity - activeBookings).clamp(
+        0,
+        slot.capacity,
+      );
+      newCapacities[slotId] = remaining;
+
+      debugPrint(
+        '📊 Slot $slotId: ${slot.capacity} total, $activeBookings booked, $remaining remaining',
+      );
+    }
+
+    // Update the capacity map
+    remainingCapacityBySlotId.value = {
+      ...remainingCapacityBySlotId.value,
+      ...newCapacities,
+    };
+
+    // Persist updated capacities
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+      _capacityKey,
+      jsonEncode(remainingCapacityBySlotId.value),
+    );
   }
 
   Future<void> _persist() async {
@@ -290,9 +398,7 @@ class BookingRepository {
   /// Recalculates remaining = newCapacity - activeBookings for that slot.
   Future<void> recalculateCapacity(String slotId, int newCapacity) async {
     final activeBookings = bookings.value
-        .where((b) =>
-            b.slotId == slotId &&
-            b.status.isActive)
+        .where((b) => b.slotId == slotId && b.status.isActive)
         .length;
     final newRemaining = (newCapacity - activeBookings).clamp(0, newCapacity);
     remainingCapacityBySlotId.value = {
@@ -301,7 +407,9 @@ class BookingRepository {
     };
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(
-        _capacityKey, jsonEncode(remainingCapacityBySlotId.value));
+      _capacityKey,
+      jsonEncode(remainingCapacityBySlotId.value),
+    );
   }
 
   Future<Booking?> createBooking({
@@ -315,7 +423,7 @@ class BookingRepository {
     required int defaultCapacity,
     required double price,
     String? seatKey,
-    String? seatKeyRaw,       // human-readable seat name e.g. "A2"
+    String? seatKeyRaw, // human-readable seat name e.g. "A2"
     SeatGender? userGender,
     String? userName,
     int? userAge,
@@ -349,9 +457,9 @@ class BookingRepository {
     String? leaseTerms,
     int? waitForFullDeadlineHours,
     Map<String, dynamic>? slotLayoutSnapshot,
-    List<String>? providerImageUrls,  // vehicle photos
-    String? paymentMethod,            // "razorpay" or "stripe"
-    String? deviceId,                 // from DeviceInfoService
+    List<String>? providerImageUrls, // vehicle photos
+    String? paymentMethod, // "razorpay" or "stripe"
+    String? deviceId, // from DeviceInfoService
     // ── location snapshot from the slot ──────────────────────
     String? routeType,
     String? fromAddress,
@@ -378,7 +486,9 @@ class BookingRepository {
         (b) => b.slotId == slotId && b.status.isActive,
       );
       if (hasActiveBookings) {
-        debugPrint('❌ Cannot book full post - slot already has active bookings');
+        debugPrint(
+          '❌ Cannot book full post - slot already has active bookings',
+        );
         return null;
       }
     } else {
@@ -398,16 +508,13 @@ class BookingRepository {
 
     if (seatKey != null) {
       final exists = bookings.value.any(
-        (b) =>
-            b.slotId == slotId &&
-            b.seatKey == seatKey &&
-            b.status.isActive,
+        (b) => b.slotId == slotId && b.seatKey == seatKey && b.status.isActive,
       );
       if (exists) return null;
     }
 
     final currentRemaining = getRemainingCapacity(slotId, defaultCapacity);
-    
+
     // For full post bookings, check if full capacity is available
     if (bookingMode == BookingMode.full) {
       if (currentRemaining < defaultCapacity) {
@@ -446,8 +553,11 @@ class BookingRepository {
       userAge: userAge,
       userPhone: userPhone,
       userEmail: userEmail,
-      status: stripePaymentIntentId != null ? BookingStatus.pending : BookingStatus.accepted,
-      otp: otp, // Use passed OTP (test mode) or wait for Supabase trigger to set it
+      status: stripePaymentIntentId != null
+          ? BookingStatus.pending
+          : BookingStatus.accepted,
+      otp:
+          otp, // Use passed OTP (test mode) or wait for Supabase trigger to set it
       otpVerified: false,
       createdAt: DateTime.now(),
       stripePaymentIntentId: stripePaymentIntentId,
@@ -457,7 +567,9 @@ class BookingRepository {
       securityDeposit: securityDeposit,
       termsSnapshot: termsSnapshot,
       bookingMode: bookingMode,
-      totalCapacityBooked: bookingMode == BookingMode.full ? (totalCapacityBooked ?? defaultCapacity) : null,
+      totalCapacityBooked: bookingMode == BookingMode.full
+          ? (totalCapacityBooked ?? defaultCapacity)
+          : null,
       isFullVehicleLocked: bookingMode == BookingMode.full,
       postMode: postMode,
       // location snapshot
@@ -479,7 +591,7 @@ class BookingRepository {
 
     bookings.value = [booking, ...bookings.value];
     await _persist();
-    
+
     // Sync to Supabase (OTP will be auto-generated by trigger)
     await _syncBookingToSupabase(
       booking,
@@ -506,14 +618,14 @@ class BookingRepository {
       paymentMethod: paymentMethod,
       deviceId: deviceId,
     );
-    
+
     // Deduplicate after sync (in case of any race conditions)
     final uniqueBookings = <String, Booking>{};
     for (final b in bookings.value) {
       uniqueBookings[b.id] = b;
     }
     bookings.value = uniqueBookings.values.toList();
-    
+
     return booking;
   }
 
@@ -546,7 +658,7 @@ class BookingRepository {
     try {
       final supabase = Supabase.instance.client;
       final currentUser = AuthRepository.instance.currentUser;
-      
+
       if (currentUser == null) {
         debugPrint('⚠️ No user logged in - skipping booking sync');
         return;
@@ -559,7 +671,9 @@ class BookingRepository {
         'profile_provider_id': booking.providerId,
         'status': booking.status.name,
         'service_type': serviceType?.name ?? 'passenger',
-        'booking_strategy_snapshot': booking.bookingMode == BookingMode.full ? 'full_vehicle' : 'instant',
+        'booking_strategy_snapshot': booking.bookingMode == BookingMode.full
+            ? 'full_vehicle'
+            : 'instant',
         'post_mode': booking.postMode?.dbValue ?? 'instant',
         'persons_snapshot': slotCapacity ?? 1,
         'seat_keys': booking.seatKey,
@@ -579,7 +693,10 @@ class BookingRepository {
         },
 
         // Parcel jsonb
-        if (maxWeight != null || maxLength != null || maxWidth != null || maxHeight != null)
+        if (maxWeight != null ||
+            maxLength != null ||
+            maxWidth != null ||
+            maxHeight != null)
           'parcel_snapshot': {
             'max_weight': maxWeight,
             'max_length': maxLength,
@@ -588,8 +705,13 @@ class BookingRepository {
           },
 
         // Timestamps
-        'start_time': (slotStartTime ?? booking.createdAt).toUtc().toIso8601String(),
-        'end_time': (slotEndTime ?? booking.createdAt.add(const Duration(hours: 1))).toUtc().toIso8601String(),
+        'start_time': (slotStartTime ?? booking.createdAt)
+            .toUtc()
+            .toIso8601String(),
+        'end_time':
+            (slotEndTime ?? booking.createdAt.add(const Duration(hours: 1)))
+                .toUtc()
+                .toIso8601String(),
 
         // Address top-level columns
         if (booking.fromAddress != null) 'from_address': booking.fromAddress,
@@ -600,8 +722,10 @@ class BookingRepository {
         if (booking.fromLng != null) 'from_lng': booking.fromLng,
         if (booking.toLat != null) 'to_lat': booking.toLat,
         if (booking.toLng != null) 'to_lng': booking.toLng,
-        if (booking.fromLat == null && booking.baseLat != null) 'from_lat': booking.baseLat,
-        if (booking.fromLng == null && booking.baseLng != null) 'from_lng': booking.baseLng,
+        if (booking.fromLat == null && booking.baseLat != null)
+          'from_lat': booking.baseLat,
+        if (booking.fromLng == null && booking.baseLng != null)
+          'from_lng': booking.baseLng,
         if (booking.rangeKm != null) 'radius': booking.rangeKm,
 
         // route_snapshot jsonb
@@ -625,11 +749,15 @@ class BookingRepository {
 
         // Payment
         'payment_method': ?paymentMethod,
-        'payment_status': booking.stripePaymentIntentId != null ? 'authorized' : 'unpaid',
+        'payment_status': booking.stripePaymentIntentId != null
+            ? 'authorized'
+            : 'unpaid',
         'payment_amount': totalPrice ?? booking.price,
         'payment_currency': AppPreferences.instance.currencyCode.value,
-        if (booking.stripePaymentIntentId != null) 'payment_gateway_id': booking.stripePaymentIntentId,
-        if (booking.stripePaymentIntentId != null) 'paid_at': DateTime.now().toUtc().toIso8601String(),
+        if (booking.stripePaymentIntentId != null)
+          'payment_gateway_id': booking.stripePaymentIntentId,
+        if (booking.stripePaymentIntentId != null)
+          'paid_at': DateTime.now().toUtc().toIso8601String(),
 
         // Slot-specific columns
         'booking_option': ?pickupOption,
@@ -639,13 +767,10 @@ class BookingRepository {
         'max_width': ?maxWidth,
         'max_height': ?maxHeight,
 
-        // trip_media jsonb
+        // trip_media jsonb - starts empty, filled during trip
         'trip_media': {
           'start': {
-            'provider': {
-              'images': providerImageUrls ?? <String>[],
-              'video_url': null,
-            },
+            'provider': {'images': <String>[], 'video_url': null},
             'customer': {'images': <String>[], 'video_url': null},
           },
           'end': {
@@ -675,7 +800,10 @@ class BookingRepository {
 
         'device_id': ?deviceId,
         if (slotLayoutSnapshot != null)
-          'slot_layout': _buildBookingLayoutSnapshot(slotLayoutSnapshot, booking.seatKey),
+          'slot_layout': _buildBookingLayoutSnapshot(
+            slotLayoutSnapshot,
+            booking.seatKey,
+          ),
       });
 
       final response = await supabase
@@ -687,7 +815,7 @@ class BookingRepository {
       // Update local booking with Supabase-generated ID and OTP
       final generatedId = response['id']?.toString();
       final generatedOtp = response['otp_code'] as String?;
-      
+
       if (generatedId != null) {
         final index = bookings.value.indexWhere((b) => b.id == booking.id);
         if (index != -1) {
@@ -698,17 +826,19 @@ class BookingRepository {
             id: generatedId,
             otp: finalOtp,
           );
-          
+
           // Deduplicate before setting (prevent duplicates)
           final uniqueBookings = <String, Booking>{};
           for (final b in updatedBookings) {
             uniqueBookings[b.id] = b;
           }
           bookings.value = uniqueBookings.values.toList();
-          
+
           await _persist();
         }
-        debugPrint('✅ Booking synced to Supabase: ID=$generatedId, OTP=$generatedOtp');
+        debugPrint(
+          '✅ Booking synced to Supabase: ID=$generatedId, OTP=$generatedOtp',
+        );
       } else {
         debugPrint('⚠️ Booking synced but no ID returned from Supabase');
       }
@@ -725,11 +855,10 @@ class BookingRepository {
 
     try {
       // Call database function
-      final result = await Supabase.instance.client
-          .rpc('accept_booking', params: {
-            'booking_id': int.parse(bookingId),
-            'user_id': currentUser.id,
-          });
+      final result = await Supabase.instance.client.rpc(
+        'accept_booking',
+        params: {'booking_id': int.parse(bookingId), 'user_id': currentUser.id},
+      );
 
       final success = result['success'] as bool? ?? false;
       final message = result['message'] as String? ?? '';
@@ -738,9 +867,11 @@ class BookingRepository {
         debugPrint('✅ $message');
         // Update local state
         bookings.value = bookings.value
-            .map((b) => b.id == bookingId 
-                ? b.copyWith(status: BookingStatus.accepted)
-                : b)
+            .map(
+              (b) => b.id == bookingId
+                  ? b.copyWith(status: BookingStatus.accepted)
+                  : b,
+            )
             .toList(growable: false);
         await _persist();
         return true;
@@ -762,18 +893,17 @@ class BookingRepository {
 
     try {
       // Call database function
-      final result = await Supabase.instance.client
-          .rpc('reject_booking', params: {
-            'booking_id': int.parse(bookingId),
-            'user_id': currentUser.id,
-          });
+      final result = await Supabase.instance.client.rpc(
+        'reject_booking',
+        params: {'booking_id': int.parse(bookingId), 'user_id': currentUser.id},
+      );
 
       final success = result['success'] as bool? ?? false;
       final message = result['message'] as String? ?? '';
 
       if (success) {
         debugPrint('✅ $message');
-        
+
         // Free up capacity
         final currentRemaining =
             remainingCapacityBySlotId.value[booking.slotId] ?? 0;
@@ -784,9 +914,11 @@ class BookingRepository {
 
         // Update local state
         bookings.value = bookings.value
-            .map((b) => b.id == bookingId 
-                ? b.copyWith(status: BookingStatus.rejected)
-                : b)
+            .map(
+              (b) => b.id == bookingId
+                  ? b.copyWith(status: BookingStatus.rejected)
+                  : b,
+            )
             .toList(growable: false);
         await _persist();
         return true;
@@ -806,7 +938,10 @@ class BookingRepository {
     return false;
   }
 
-  Future<bool> verifyOtp({required String bookingId, required String otp}) async {
+  Future<bool> verifyOtp({
+    required String bookingId,
+    required String otp,
+  }) async {
     final booking = bookings.value.firstWhere(
       (b) => b.id == bookingId,
       orElse: () => throw Exception('Booking $bookingId not found locally'),
@@ -827,18 +962,23 @@ class BookingRepository {
       if (result.isSuccess) {
         // Update local state
         bookings.value = bookings.value
-            .map((b) => b.id == bookingId
-                ? b.copyWith(status: BookingStatus.completed, otpVerified: true)
-                : b)
+            .map(
+              (b) => b.id == bookingId
+                  ? b.copyWith(
+                      status: BookingStatus.completed,
+                      otpVerified: true,
+                    )
+                  : b,
+            )
             .toList(growable: false);
         await _persist();
-        
+
         // Refresh from database to ensure consistency
         // (run in background, don't await to avoid blocking UI)
         refreshFromSupabase().catchError((e) {
           debugPrint('⚠️ Background refresh failed: $e');
         });
-        
+
         return true;
       } else {
         debugPrint('❌ OTP verification failed: ${result.message}');
@@ -867,17 +1007,22 @@ class BookingRepository {
         }
 
         bookings.value = bookings.value
-            .map((b) => b.id == bookingId
-                ? b.copyWith(status: BookingStatus.completed, otpVerified: true)
-                : b)
+            .map(
+              (b) => b.id == bookingId
+                  ? b.copyWith(
+                      status: BookingStatus.completed,
+                      otpVerified: true,
+                    )
+                  : b,
+            )
             .toList(growable: false);
         await _persist();
-        
+
         // Refresh from database to ensure consistency
         refreshFromSupabase().catchError((e) {
           debugPrint('⚠️ Background refresh failed: $e');
         });
-        
+
         return true;
       }
 
@@ -922,30 +1067,32 @@ class BookingRepository {
 
     try {
       // Call database function
-      final result = await Supabase.instance.client
-          .rpc('refund_booking', params: {
-            'booking_id': int.parse(bookingId),
-            'user_id': currentUser.id,
-          });
+      final result = await Supabase.instance.client.rpc(
+        'refund_booking',
+        params: {'booking_id': int.parse(bookingId), 'user_id': currentUser.id},
+      );
 
       final success = result['success'] as bool? ?? false;
       final message = result['message'] as String? ?? '';
 
       if (success) {
         debugPrint('✅ $message');
-        
+
         // Free up capacity
-        final currentRemaining = remainingCapacityBySlotId.value[booking.slotId] ?? 0;
+        final currentRemaining =
+            remainingCapacityBySlotId.value[booking.slotId] ?? 0;
         remainingCapacityBySlotId.value = {
           ...remainingCapacityBySlotId.value,
           booking.slotId: currentRemaining + 1,
         };
-        
+
         // Update local state
         bookings.value = bookings.value
-            .map((b) => b.id == bookingId 
-                ? b.copyWith(status: BookingStatus.refunded)
-                : b)
+            .map(
+              (b) => b.id == bookingId
+                  ? b.copyWith(status: BookingStatus.refunded)
+                  : b,
+            )
             .toList(growable: false);
         await _persist();
         return true;
@@ -967,32 +1114,68 @@ class BookingRepository {
     try {
       await Supabase.instance.client
           .from('bookings')
-          .update({
-            'trip_media': media.toJson(),
-          })
+          .update({'trip_media': media.toJson()})
           .eq('id', int.parse(bookingId));
       debugPrint('✅ trip_media updated for booking $bookingId');
-      
+
       // Log GPS verification status for debugging
       final booking = bookings.value.firstWhere(
         (b) => b.id == bookingId,
         orElse: () => throw Exception('Booking not found: $bookingId'),
       );
       final updatedBooking = booking.copyWith(tripMedia: media);
-      final customerVerified = GpsVerificationHelper.verifyCustomerPickupLocation(updatedBooking);
-      final providerVerified = GpsVerificationHelper.verifyProviderPickupLocation(updatedBooking);
+      final customerVerified =
+          GpsVerificationHelper.verifyCustomerPickupLocation(updatedBooking);
+      final providerVerified =
+          GpsVerificationHelper.verifyProviderPickupLocation(updatedBooking);
       debugPrint('🔍 GPS Verification for booking $bookingId:');
-      debugPrint('   Customer: ${customerVerified ? "✅ verified" : "❌ not verified"}');
-      debugPrint('   Provider: ${providerVerified ? "✅ verified" : "❌ not verified"}');
+      debugPrint(
+        '   Customer: ${customerVerified ? "✅ verified" : "❌ not verified"}',
+      );
+      debugPrint(
+        '   Provider: ${providerVerified ? "✅ verified" : "❌ not verified"}',
+      );
     } catch (e) {
       debugPrint('❌ Failed to update trip_media: $e');
     }
 
     // Update local state AFTER Supabase completes to avoid rebuild loop
     bookings.value = bookings.value
-        .map((b) => b.id == bookingId 
-            ? b.copyWith(tripMedia: media)
-            : b)
+        .map((b) => b.id == bookingId ? b.copyWith(tripMedia: media) : b)
+        .toList(growable: false);
+    await _persist();
+  }
+
+  /// Update location confirmations (automatic GPS tracking, separate from trip media)
+  Future<void> updateLocationConfirmations(
+    String bookingId,
+    LocationConfirmations confirmations,
+  ) async {
+    // Patch Supabase with location_confirmations JSON
+    try {
+      await Supabase.instance.client
+          .from('bookings')
+          .update({'location_confirmations': confirmations.toJson()})
+          .eq('id', int.parse(bookingId));
+      debugPrint('✅ location_confirmations updated for booking $bookingId');
+      debugPrint(
+        '   Pickup - Provider: ${confirmations.pickup.provider.isConfirmed ? "✅" : "❌"}, Customer: ${confirmations.pickup.customer.isConfirmed ? "✅" : "❌"}',
+      );
+      debugPrint(
+        '   Dropoff - Provider: ${confirmations.dropoff.provider.isConfirmed ? "✅" : "❌"}, Customer: ${confirmations.dropoff.customer.isConfirmed ? "✅" : "❌"}',
+      );
+    } catch (e) {
+      debugPrint('❌ Failed to update location_confirmations: $e');
+      rethrow;
+    }
+
+    // Update local state AFTER Supabase completes
+    bookings.value = bookings.value
+        .map(
+          (b) => b.id == bookingId
+              ? b.copyWith(locationConfirmations: confirmations)
+              : b,
+        )
         .toList(growable: false);
     await _persist();
   }
@@ -1025,12 +1208,6 @@ class BookingRepository {
       return map;
     }).toList();
 
-    return {
-      'type': type,
-      'layout': modifiedLayout,
-    };
+    return {'type': type, 'layout': modifiedLayout};
   }
 }
-
-
-

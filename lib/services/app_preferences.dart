@@ -13,20 +13,30 @@ class AppPreferences {
   static const _preferredCountryKey = 'preferredCountry';
   static const _avatarBase64Key = 'avatarBase64';
   static const _subscriptionPlanKey = 'subscriptionPlan';
+  static const _subscriptionExpiryKey = 'subscriptionExpiry';
   static const _preferredLanguageKey = 'preferredLanguage';
 
-  final ValueNotifier<String> currencyCode = ValueNotifier<String>('INR');
-  final ValueNotifier<String> preferredCountry = ValueNotifier<String>('India');
-  final ValueNotifier<String> preferredLanguage = ValueNotifier<String>('English');
+  // Multi-currency support enabled
+  final ValueNotifier<String> currencyCode = ValueNotifier<String>('USD');
+  final ValueNotifier<String> preferredCountry = ValueNotifier<String>(
+    'United States',
+  );
+  final ValueNotifier<String> preferredLanguage = ValueNotifier<String>(
+    'English',
+  );
   final ValueNotifier<String?> avatarBase64 = ValueNotifier<String?>(null);
   final ValueNotifier<SubscriptionPlan> subscriptionPlan =
       ValueNotifier<SubscriptionPlan>(SubscriptionPlan.basic);
+  final ValueNotifier<DateTime?> subscriptionExpiry = ValueNotifier<DateTime?>(
+    null,
+  );
 
   Future<void> init() async {
     final prefs = await SharedPreferences.getInstance();
-    currencyCode.value = prefs.getString(_currencyCodeKey) ?? 'INR';
+    // Multi-currency support enabled - user can select their preferred currency
+    currencyCode.value = prefs.getString(_currencyCodeKey) ?? 'USD';
     preferredCountry.value =
-        prefs.getString(_preferredCountryKey) ?? preferredCountry.value;
+        prefs.getString(_preferredCountryKey) ?? 'United States';
     preferredLanguage.value =
         prefs.getString(_preferredLanguageKey) ?? 'English';
     avatarBase64.value = prefs.getString(_avatarBase64Key);
@@ -36,8 +46,30 @@ class AppPreferences {
       (p) => p.name == planRaw,
       orElse: () => SubscriptionPlan.basic,
     );
+
+    final expiryRaw = prefs.getString(_subscriptionExpiryKey);
+    if (expiryRaw != null) {
+      subscriptionExpiry.value = DateTime.tryParse(expiryRaw);
+    }
+
+    // Check if subscription has expired and auto-downgrade to basic
+    await _checkAndHandleExpiredSubscription();
   }
 
+  /// Check if current subscription has expired and downgrade to basic if needed
+  Future<void> _checkAndHandleExpiredSubscription() async {
+    if (subscriptionPlan.value == SubscriptionPlan.basic) return;
+
+    final expiry = subscriptionExpiry.value;
+    if (expiry == null) return;
+
+    if (DateTime.now().isAfter(expiry)) {
+      // Subscription expired - downgrade to basic
+      await setSubscriptionPlan(SubscriptionPlan.basic);
+    }
+  }
+
+  // Multi-currency support: User can select any currency
   Future<void> setCurrencyCode(String code) async {
     currencyCode.value = code;
     final prefs = await SharedPreferences.getInstance();
@@ -50,12 +82,11 @@ class AppPreferences {
     await prefs.setString(_preferredCountryKey, country);
 
     // Auto-set currency based on country
-    final autoCurrency = _countryCurrencyMap[country] ?? 'USD';
-    await setCurrencyCode(autoCurrency);
-
+    final currency = _countryCurrencyMap[country] ?? 'INR';
+    await setCurrencyCode(currency);
   }
 
-  // Country → Currency mapping
+  // Country → Currency mapping for international support
   static const Map<String, String> _countryCurrencyMap = {
     'India': 'INR',
     'United States': 'USD',
@@ -112,6 +143,16 @@ class AppPreferences {
     subscriptionPlan.value = plan;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_subscriptionPlanKey, plan.name);
+
+    // Set expiry date for paid plans (30 days from now)
+    if (plan != SubscriptionPlan.basic) {
+      final expiry = DateTime.now().add(const Duration(days: 30));
+      subscriptionExpiry.value = expiry;
+      await prefs.setString(_subscriptionExpiryKey, expiry.toIso8601String());
+    } else {
+      subscriptionExpiry.value = null;
+      await prefs.remove(_subscriptionExpiryKey);
+    }
   }
 
   String get currencySymbol {
@@ -123,6 +164,3 @@ class AppPreferences {
     return fmt.format(amount);
   }
 }
-
-
-

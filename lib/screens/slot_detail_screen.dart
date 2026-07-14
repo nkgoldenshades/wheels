@@ -12,7 +12,6 @@ import '../models/service_type.dart';
 import '../services/auth_repository.dart';
 import '../services/booking_repository.dart';
 import '../services/seat_layout_repository.dart';
-import '../services/app_preferences.dart';
 import '../services/vehicle_repository.dart';
 import '../services/customer_vehicle_repository.dart';
 import '../services/slot_repository.dart' as slot_repo;
@@ -60,12 +59,15 @@ class SlotDetailScreen extends StatelessWidget {
     );
   }
 
+  // Helper removed - no longer needed without image tracking
+
   Widget _buildContent(BuildContext context) {
     return ValueListenableBuilder<List<Vehicle>>(
       valueListenable: VehicleRepository.instance.vehiclesListenable,
       builder: (context, _, child) {
         // Resolve latest slot from repositories
-        final resolvedSlot = slot_repo.SlotRepository.instance.allSlotsRaw
+        final resolvedSlot =
+            slot_repo.SlotRepository.instance.allSlotsRaw
                 .cast<Slot?>()
                 .firstWhere((s) => s?.id == slot.id, orElse: () => null) ??
             CustomerSlotRepository.instance.allSlotsRaw
@@ -74,8 +76,11 @@ class SlotDetailScreen extends StatelessWidget {
             slot;
 
         // Try to find vehicle in both repositories
-        final resolvedVehicle = VehicleRepository.instance.getById(resolvedSlot.vehicleId) ??
-            CustomerVehicleRepository.instance.getById(resolvedSlot.vehicleId) ??
+        final resolvedVehicle =
+            VehicleRepository.instance.getById(resolvedSlot.vehicleId) ??
+            CustomerVehicleRepository.instance.getById(
+              resolvedSlot.vehicleId,
+            ) ??
             VehicleRepository.instance.getById(vehicle.id) ??
             CustomerVehicleRepository.instance.getById(vehicle.id) ??
             vehicle;
@@ -85,7 +90,9 @@ class SlotDetailScreen extends StatelessWidget {
         );
 
         final currentUser = AuthRepository.instance.currentUser;
-        final isOwner = currentUser != null && currentUser.id == resolvedSlot.profileId; // Use post owner
+        final isOwner =
+            currentUser != null &&
+            currentUser.id == resolvedSlot.profileId; // Use post owner
 
         return Scaffold(
           appBar: AppBar(
@@ -97,12 +104,15 @@ class SlotDetailScreen extends StatelessWidget {
                   tooltip: 'Edit post',
                   icon: const Icon(Icons.edit),
                   onPressed: () async {
-                    final updated = await _showEditSlotSheet(context, resolvedSlot);
+                    final updated = await _showEditSlotSheet(
+                      context,
+                      resolvedSlot,
+                    );
                     if (updated == null || !context.mounted) return;
 
                     // Detect changes and create edit history entry
                     final changes = <String, dynamic>{};
-                    
+
                     // Track price change
                     if (resolvedSlot.price != updated.price) {
                       changes['price'] = {
@@ -110,7 +120,7 @@ class SlotDetailScreen extends StatelessWidget {
                         'new': updated.price.toInt(),
                       };
                     }
-                    
+
                     // Track capacity change
                     if (resolvedSlot.capacity != updated.capacity) {
                       changes['capacity'] = {
@@ -118,7 +128,7 @@ class SlotDetailScreen extends StatelessWidget {
                         'new': updated.capacity,
                       };
                     }
-                    
+
                     // Track time changes
                     if (resolvedSlot.startTime != updated.startTime) {
                       changes['startTime'] = {
@@ -126,14 +136,14 @@ class SlotDetailScreen extends StatelessWidget {
                         'new': updated.startTime.toIso8601String(),
                       };
                     }
-                    
+
                     if (resolvedSlot.endTime != updated.endTime) {
                       changes['endTime'] = {
                         'old': resolvedSlot.endTime.toIso8601String(),
                         'new': updated.endTime.toIso8601String(),
                       };
                     }
-                    
+
                     // Track location changes
                     if (resolvedSlot.fromLocation != updated.fromLocation) {
                       changes['fromLocation'] = {
@@ -141,28 +151,28 @@ class SlotDetailScreen extends StatelessWidget {
                         'new': updated.fromLocation ?? '',
                       };
                     }
-                    
+
                     if (resolvedSlot.toLocation != updated.toLocation) {
                       changes['toLocation'] = {
                         'old': resolvedSlot.toLocation ?? '',
                         'new': updated.toLocation ?? '',
                       };
                     }
-                    
+
                     if (resolvedSlot.baseLocation != updated.baseLocation) {
                       changes['baseLocation'] = {
                         'old': resolvedSlot.baseLocation ?? '',
                         'new': updated.baseLocation ?? '',
                       };
                     }
-                    
+
                     if (resolvedSlot.radius != updated.radius) {
                       changes['radius'] = {
                         'old': resolvedSlot.radius ?? 0,
                         'new': updated.radius ?? 0,
                       };
                     }
-                    
+
                     // Track notes/terms change
                     if (resolvedSlot.notes != updated.notes) {
                       changes['notes'] = {
@@ -170,25 +180,41 @@ class SlotDetailScreen extends StatelessWidget {
                         'new': updated.notes ?? '',
                       };
                     }
-                    
+
+                    // Images tracking removed - posts use vehicle images
+
                     // Add edit history if there are changes
                     final updatedWithHistory = changes.isEmpty
                         ? updated
                         : updated.copyWith(
-                            editHistory: resolvedSlot.editHistory.addEdit(changes),
+                            editHistory: resolvedSlot.editHistory.addEdit(
+                              changes,
+                            ),
                           );
 
-                    final existsInProviderRepo = slot_repo.SlotRepository.instance.allSlotsRaw
+                    final existsInProviderRepo = slot_repo
+                        .SlotRepository
+                        .instance
+                        .allSlotsRaw
                         .any((s) => s.id == updatedWithHistory.id);
                     final existsInUserRepo =
-                        CustomerSlotRepository.instance.getById(updatedWithHistory.id) != null;
+                        CustomerSlotRepository.instance.getById(
+                          updatedWithHistory.id,
+                        ) !=
+                        null;
 
                     if (existsInProviderRepo) {
-                      await slot_repo.SlotRepository.instance.updateSlot(updatedWithHistory);
+                      await slot_repo.SlotRepository.instance.updateSlot(
+                        updatedWithHistory,
+                      );
                     } else if (existsInUserRepo) {
-                      await CustomerSlotRepository.instance.updateSlot(updatedWithHistory);
+                      await CustomerSlotRepository.instance.updateSlot(
+                        updatedWithHistory,
+                      );
                     } else {
-                      await slot_repo.SlotRepository.instance.updateSlot(updatedWithHistory);
+                      await slot_repo.SlotRepository.instance.updateSlot(
+                        updatedWithHistory,
+                      );
                     }
 
                     // Recalculate remaining capacity based on new capacity value
@@ -200,9 +226,11 @@ class SlotDetailScreen extends StatelessWidget {
                     if (!context.mounted) return;
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
-                        content: Text(changes.isEmpty 
-                            ? 'Post updated' 
-                            : 'Post updated (Edit #${updatedWithHistory.editHistory.totalEdits})'),
+                        content: Text(
+                          changes.isEmpty
+                              ? 'Post updated'
+                              : 'Post updated (Edit #${updatedWithHistory.editHistory.totalEdits})',
+                        ),
                       ),
                     );
                   },
@@ -223,7 +251,8 @@ class SlotDetailScreen extends StatelessWidget {
                           providerAvatar: providerAvatar,
                           providerRating: providerRating,
                           vehicle: resolvedVehicle,
-                          serviceTypeLabel: resolvedSlot.serviceType.displayName,
+                          serviceTypeLabel:
+                              resolvedSlot.serviceType.displayName,
                           serviceTypeIcon: _serviceTypeIcon(resolvedSlot),
                           serviceTypeColor: _serviceTypeColor(resolvedSlot),
                         ),
@@ -242,15 +271,17 @@ class SlotDetailScreen extends StatelessWidget {
                         _InfoRow(
                           icon: Icons.timelapse,
                           title: 'Duration',
-                          value: _formatDuration(resolvedSlot.startTime, resolvedSlot.endTime),
+                          value: _formatDuration(
+                            resolvedSlot.startTime,
+                            resolvedSlot.endTime,
+                          ),
                         ),
                         const SizedBox(height: 12),
                         _InfoRow(
                           icon: Icons.payments,
                           title: 'Price',
-                          value: AppPreferences.instance.formatMoney(
-                            resolvedSlot.price.toInt(),
-                          ),
+                          value:
+                              '${resolvedSlot.currencySymbol}${resolvedSlot.price.toStringAsFixed(0)}',
                         ),
                         const SizedBox(height: 12),
                         _InfoRow(
@@ -261,7 +292,8 @@ class SlotDetailScreen extends StatelessWidget {
                         const SizedBox(height: 12),
                         ValueListenableBuilder<Map<String, int>>(
                           valueListenable: BookingRepository
-                              .instance.remainingCapacityBySlotId,
+                              .instance
+                              .remainingCapacityBySlotId,
                           builder: (context, _, c) {
                             return _InfoRow(
                               icon: _capacityIcon(resolvedSlot),
@@ -273,13 +305,16 @@ class SlotDetailScreen extends StatelessWidget {
                         // Parcel dimensions — only shown for parcel service type
                         if (resolvedSlot.serviceType == ServiceType.parcel &&
                             (resolvedSlot.maxWeight != null ||
-                             resolvedSlot.maxLength != null ||
-                             resolvedSlot.maxWidth != null ||
-                             resolvedSlot.maxHeight != null)) ...[
+                                resolvedSlot.maxLength != null ||
+                                resolvedSlot.maxWidth != null ||
+                                resolvedSlot.maxHeight != null)) ...[
                           const SizedBox(height: 12),
                           const Text(
                             'Parcel Dimensions',
-                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
                           ),
                           const SizedBox(height: 8),
                           Container(
@@ -322,40 +357,112 @@ class SlotDetailScreen extends StatelessWidget {
                             ),
                           ),
                         ],
+                        // Lease details — only shown for lease service type
+                        if (resolvedSlot.serviceType == ServiceType.lease) ...[
+                          const SizedBox(height: 12),
+                          const Text(
+                            'Lease Details',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Colors.blue.shade50,
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: Colors.blue.shade200),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                if (resolvedSlot.securityDeposit != null &&
+                                    resolvedSlot.securityDeposit! > 0)
+                                  _InfoRow(
+                                    icon: Icons.security,
+                                    title: 'Security Deposit',
+                                    value:
+                                        '₹${resolvedSlot.securityDeposit!.toStringAsFixed(0)}',
+                                  ),
+                                if (resolvedSlot.fuelPolicy != null) ...[
+                                  const SizedBox(height: 4),
+                                  _InfoRow(
+                                    icon: Icons.local_gas_station,
+                                    title: 'Fuel Policy',
+                                    value: resolvedSlot.fuelPolicy!,
+                                  ),
+                                ],
+                                if (resolvedSlot.insuranceIncluded == true) ...[
+                                  const SizedBox(height: 4),
+                                  _InfoRow(
+                                    icon: Icons.verified_user,
+                                    title: 'Insurance',
+                                    value: 'Included',
+                                  ),
+                                ],
+                                if (resolvedSlot.leaseTerms != null &&
+                                    resolvedSlot.leaseTerms!.isNotEmpty) ...[
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    'Terms: ${resolvedSlot.leaseTerms}',
+                                    style: const TextStyle(
+                                      fontSize: 13,
+                                      color: Colors.black87,
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
+                        ],
                         const SizedBox(height: 16),
                         if (resolvedSlot.seatLayoutOwnerId != null ||
                             resolvedSlot.seatLayoutStructure != null) ...[
-                          Builder(builder: (context) {
-                            // Try local repository first
-                            SeatLayout? layout = resolvedSlot.seatLayoutOwnerId != null
-                                ? SeatLayoutRepository.instance.getLayout(resolvedSlot.seatLayoutOwnerId!)
-                                : null;
+                          Builder(
+                            builder: (context) {
+                              // Try local repository first
+                              SeatLayout? layout =
+                                  resolvedSlot.seatLayoutOwnerId != null
+                                  ? SeatLayoutRepository.instance.getLayout(
+                                      resolvedSlot.seatLayoutOwnerId!,
+                                    )
+                                  : null;
 
-                            // Fallback: convert from Supabase structure
-                            if (layout == null && resolvedSlot.seatLayoutStructure != null) {
-                              layout = _simpleSeatLayoutToSeatLayout(
-                                resolvedSlot.seatLayoutStructure!,
-                                resolvedSlot.id,
+                              // Fallback: convert from Supabase structure
+                              if (layout == null &&
+                                  resolvedSlot.seatLayoutStructure != null) {
+                                layout = _simpleSeatLayoutToSeatLayout(
+                                  resolvedSlot.seatLayoutStructure!,
+                                  resolvedSlot.id,
+                                );
+                              }
+
+                              if (layout == null) {
+                                return const SizedBox.shrink();
+                              }
+
+                              return Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text(
+                                    'Seat Layout',
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  _SeatLayoutPreview(layout: layout),
+                                  const SizedBox(height: 16),
+                                  const _Legend(),
+                                  const SizedBox(height: 16),
+                                ],
                               );
-                            }
-
-                            if (layout == null) return const SizedBox.shrink();
-
-                            return Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Text(
-                                  'Seat Layout',
-                                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                                ),
-                                const SizedBox(height: 8),
-                                _SeatLayoutPreview(layout: layout),
-                                const SizedBox(height: 16),
-                                const _Legend(),
-                                const SizedBox(height: 16),
-                              ],
-                            );
-                          }),
+                            },
+                          ),
                         ],
                         if (resolvedSlot.notes != null &&
                             resolvedSlot.notes!.trim().isNotEmpty) ...[
@@ -408,15 +515,15 @@ class SlotDetailScreen extends StatelessWidget {
                                       fit: BoxFit.cover,
                                       errorBuilder:
                                           (context, error, stackTrace) {
-                                        return Container(
-                                          color: Colors.grey[200],
-                                          child: const Center(
-                                            child: Icon(
-                                              Icons.image_not_supported,
-                                            ),
-                                          ),
-                                        );
-                                      },
+                                            return Container(
+                                              color: Colors.grey[200],
+                                              child: const Center(
+                                                child: Icon(
+                                                  Icons.image_not_supported,
+                                                ),
+                                              ),
+                                            );
+                                          },
                                     ),
                                   ),
                                 );
@@ -454,7 +561,10 @@ class SlotDetailScreen extends StatelessWidget {
     );
   }
 
-  static Future<Slot?> _showEditSlotSheet(BuildContext context, Slot slot) async {
+  static Future<Slot?> _showEditSlotSheet(
+    BuildContext context,
+    Slot slot,
+  ) async {
     String displayOnly(String raw) {
       final trimmed = raw.trim();
       if (!trimmed.contains('|')) return trimmed;
@@ -473,13 +583,35 @@ class SlotDetailScreen extends StatelessWidget {
     final radiusController = TextEditingController(
       text: slot.radius == null ? '' : slot.radius!.toStringAsFixed(0),
     );
-    final priceController = TextEditingController(text: slot.price.toStringAsFixed(0));
-    final capacityController = TextEditingController(text: slot.capacity.toString());
+    final priceController = TextEditingController(
+      text: slot.price.toStringAsFixed(0),
+    );
+    final capacityController = TextEditingController(
+      text: slot.capacity.toString(),
+    );
     final notesController = TextEditingController(text: slot.notes ?? '');
+
+    // Parcel dimension controllers
+    final weightController = TextEditingController(
+      text: slot.maxWeight?.toString() ?? '',
+    );
+    final lengthController = TextEditingController(
+      text: slot.maxLength?.toString() ?? '',
+    );
+    final widthController = TextEditingController(
+      text: slot.maxWidth?.toString() ?? '',
+    );
+    final heightController = TextEditingController(
+      text: slot.maxHeight?.toString() ?? '',
+    );
 
     LocationSuggestion? fromSuggestion;
     LocationSuggestion? toSuggestion;
     LocationSuggestion? baseSuggestion;
+
+    // Image management state - REMOVED (posts use vehicle images)
+    // List<String> updatedImages = List<String>.from(slot.images);
+    // bool isUploadingImage = false;
 
     String formatLocationValue({
       required String typedText,
@@ -502,7 +634,8 @@ class SlotDetailScreen extends StatelessWidget {
         }
         return '$label|$coords';
       }
-      if (originalValue != null && typedText.trim() == displayOnly(originalValue)) {
+      if (originalValue != null &&
+          typedText.trim() == displayOnly(originalValue)) {
         return originalValue;
       }
       return typedText.trim();
@@ -511,7 +644,10 @@ class SlotDetailScreen extends StatelessWidget {
     DateTime startTime = slot.startTime;
     DateTime endTime = slot.endTime;
 
-    Future<void> pickTime({required bool isStart, required void Function(void Function()) setSheetState}) async {
+    Future<void> pickTime({
+      required bool isStart,
+      required void Function(void Function()) setSheetState,
+    }) async {
       final current = isStart ? startTime : endTime;
       final now = DateTime.now();
 
@@ -558,18 +694,48 @@ class SlotDetailScreen extends StatelessWidget {
       setSheetState(() {
         if (isStart) {
           startTime = newDt;
+          // Auto-adjust end time if it's before the new start time
           if (endTime.isBefore(startTime)) {
             endTime = startTime.add(const Duration(hours: 2));
           }
         } else {
+          // Validate: end time must be after start time
+          if (newDt.isBefore(startTime) || newDt.isAtSameMomentAs(startTime)) {
+            if (context.mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('End time must be after start time'),
+                  backgroundColor: Colors.red,
+                ),
+              );
+            }
+            return;
+          }
           endTime = newDt;
         }
       });
     }
 
     String fmt(DateTime dt) {
-      return '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+      final now = DateTime.now();
+      final today = DateTime(now.year, now.month, now.day);
+      final dtDate = DateTime(dt.year, dt.month, dt.day);
+
+      final time =
+          '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+
+      // Show relative date if today/tomorrow, otherwise show full date
+      if (dtDate == today) {
+        return 'Today $time';
+      } else if (dtDate == today.add(const Duration(days: 1))) {
+        return 'Tomorrow $time';
+      } else {
+        return '${dt.day}/${dt.month}/${dt.year} $time';
+      }
     }
+
+    // Image upload/management removed - posts use vehicle images
+    // To change images, edit the vehicle instead
 
     final result = await showModalBottomSheet<Slot>(
       context: context,
@@ -682,7 +848,64 @@ class SlotDetailScreen extends StatelessWidget {
                       border: OutlineInputBorder(),
                     ),
                   ),
+                  // Parcel dimensions (only for parcel service type)
+                  if (slot.serviceType == ServiceType.parcel) ...[
+                    const SizedBox(height: 16),
+                    const Text(
+                      'Parcel Dimensions',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: weightController,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                        labelText: 'Max Weight (kg)',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: lengthController,
+                            keyboardType: TextInputType.number,
+                            decoration: const InputDecoration(
+                              labelText: 'Length (cm)',
+                              border: OutlineInputBorder(),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: TextField(
+                            controller: widthController,
+                            keyboardType: TextInputType.number,
+                            decoration: const InputDecoration(
+                              labelText: 'Width (cm)',
+                              border: OutlineInputBorder(),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: heightController,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                        labelText: 'Height (cm)',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 16),
+                  // Images removed - posts use vehicle images
+                  // To change images, edit the vehicle instead
                   Row(
                     children: [
                       Expanded(
@@ -700,7 +923,9 @@ class SlotDetailScreen extends StatelessWidget {
                                   toController.text.trim().isEmpty) {
                                 ScaffoldMessenger.of(context).showSnackBar(
                                   const SnackBar(
-                                    content: Text('Please enter both from and to locations'),
+                                    content: Text(
+                                      'Please enter both from and to locations',
+                                    ),
                                   ),
                                 );
                                 return;
@@ -708,20 +933,28 @@ class SlotDetailScreen extends StatelessWidget {
                             } else {
                               if (baseController.text.trim().isEmpty) {
                                 ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(content: Text('Please enter base location')),
+                                  const SnackBar(
+                                    content: Text('Please enter base location'),
+                                  ),
                                 );
                                 return;
                               }
-                              final r = double.tryParse(radiusController.text.trim());
+                              final r = double.tryParse(
+                                radiusController.text.trim(),
+                              );
                               if (r != null && r < 0) {
                                 ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(content: Text('Invalid radius')),
+                                  const SnackBar(
+                                    content: Text('Invalid radius'),
+                                  ),
                                 );
                                 return;
                               }
                             }
 
-                            final price = double.tryParse(priceController.text.trim());
+                            final price = double.tryParse(
+                              priceController.text.trim(),
+                            );
                             if (price == null || price <= 0) {
                               ScaffoldMessenger.of(context).showSnackBar(
                                 const SnackBar(content: Text('Invalid price')),
@@ -729,15 +962,70 @@ class SlotDetailScreen extends StatelessWidget {
                               return;
                             }
 
-                            final cap = int.tryParse(capacityController.text.trim());
+                            final cap = int.tryParse(
+                              capacityController.text.trim(),
+                            );
                             if (cap == null || cap <= 0) {
                               ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('Invalid capacity')),
+                                const SnackBar(
+                                  content: Text('Invalid capacity'),
+                                ),
                               );
                               return;
                             }
 
-                            final newRadius = slot.slotType == SlotType.fromRange
+                            // Validate parcel dimensions for parcel service type
+                            double? maxWeight, maxLength, maxWidth, maxHeight;
+                            if (slot.serviceType == ServiceType.parcel) {
+                              maxWeight = double.tryParse(
+                                weightController.text.trim(),
+                              );
+                              maxLength = double.tryParse(
+                                lengthController.text.trim(),
+                              );
+                              maxWidth = double.tryParse(
+                                widthController.text.trim(),
+                              );
+                              maxHeight = double.tryParse(
+                                heightController.text.trim(),
+                              );
+
+                              if (maxWeight == null || maxWeight <= 0) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Invalid weight'),
+                                  ),
+                                );
+                                return;
+                              }
+                              if (maxLength == null || maxLength <= 0) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Invalid length'),
+                                  ),
+                                );
+                                return;
+                              }
+                              if (maxWidth == null || maxWidth <= 0) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Invalid width'),
+                                  ),
+                                );
+                                return;
+                              }
+                              if (maxHeight == null || maxHeight <= 0) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Invalid height'),
+                                  ),
+                                );
+                                return;
+                              }
+                            }
+
+                            final newRadius =
+                                slot.slotType == SlotType.fromRange
                                 ? double.tryParse(radiusController.text.trim())
                                 : null;
 
@@ -749,7 +1037,8 @@ class SlotDetailScreen extends StatelessWidget {
                                       originalValue: slot.fromLocation,
                                     )
                                   : null,
-                              setFromLocationNull: slot.slotType != SlotType.fromTo,
+                              setFromLocationNull:
+                                  slot.slotType != SlotType.fromTo,
                               toLocation: slot.slotType == SlotType.fromTo
                                   ? formatLocationValue(
                                       typedText: toController.text,
@@ -757,7 +1046,8 @@ class SlotDetailScreen extends StatelessWidget {
                                       originalValue: slot.toLocation,
                                     )
                                   : null,
-                              setToLocationNull: slot.slotType != SlotType.fromTo,
+                              setToLocationNull:
+                                  slot.slotType != SlotType.fromTo,
                               baseLocation: slot.slotType == SlotType.fromRange
                                   ? formatLocationValue(
                                       typedText: baseController.text,
@@ -765,9 +1055,11 @@ class SlotDetailScreen extends StatelessWidget {
                                       originalValue: slot.baseLocation,
                                     )
                                   : null,
-                              setBaseLocationNull: slot.slotType != SlotType.fromRange,
+                              setBaseLocationNull:
+                                  slot.slotType != SlotType.fromRange,
                               radius: newRadius,
-                              setRadiusNull: slot.slotType != SlotType.fromRange,
+                              setRadiusNull:
+                                  slot.slotType != SlotType.fromRange,
                               startTime: startTime,
                               endTime: endTime,
                               price: price,
@@ -776,6 +1068,20 @@ class SlotDetailScreen extends StatelessWidget {
                                   ? null
                                   : notesController.text.trim(),
                               setNotesNull: notesController.text.trim().isEmpty,
+                              // Parcel dimensions (only for parcel service type)
+                              maxWeight: slot.serviceType == ServiceType.parcel
+                                  ? maxWeight
+                                  : null,
+                              maxLength: slot.serviceType == ServiceType.parcel
+                                  ? maxLength
+                                  : null,
+                              maxWidth: slot.serviceType == ServiceType.parcel
+                                  ? maxWidth
+                                  : null,
+                              maxHeight: slot.serviceType == ServiceType.parcel
+                                  ? maxHeight
+                                  : null,
+                              // images removed - posts use vehicle images
                             );
 
                             Navigator.pop(context, updated);
@@ -800,6 +1106,10 @@ class SlotDetailScreen extends StatelessWidget {
     priceController.dispose();
     capacityController.dispose();
     notesController.dispose();
+    weightController.dispose();
+    lengthController.dispose();
+    widthController.dispose();
+    heightController.dispose();
     return result;
   }
 
@@ -810,13 +1120,13 @@ class SlotDetailScreen extends StatelessWidget {
 
   static String _formatDuration(DateTime start, DateTime end) {
     final duration = end.difference(start);
-    
+
     final days = duration.inDays;
     final hours = duration.inHours % 24;
     final minutes = duration.inMinutes % 60;
-    
+
     final parts = <String>[];
-    
+
     if (days > 0) {
       parts.add('$days ${days == 1 ? 'day' : 'days'}');
     }
@@ -826,7 +1136,7 @@ class SlotDetailScreen extends StatelessWidget {
     if (minutes > 0 || parts.isEmpty) {
       parts.add('$minutes ${minutes == 1 ? 'minute' : 'minutes'}');
     }
-    
+
     return parts.join(', ');
   }
 
@@ -856,7 +1166,10 @@ class SlotDetailScreen extends StatelessWidget {
     }
   }
 
-  static SeatLayout _simpleSeatLayoutToSeatLayout(SimpleSeatLayout simple, String slotId) {
+  static SeatLayout _simpleSeatLayoutToSeatLayout(
+    SimpleSeatLayout simple,
+    String slotId,
+  ) {
     final cells = <String, LayoutCell>{};
     int maxRow = 0;
     int maxCol = 0;
@@ -873,7 +1186,9 @@ class SlotDetailScreen extends StatelessWidget {
         final g = item.allowedGender.toLowerCase();
         if (g == 'male') {
           gender = SeatGender.male;
-        } else if (g == 'female') { gender = SeatGender.female; }
+        } else if (g == 'female') {
+          gender = SeatGender.female;
+        }
       }
 
       cells[key] = LayoutCell(
@@ -926,6 +1241,139 @@ class SlotDetailScreen extends StatelessWidget {
     }
   }
 
+  /// Show dialog to collect customer details before booking
+  static Future<Map<String, dynamic>?> _showCustomerDetailsDialog(
+    BuildContext context,
+  ) async {
+    final nameController = TextEditingController();
+    final phoneController = TextEditingController();
+    final ageController = TextEditingController();
+    String? selectedGender;
+
+    return showDialog<Map<String, dynamic>>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Enter Your Details'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Please provide your information for this booking:',
+                  style: TextStyle(fontSize: 14, color: Colors.grey),
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: nameController,
+                  decoration: const InputDecoration(
+                    labelText: 'Name *',
+                    border: OutlineInputBorder(),
+                    helperText: 'Required',
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: phoneController,
+                  decoration: const InputDecoration(
+                    labelText: 'Phone Number *',
+                    border: OutlineInputBorder(),
+                    helperText: 'Required',
+                  ),
+                  keyboardType: TextInputType.phone,
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: ageController,
+                  decoration: const InputDecoration(
+                    labelText: 'Age (optional)',
+                    border: OutlineInputBorder(),
+                  ),
+                  keyboardType: TextInputType.number,
+                ),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<String>(
+                  initialValue: selectedGender,
+                  decoration: const InputDecoration(
+                    labelText: 'Gender (optional)',
+                    border: OutlineInputBorder(),
+                  ),
+                  items: const [
+                    DropdownMenuItem(value: 'male', child: Text('Male')),
+                    DropdownMenuItem(value: 'female', child: Text('Female')),
+                    DropdownMenuItem(value: 'other', child: Text('Other')),
+                  ],
+                  onChanged: (value) {
+                    setDialogState(() {
+                      selectedGender = value;
+                    });
+                  },
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, null),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                // Validate required fields
+                if (nameController.text.trim().isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Name is required'),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                  return;
+                }
+                if (phoneController.text.trim().isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Phone number is required'),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                  return;
+                }
+
+                // Convert gender string to SeatGender enum if provided
+                SeatGender? gender;
+                if (selectedGender != null) {
+                  switch (selectedGender) {
+                    case 'male':
+                      gender = SeatGender.male;
+                      break;
+                    case 'female':
+                      gender = SeatGender.female;
+                      break;
+                    case 'other':
+                      gender = SeatGender.any;
+                      break;
+                  }
+                }
+
+                Navigator.pop(context, {
+                  'name': nameController.text.trim(),
+                  'phone': phoneController.text.trim(),
+                  'age': ageController.text.isEmpty
+                      ? null
+                      : int.tryParse(ageController.text),
+                  'gender': gender,
+                });
+              },
+              child: const Text('Confirm'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   static Future<void> _handleBookingAction(
     BuildContext context, {
     required Slot slot,
@@ -946,8 +1394,15 @@ class SlotDetailScreen extends StatelessWidget {
       return;
     }
 
-    // For "Accept" flow, create request directly without popup sheet.
+    // For "Accept" flow, create request directly but first collect customer details
     if (!isOffer) {
+      // Show dialog to collect customer details
+      final customerDetails = await _showCustomerDetailsDialog(context);
+      if (customerDetails == null) {
+        // User cancelled
+        return;
+      }
+
       final booking = await BookingRepository.instance.createBooking(
         slotId: slot.id,
         providerId: providerId,
@@ -959,19 +1414,19 @@ class SlotDetailScreen extends StatelessWidget {
         defaultCapacity: slot.capacity,
         price: slot.price,
         seatKey: null,
-        userGender: null,
-        userName: 'Guest',
-        userAge: 18,
-        userPhone: null,
+        userGender: customerDetails['gender'],
+        userName: customerDetails['name'],
+        userAge: customerDetails['age'],
+        userPhone: customerDetails['phone'],
         userEmail: null,
       );
 
       if (!context.mounted) return;
 
       if (booking == null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('No capacity remaining')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('No capacity remaining')));
         return;
       }
 
@@ -1030,7 +1485,9 @@ class SlotDetailScreen extends StatelessWidget {
 
     final createdBookings = <Booking>[];
     for (var i = 0; i < confirmedCount; i++) {
-      final seatKey = confirmed.seatKeys.length > i ? confirmed.seatKeys[i] : null;
+      final seatKey = confirmed.seatKeys.length > i
+          ? confirmed.seatKeys[i]
+          : null;
       final seatPrice = (layout != null && seatKey != null)
           ? layout.cells[seatKey]?.price
           : null;
@@ -1047,18 +1504,26 @@ class SlotDetailScreen extends StatelessWidget {
         defaultCapacity: slot.capacity,
         price: bookingPrice,
         seatKey: seatKey,
-        userGender: confirmed.userGenders.length > i ? confirmed.userGenders[i] : null,
-        userName: confirmed.userNames.length > i ? confirmed.userNames[i] : 'Guest',
+        userGender: confirmed.userGenders.length > i
+            ? confirmed.userGenders[i]
+            : null,
+        userName: confirmed.userNames.length > i
+            ? confirmed.userNames[i]
+            : 'Guest',
         userAge: confirmed.userAges.length > i ? confirmed.userAges[i] : 18,
-        userPhone: confirmed.userPhones.length > i ? confirmed.userPhones[i] : null,
-        userEmail: confirmed.userEmails.length > i ? confirmed.userEmails[i] : null,
+        userPhone: confirmed.userPhones.length > i
+            ? confirmed.userPhones[i]
+            : null,
+        userEmail: confirmed.userEmails.length > i
+            ? confirmed.userEmails[i]
+            : null,
       );
 
       if (booking == null) {
         if (!context.mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('No capacity remaining')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('No capacity remaining')));
         return;
       }
 
@@ -1108,7 +1573,7 @@ class _VehicleMediaSection extends StatelessWidget {
       if (vehicle.profileImage != null) vehicle.profileImage!,
       ...vehicle.galleryImages,
     ];
-    
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1118,89 +1583,89 @@ class _VehicleMediaSection extends StatelessWidget {
         ),
         const SizedBox(height: 8),
         if (allImages.isEmpty)
-          Text(
-            'No media added yet',
-            style: TextStyle(color: Colors.grey[700]),
-          )
+          Text('No media added yet', style: TextStyle(color: Colors.grey[700]))
         else
-        SizedBox(
-          height: 120,
-          child: ListView.separated(
-            scrollDirection: Axis.horizontal,
-            itemCount: allImages.length,
-            separatorBuilder: (_, _) => const SizedBox(width: 10),
-            itemBuilder: (context, index) {
-              final photo = allImages[index];
-              final isProfile = vehicle.profileImage != null && index == 0;
-              final bytes = _isLikelyUrl(photo) ? null : _tryDecode(photo);
-              return Stack(
-                children: [
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
-                    child: AspectRatio(
-                  aspectRatio: 16 / 9,
-                  child: _isLikelyUrl(photo)
-                      ? Image.network(
-                          photo,
-                          fit: BoxFit.cover,
-                          errorBuilder: (context, error, stackTrace) {
-                            return Container(
-                              color: Colors.grey[200],
-                              child: const Center(
-                                child: Icon(Icons.image_not_supported),
-                              ),
-                            );
-                          },
-                        )
-                      : (bytes == null
-                          ? Container(
-                              color: Colors.grey[200],
-                              child: const Center(
-                                child: Icon(Icons.image_not_supported),
-                              ),
-                            )
-                          : Image.memory(
-                              bytes,
-                              fit: BoxFit.cover,
-                              errorBuilder: (context, error, stackTrace) {
-                                return Container(
-                                  color: Colors.grey[200],
-                                  child: const Center(
-                                    child: Icon(Icons.image_not_supported),
-                                  ),
-                                );
-                              },
-                            )),
+          SizedBox(
+            height: 120,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: allImages.length,
+              separatorBuilder: (_, _) => const SizedBox(width: 10),
+              itemBuilder: (context, index) {
+                final photo = allImages[index];
+                final isProfile = vehicle.profileImage != null && index == 0;
+                final bytes = _isLikelyUrl(photo) ? null : _tryDecode(photo);
+                return Stack(
+                  children: [
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: AspectRatio(
+                        aspectRatio: 16 / 9,
+                        child: _isLikelyUrl(photo)
+                            ? Image.network(
+                                photo,
+                                fit: BoxFit.cover,
+                                errorBuilder: (context, error, stackTrace) {
+                                  return Container(
+                                    color: Colors.grey[200],
+                                    child: const Center(
+                                      child: Icon(Icons.image_not_supported),
+                                    ),
+                                  );
+                                },
+                              )
+                            : (bytes == null
+                                  ? Container(
+                                      color: Colors.grey[200],
+                                      child: const Center(
+                                        child: Icon(Icons.image_not_supported),
+                                      ),
+                                    )
+                                  : Image.memory(
+                                      bytes,
+                                      fit: BoxFit.cover,
+                                      errorBuilder:
+                                          (context, error, stackTrace) {
+                                            return Container(
+                                              color: Colors.grey[200],
+                                              child: const Center(
+                                                child: Icon(
+                                                  Icons.image_not_supported,
+                                                ),
+                                              ),
+                                            );
+                                          },
+                                    )),
+                      ),
                     ),
-                  ),
-                  if (isProfile)
-                    Positioned(
-                      top: 4,
-                      left: 4,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 6,
-                          vertical: 2,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Colors.blue,
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: const Text(
-                          'PROFILE',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 9,
-                            fontWeight: FontWeight.bold,
+                    if (isProfile)
+                      Positioned(
+                        top: 4,
+                        left: 4,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.blue,
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: const Text(
+                            'PROFILE',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 9,
+                              fontWeight: FontWeight.bold,
+                            ),
                           ),
                         ),
                       ),
-                    ),
-                ],
-              );
-            },
+                  ],
+                );
+              },
+            ),
           ),
-        ),
       ],
     );
   }
@@ -1266,8 +1731,11 @@ class _Header extends StatelessWidget {
                           .toList();
                       final avg = userReviews.isEmpty
                           ? 0.0
-                          : userReviews.fold<double>(0, (s, r) => s + r.rating) /
-                              userReviews.length;
+                          : userReviews.fold<double>(
+                                  0,
+                                  (s, r) => s + r.rating,
+                                ) /
+                                userReviews.length;
                       return GestureDetector(
                         onTap: () => Navigator.push(
                           context,
@@ -1281,7 +1749,11 @@ class _Header extends StatelessWidget {
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            const Icon(Icons.star, size: 16, color: Colors.amber),
+                            const Icon(
+                              Icons.star,
+                              size: 16,
+                              color: Colors.amber,
+                            ),
                             const SizedBox(width: 4),
                             Text(
                               avg.toStringAsFixed(1),
@@ -1290,6 +1762,16 @@ class _Header extends StatelessWidget {
                                 decoration: TextDecoration.underline,
                               ),
                             ),
+                            if (userReviews.isNotEmpty) ...[
+                              const SizedBox(width: 4),
+                              Text(
+                                '(${userReviews.length} ${userReviews.length == 1 ? 'rating' : 'ratings'})',
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.grey,
+                                ),
+                              ),
+                            ],
                           ],
                         ),
                       );
@@ -1303,10 +1785,14 @@ class _Header extends StatelessWidget {
                 style: TextStyle(color: Colors.grey[800]),
               ),
               // Operator info if available
-              if (vehicle.operatorName != null && vehicle.operatorName!.isNotEmpty) ...[
+              if (vehicle.operatorName != null &&
+                  vehicle.operatorName!.isNotEmpty) ...[
                 const SizedBox(height: 6),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
                   decoration: BoxDecoration(
                     color: Colors.blue.shade50,
                     borderRadius: BorderRadius.circular(6),
@@ -1315,7 +1801,11 @@ class _Header extends StatelessWidget {
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(Icons.person_outline, size: 14, color: Colors.blue),
+                      const Icon(
+                        Icons.person_outline,
+                        size: 14,
+                        color: Colors.blue,
+                      ),
                       const SizedBox(width: 4),
                       Text(
                         'Operator: ${vehicle.operatorName}',
@@ -1328,26 +1818,39 @@ class _Header extends StatelessWidget {
                       if (vehicle.operatorGender != null) ...[
                         const SizedBox(width: 6),
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
                           decoration: BoxDecoration(
-                            color: vehicle.operatorGender == 'male' ? Colors.blue.shade100 : Colors.pink.shade100,
+                            color: vehicle.operatorGender == 'male'
+                                ? Colors.blue.shade100
+                                : Colors.pink.shade100,
                             borderRadius: BorderRadius.circular(10),
                           ),
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               Icon(
-                                vehicle.operatorGender == 'male' ? Icons.male : Icons.female,
+                                vehicle.operatorGender == 'male'
+                                    ? Icons.male
+                                    : Icons.female,
                                 size: 12,
-                                color: vehicle.operatorGender == 'male' ? Colors.blue.shade700 : Colors.pink.shade700,
+                                color: vehicle.operatorGender == 'male'
+                                    ? Colors.blue.shade700
+                                    : Colors.pink.shade700,
                               ),
                               const SizedBox(width: 2),
                               Text(
-                                vehicle.operatorGender == 'male' ? 'Male' : 'Female',
+                                vehicle.operatorGender == 'male'
+                                    ? 'Male'
+                                    : 'Female',
                                 style: TextStyle(
                                   fontSize: 10,
                                   fontWeight: FontWeight.w600,
-                                  color: vehicle.operatorGender == 'male' ? Colors.blue.shade700 : Colors.pink.shade700,
+                                  color: vehicle.operatorGender == 'male'
+                                      ? Colors.blue.shade700
+                                      : Colors.pink.shade700,
                                 ),
                               ),
                             ],
@@ -1483,7 +1986,11 @@ class _LocationBlock extends StatelessWidget {
                   _LocationFlagRow(label: from, coords: fromCoords),
                   const Padding(
                     padding: EdgeInsets.symmetric(vertical: 4),
-                    child: Icon(Icons.arrow_downward, size: 16, color: Colors.grey),
+                    child: Icon(
+                      Icons.arrow_downward,
+                      size: 16,
+                      color: Colors.grey,
+                    ),
                   ),
                   _LocationFlagRow(label: to, coords: toCoords),
                 ],
@@ -1567,12 +2074,16 @@ class _LocationFlagRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (coords == null) {
-      return Text(label,
-          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold));
+      return Text(
+        label,
+        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+      );
     }
     return FutureBuilder<GeoLocation?>(
-      future: LocationAutocompleteService.instance
-          .reverseGeocode(coords!.$1, coords!.$2),
+      future: LocationAutocompleteService.instance.reverseGeocode(
+        coords!.$1,
+        coords!.$2,
+      ),
       builder: (context, snapshot) {
         final geo = snapshot.data;
         final flag = _LocationBlock._flag(geo?.countryCode);
@@ -1592,8 +2103,7 @@ class _LocationFlagRow extends StatelessWidget {
                 spacing: 10,
                 runSpacing: 2,
                 children: [
-                  if (district != null)
-                    _GeoTag(Icons.map_outlined, district),
+                  if (district != null) _GeoTag(Icons.map_outlined, district),
                   if (geo.state != null)
                     _GeoTag(Icons.account_balance_outlined, geo.state!),
                   if (geo.postcode != null)
@@ -1846,15 +2356,9 @@ class _DimensionChip extends StatelessWidget {
         ),
         Text(
           value,
-          style: const TextStyle(
-            fontSize: 13,
-            fontWeight: FontWeight.bold,
-          ),
+          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
         ),
       ],
     );
   }
 }
-
-
-

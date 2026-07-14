@@ -8,6 +8,15 @@ enum CaptureMode {
   video, // Video recording for verification
 }
 
+/// Live camera screen for capturing photos and videos
+/// 
+/// **Web Behavior:**
+/// On web, ImagePicker uses the browser's native camera API (getUserMedia).
+/// Modern browsers (Chrome, Firefox, Safari) will show a camera permission dialog
+/// and open the device camera directly - NOT the file browser.
+/// 
+/// **Mobile Behavior:**
+/// Uses the native camera plugin for full camera control.
 class LiveCameraScreen extends StatefulWidget {
   final CaptureMode mode;
   final String title;
@@ -46,11 +55,17 @@ class _LiveCameraScreenState extends State<LiveCameraScreen> {
   Future<void> _pickOnWeb() async {
     try {
       final picker = ImagePicker();
+      // On web, ImagePicker with ImageSource.camera opens the system camera
+      // (not file browser) if the browser supports it
       final picked = widget.mode == CaptureMode.video
-          ? await picker.pickVideo(source: ImageSource.camera)
+          ? await picker.pickVideo(
+              source: ImageSource.camera,
+              maxDuration: Duration(seconds: widget.maxVideoDuration ?? 10),
+            )
           : await picker.pickImage(
               source: ImageSource.camera,
               imageQuality: 90,
+              preferredCameraDevice: CameraDevice.rear,
             );
       if (picked == null) {
         if (mounted) Navigator.pop(context);
@@ -63,7 +78,7 @@ class _LiveCameraScreenState extends State<LiveCameraScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Camera error: $e')),
+          SnackBar(content: Text('Camera access denied or not available: $e')),
         );
         Navigator.pop(context);
       }

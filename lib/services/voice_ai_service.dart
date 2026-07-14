@@ -11,11 +11,11 @@ class VoiceAIService extends ChangeNotifier {
 
   final SpeechToText _speechToText = SpeechToText();
   final FlutterTts _flutterTts = FlutterTts();
-  
+
   // Firebase AI Logic components
   late final GenerativeModel _model;
   late final ChatSession _chat;
-  
+
   bool _isListening = false;
   bool _isProcessing = false;
   bool _isInitialized = false;
@@ -23,7 +23,7 @@ class VoiceAIService extends ChangeNotifier {
   bool _continuousMode = false; // New: Keep mic active continuously
   String _lastCommand = '';
   String _lastResponse = '';
-  
+
   bool get isListening => _isListening;
   bool get isProcessing => _isProcessing;
   bool get isActive => _isListening || _isProcessing;
@@ -71,7 +71,9 @@ class VoiceAIService extends ChangeNotifier {
       );
 
       if (!speechAvailable) {
-        if (kDebugMode) print('🎤 Speech recognition not available on this browser/device');
+        if (kDebugMode) {
+          print('🎤 Speech recognition not available on this browser/device');
+        }
         // Still mark as initialized for Firebase AI (text chat still works)
       }
 
@@ -90,9 +92,9 @@ class VoiceAIService extends ChangeNotifier {
   Future<void> _initializeFirebaseAI() async {
     try {
       debugPrint('🚀 Voice AI: Starting Firebase Gemini API initialization...');
-      
+
       _model = FirebaseAI.googleAI().generativeModel(
-        model: 'gemini-2.5-flash',  // Latest, faster, lighter model
+        model: 'gemini-2.5-flash', // Latest, faster, lighter model
         systemInstruction: Content.system('''
 You are a helpful AI assistant for QuickOHunt, a ride-sharing and vehicle rental app.
 
@@ -121,8 +123,10 @@ Examples:
       // Start a chat session for conversation continuity
       _chat = _model.startChat();
       _aiInitialized = true;
-      
-      debugPrint('🔥 Voice AI: Firebase Gemini API initialized with Gemini 2.0 Flash');
+
+      debugPrint(
+        '🔥 Voice AI: Firebase Gemini API initialized with Gemini 2.0 Flash',
+      );
     } catch (e) {
       debugPrint('❌ Voice AI initialization failed: $e');
       _aiInitialized = false;
@@ -156,22 +160,24 @@ Examples:
       _isProcessing = false;
       if (kDebugMode) print('🎤 Voice AI activated - listening...');
       notifyListeners();
-      
+
       // Only speak "Listening" on first activation
       if (_continuousMode && _lastCommand.isEmpty) {
         await _flutterTts.speak('Continuous listening activated');
       }
-      
+
       await _speechToText.listen(
         onResult: (result) {
           if (result.finalResult && result.recognizedWords.isNotEmpty) {
             _processCommand(result.recognizedWords);
           }
         },
-        listenFor: const Duration(seconds: 30), // Longer duration for continuous mode
-        pauseFor: const Duration(seconds: 2), // Shorter pause
         listenOptions: SpeechListenOptions(
           partialResults: false,
+          listenFor: const Duration(
+            seconds: 30,
+          ), // Longer duration for continuous mode
+          pauseFor: const Duration(seconds: 2), // Shorter pause
         ),
       );
     } catch (e) {
@@ -183,7 +189,7 @@ Examples:
   // Stop voice listening
   void _stopListening() {
     if (!_isListening && !_continuousMode) return;
-    
+
     _speechToText.stop();
     _isListening = false;
     _continuousMode = false;
@@ -214,10 +220,10 @@ Examples:
       // Try to get AI response from Firebase function
       final response = await _getAIResponse(command);
       _lastResponse = response;
-      
+
       // Speak the response
       await _flutterTts.speak(response);
-      
+
       // Handle the command action
       handleVoiceCommand(command);
     } catch (e) {
@@ -228,12 +234,12 @@ Examples:
       await _flutterTts.speak(response);
       handleVoiceCommand(command);
     }
-    
+
     await Future.delayed(const Duration(milliseconds: 500));
     _isProcessing = false;
     if (kDebugMode) print('✅ Command processed: $command');
     notifyListeners();
-    
+
     // Restart listening if continuous mode is enabled
     if (_continuousMode) {
       await Future.delayed(const Duration(milliseconds: 500));
@@ -245,21 +251,27 @@ Examples:
   Future<String> _getAIResponse(String message) async {
     try {
       if (!_aiInitialized) {
-        if (kDebugMode) print('⚠️ Voice AI: Firebase AI not initialized, using fallback');
+        if (kDebugMode) {
+          print('⚠️ Voice AI: Firebase AI not initialized, using fallback');
+        }
         return _generateAIResponse(message);
       }
 
-      if (kDebugMode) print('🔥 Voice AI: Sending message to Firebase AI: $message');
-      
+      if (kDebugMode) {
+        print('🔥 Voice AI: Sending message to Firebase AI: $message');
+      }
+
       // Send message to Gemini via Firebase AI Logic
       final response = await _chat.sendMessage(Content.text(message));
       final aiText = response.text?.trim();
-      
+
       if (aiText != null && aiText.isNotEmpty) {
         if (kDebugMode) print('✅ Voice AI: Got Firebase AI response: $aiText');
         return aiText;
       } else {
-        if (kDebugMode) print('⚠️ Voice AI: Empty response from Firebase AI, using fallback');
+        if (kDebugMode) {
+          print('⚠️ Voice AI: Empty response from Firebase AI, using fallback');
+        }
         return _generateAIResponse(message);
       }
     } catch (e) {
@@ -273,14 +285,15 @@ Examples:
   // Generate AI response based on command (fallback)
   String _generateAIResponse(String command) {
     final lowerCommand = command.toLowerCase();
-    
+
     // Note: This is a fallback system. Real AI responses come from Firebase Functions
-    
+
     if (lowerCommand.contains('book') || lowerCommand.contains('ride')) {
       return 'I can help you book a ride. Let me show you available options.';
     } else if (lowerCommand.contains('cancel')) {
       return 'I can help you cancel a booking. Please provide your booking details.';
-    } else if (lowerCommand.contains('wallet') || lowerCommand.contains('balance')) {
+    } else if (lowerCommand.contains('wallet') ||
+        lowerCommand.contains('balance')) {
       return 'Opening your wallet to check balance.';
     } else if (lowerCommand.contains('profile')) {
       return 'Opening your profile page.';
@@ -296,11 +309,12 @@ Examples:
   // Handle voice commands
   void handleVoiceCommand(String command) {
     final lowerCommand = command.toLowerCase();
-    
+
     if (lowerCommand.contains('book') || lowerCommand.contains('ride')) {
       // Navigate to booking screen
       if (kDebugMode) print('🚗 Navigating to booking...');
-    } else if (lowerCommand.contains('wallet') || lowerCommand.contains('balance')) {
+    } else if (lowerCommand.contains('wallet') ||
+        lowerCommand.contains('balance')) {
       // Navigate to wallet
       if (kDebugMode) print('💰 Opening wallet...');
     } else if (lowerCommand.contains('profile')) {
@@ -323,6 +337,3 @@ Examples:
     return await _getAIResponse(message);
   }
 }
-
-
-

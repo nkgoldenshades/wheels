@@ -405,6 +405,74 @@ class _ReviewsScreenState extends State<ReviewsScreen> {
                 style: const TextStyle(fontSize: 14),
               ),
             ],
+            // Show review photos if any
+            if (review.mediaUrls.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              SizedBox(
+                height: 90,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: review.mediaUrls.length,
+                  separatorBuilder: (context, index) => const SizedBox(width: 8),
+                  itemBuilder: (context, i) {
+                    final url = review.mediaUrls[i];
+                    final isBase64 = url.startsWith('data:image');
+                    return GestureDetector(
+                      onTap: () => showDialog(
+                        context: context,
+                        builder: (_) => Dialog(
+                          backgroundColor: Colors.black,
+                          insetPadding: EdgeInsets.zero,
+                          child: Stack(
+                            children: [
+                              InteractiveViewer(
+                                child: isBase64
+                                    ? Image.memory(
+                                        Uri.parse(url).data!.contentAsBytes(),
+                                        fit: BoxFit.contain,
+                                      )
+                                    : Image.network(url, fit: BoxFit.contain),
+                              ),
+                              Positioned(
+                                top: 8,
+                                right: 8,
+                                child: IconButton(
+                                  icon: const Icon(Icons.close,
+                                      color: Colors.white),
+                                  onPressed: () => Navigator.pop(context),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: isBase64
+                            ? Image.memory(
+                                Uri.parse(url).data!.contentAsBytes(),
+                                width: 80,
+                                height: 80,
+                                fit: BoxFit.cover,
+                              )
+                            : Image.network(
+                                url,
+                                width: 80,
+                                height: 80,
+                                fit: BoxFit.cover,
+                                errorBuilder: (context, error, stackTrace) => Container(
+                                  width: 80,
+                                  height: 80,
+                                  color: Colors.grey[200],
+                                  child: const Icon(Icons.broken_image),
+                                ),
+                              ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
           ],
         ),
       ),

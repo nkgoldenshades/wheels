@@ -42,7 +42,8 @@ class UserPostAcceptanceRepository {
           .toList();
 
       debugPrint(
-          '✅ Loaded ${acceptances.value.length} post acceptances from Supabase');
+        '✅ Loaded ${acceptances.value.length} post acceptances from Supabase',
+      );
     } catch (e) {
       debugPrint('❌ Failed to load post acceptances: $e');
       acceptances.value = [];
@@ -54,6 +55,13 @@ class UserPostAcceptanceRepository {
     required String postId,
     required String userId,
     required double amount,
+    String? vehicleId,
+    String? operatorName,
+    String? operatorPhone,
+    String? customerName,
+    String? customerPhone,
+    int? customerAge,
+    String? customerGender,
   }) async {
     try {
       final currentUser = AuthRepository.instance.currentUser;
@@ -77,14 +85,32 @@ class UserPostAcceptanceRepository {
         createdAt: DateTime.now(),
       );
 
+      // Build acceptance data with operator and customer details
+      final acceptanceData = acceptance.toJson();
+
+      // Add operator and customer details to customer_details jsonb
+      acceptanceData['customer_details'] = {
+        'vehicle_id': vehicleId,
+        'operator_name': operatorName,
+        'operator_phone': operatorPhone,
+        'name': customerName,
+        'phone': customerPhone,
+        'age': customerAge,
+        'gender': customerGender,
+      };
+
       // Insert to Supabase
-      await _supabase.from('user_post_acceptances').insert(acceptance.toJson());
+      await _supabase.from('user_post_acceptances').insert(acceptanceData);
 
       // Update local state
       acceptances.value = [acceptance, ...acceptances.value];
 
       debugPrint('✅ Post acceptance created with OTP: $otp');
-      
+      debugPrint('👨‍✈️ Operator: $operatorName ($operatorPhone)');
+      if (customerName != null) {
+        debugPrint('👤 Customer: $customerName ($customerPhone)');
+      }
+
       // NOTE: OTP delivery via SMS/Email to be implemented in production
       // For development, OTP is logged to console
       debugPrint('📱 OTP for user: $otp (expires in 10 minutes)');
@@ -126,9 +152,11 @@ class UserPostAcceptanceRepository {
 
       // Update local state
       acceptances.value = acceptances.value
-          .map((a) => a.id == acceptanceId
-              ? a.copyWith(status: AcceptanceStatus.otpVerified)
-              : a)
+          .map(
+            (a) => a.id == acceptanceId
+                ? a.copyWith(status: AcceptanceStatus.otpVerified)
+                : a,
+          )
           .toList();
 
       debugPrint('✅ OTP verified for acceptance: $acceptanceId');
@@ -147,9 +175,7 @@ class UserPostAcceptanceRepository {
     AcceptanceStatus? status,
   }) async {
     try {
-      final updates = <String, dynamic>{
-        'razorpay_order_id': razorpayOrderId,
-      };
+      final updates = <String, dynamic>{'razorpay_order_id': razorpayOrderId};
 
       if (razorpayPaymentId != null) {
         updates['razorpay_payment_id'] = razorpayPaymentId;
@@ -169,16 +195,18 @@ class UserPostAcceptanceRepository {
 
       // Update local state
       acceptances.value = acceptances.value
-          .map((a) => a.id == acceptanceId
-              ? a.copyWith(
-                  razorpayOrderId: razorpayOrderId,
-                  razorpayPaymentId: razorpayPaymentId,
-                  status: status ?? a.status,
-                  paidAt: status == AcceptanceStatus.paid
-                      ? DateTime.now()
-                      : a.paidAt,
-                )
-              : a)
+          .map(
+            (a) => a.id == acceptanceId
+                ? a.copyWith(
+                    razorpayOrderId: razorpayOrderId,
+                    razorpayPaymentId: razorpayPaymentId,
+                    status: status ?? a.status,
+                    paidAt: status == AcceptanceStatus.paid
+                        ? DateTime.now()
+                        : a.paidAt,
+                  )
+                : a,
+          )
           .toList();
 
       debugPrint('✅ Payment details updated for acceptance: $acceptanceId');
@@ -198,9 +226,11 @@ class UserPostAcceptanceRepository {
 
       // Update local state
       acceptances.value = acceptances.value
-          .map((a) => a.id == acceptanceId
-              ? a.copyWith(status: AcceptanceStatus.cancelled)
-              : a)
+          .map(
+            (a) => a.id == acceptanceId
+                ? a.copyWith(status: AcceptanceStatus.cancelled)
+                : a,
+          )
           .toList();
 
       debugPrint('✅ Acceptance cancelled: $acceptanceId');
@@ -235,6 +265,3 @@ class UserPostAcceptanceRepository {
     return (100000 + random.nextInt(900000)).toString();
   }
 }
-
-
-

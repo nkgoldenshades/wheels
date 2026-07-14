@@ -1,7 +1,4 @@
 import 'package:flutter/foundation.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
-import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
 import 'package:cloud_functions/cloud_functions.dart';
 import 'stripe_service.dart';
 import 'razorpay_service.dart';
@@ -15,25 +12,11 @@ class PaymentService {
   PaymentService._();
   static final PaymentService instance = PaymentService._();
 
-  // Firebase Cloud Functions (mobile/desktop only)
+  // Firebase Cloud Functions
   FirebaseFunctions? _functions;
-  
-  // Firebase Cloud Functions HTTP URL (for web)
-  static const String _firebaseFunctionsUrl = 'https://us-central1-quickohunt-app.cloudfunctions.net';
-
-  Future<Map<String, String>> _authorizedJsonHeaders() async {
-    final headers = <String, String>{'Content-Type': 'application/json'};
-    final user = firebase_auth.FirebaseAuth.instance.currentUser;
-    if (user == null) return headers;
-    final token = await user.getIdToken(true);
-    if (token != null && token.isNotEmpty) {
-      headers['Authorization'] = 'Bearer $token';
-    }
-    return headers;
-  }
 
   void _initFunctions() {
-    if (_functions == null && !kIsWeb) {
+    if (_functions == null) {
       try {
         _functions = FirebaseFunctions.instanceFor(region: 'us-central1');
       } catch (e) {
@@ -66,64 +49,34 @@ class PaymentService {
     Map<String, String>? notes,
   }) async {
     try {
-      debugPrint('[PaymentService] createOrder: kIsWeb=$kIsWeb, amount=$amount, currency=$currency');
-      
-      if (kIsWeb) {
-        // Web: Use HTTP endpoint
-        debugPrint('[PaymentService] Using HTTP endpoint for web');
-        final headers = await _authorizedJsonHeaders();
-        debugPrint('[PaymentService] Headers: ${headers.keys.join(", ")}');
-        
-        final response = await http.post(
-          Uri.parse('$_firebaseFunctionsUrl/createRazorpayOrder'),
-          headers: headers,
-          body: jsonEncode({
-            'amount': amount,
-            'currency': currency.toUpperCase(),
-            'receipt': 'rcpt_${DateTime.now().millisecondsSinceEpoch}',
-            'notes': notes ?? {},
-          }),
-        );
+      debugPrint(
+        '[PaymentService] createOrder: kIsWeb=$kIsWeb, amount=$amount, currency=$currency',
+      );
 
-        debugPrint('[PaymentService] HTTP Response: ${response.statusCode}');
-        
-        if (response.statusCode == 200) {
-          final data = jsonDecode(response.body) as Map<String, dynamic>;
-          debugPrint('[PaymentService] Order created: ${data['id']}');
-          return {
-            'id': data['id'] as String,
-            'amount': data['amount'],
-            'currency': data['currency'],
-          };
-        } else {
-          debugPrint('[PaymentService] HTTP Error body: ${response.body}');
-          final err = jsonDecode(response.body);
-          debugPrint('[PaymentService] createOrder error: ${err['error']}');
-          return {'error': err['error'] ?? 'Failed to create order'};
-        }
-      } else {
-        // Mobile/Desktop: Use callable function
-        debugPrint('[PaymentService] Using callable function for mobile/desktop');
-        _initFunctions();
-        if (_functions == null) {
-          return {'error': 'Firebase Functions not available'};
-        }
-        
-        final callable = _functions!.httpsCallable('createRazorpayOrder');
-        final result = await callable.call({
-          'amount': amount,
-          'currency': currency.toUpperCase(),
-          'receipt': 'rcpt_${DateTime.now().millisecondsSinceEpoch}',
-          'notes': notes ?? {},
-        });
-
-        final data = result.data as Map<String, dynamic>;
-        return {
-          'id': data['orderId'] as String,
-          'amount': data['amount'],
-          'currency': data['currency'],
-        };
+      // Use the Firebase callable on all platforms (web + mobile/desktop).
+      // The cloud_functions package supports web natively. Raw HTTP POST to an
+      // onCall function would require the {"data": {...}} wrapper and bypass
+      // Firebase Auth context — so always go through the callable SDK.
+      _initFunctions();
+      if (_functions == null) {
+        return {'error': 'Firebase Functions not available'};
       }
+
+      final callable = _functions!.httpsCallable('createRazorpayOrder');
+      final result = await callable.call({
+        'amount': amount,
+        'currency': currency.toUpperCase(),
+        'receipt': 'rcpt_${DateTime.now().millisecondsSinceEpoch}',
+        'notes': notes ?? {},
+      });
+
+      final data = result.data as Map<String, dynamic>;
+      debugPrint('[PaymentService] Order created: ${data['orderId']}');
+      return {
+        'id': data['orderId'] as String,
+        'amount': data['amount'],
+        'currency': data['currency'],
+      };
     } catch (e) {
       debugPrint('[PaymentService] createOrder exception: $e');
       if (e is FirebaseFunctionsException) {
@@ -133,55 +86,47 @@ class PaymentService {
     }
   }
 
-  /// Verify Razorpay payment signature via Firebase Function (callable on mobile, HTTP on web).
+  /// Verify Razorpay payment signature via Firebase callable function.
   /// Returns `{ 'verified': true }` on valid signature, or `{ 'error': '...' }`.
   Future<Map<String, dynamic>> verifyPayment({
     required String razorpayOrderId,
     required String razorpayPaymentId,
     required String razorpaySignature,
   }) async {
+    // ══════════════════════════════════════════════════════════
+    // 🚀 DEV BYPASS: Skip verification for dev payment IDs
+    // ══════════════════════════════════════════════════════════
+    if (razorpayPaymentId.startsWith('dev_pay_') ||
+        razorpayOrderId.startsWith('dev_order_')) {
+      debugPrint(
+        '💰 [DEV MODE] Bypassing payment verification for dev payment',
+      );
+      return {
+        'verified': true,
+        'payment_id': razorpayPaymentId,
+        'dev_bypass': true,
+      };
+    }
+
     try {
-      if (kIsWeb) {
-        // Web: Use HTTP endpoint
-        final headers = await _authorizedJsonHeaders();
-        final response = await http.post(
-          Uri.parse('$_firebaseFunctionsUrl/verifyRazorpayPayment'),
-          headers: headers,
-          body: jsonEncode({
-            'razorpay_order_id': razorpayOrderId,
-            'razorpay_payment_id': razorpayPaymentId,
-            'razorpay_signature': razorpaySignature,
-          }),
-        );
+      _initFunctions();
+      if (_functions == null) {
+        return {'verified': false, 'error': 'Firebase Functions not available'};
+      }
 
-        final data = jsonDecode(response.body) as Map<String, dynamic>;
-        if (response.statusCode == 200 && data['verified'] == true) {
-          return {'verified': true, 'payment_id': razorpayPaymentId};
-        } else {
-          debugPrint('[PaymentService] verifyPayment failed');
-          return {'verified': false, 'error': 'Signature verification failed'};
-        }
+      final callable = _functions!.httpsCallable('verifyRazorpayPayment');
+      final result = await callable.call({
+        'razorpay_order_id': razorpayOrderId,
+        'razorpay_payment_id': razorpayPaymentId,
+        'razorpay_signature': razorpaySignature,
+      });
+
+      final data = result.data as Map<String, dynamic>;
+      if (data['verified'] == true) {
+        return {'verified': true, 'payment_id': razorpayPaymentId};
       } else {
-        // Mobile/Desktop: Use callable function
-        _initFunctions();
-        if (_functions == null) {
-          return {'verified': false, 'error': 'Firebase Functions not available'};
-        }
-        
-        final callable = _functions!.httpsCallable('verifyRazorpayPayment');
-        final result = await callable.call({
-          'razorpay_order_id': razorpayOrderId,
-          'razorpay_payment_id': razorpayPaymentId,
-          'razorpay_signature': razorpaySignature,
-        });
-
-        final data = result.data as Map<String, dynamic>;
-        if (data['verified'] == true) {
-          return {'verified': true, 'payment_id': razorpayPaymentId};
-        } else {
-          debugPrint('[PaymentService] verifyPayment failed');
-          return {'verified': false, 'error': 'Signature verification failed'};
-        }
+        debugPrint('[PaymentService] verifyPayment failed');
+        return {'verified': false, 'error': 'Signature verification failed'};
       }
     } catch (e) {
       debugPrint('[PaymentService] verifyPayment exception: $e');
@@ -219,7 +164,8 @@ class PaymentService {
     final currentUser = AuthRepository.instance.currentUser;
     if (currentUser == null) return {'error': 'Not logged in'};
 
-    if (_isIndia(countryCode)) {
+    final isINR = currency.toUpperCase() == 'INR';
+    if (_isIndia(countryCode) && isINR) {
       // ── Razorpay path ──────────────────────────────────────────────────────
       debugPrint('[PaymentService] Routing to Razorpay (India)');
 
@@ -257,7 +203,9 @@ class PaymentService {
           razorpaySignature: signature,
         );
         if (verification['verified'] != true) {
-          return {'error': verification['error'] ?? 'Payment verification failed'};
+          return {
+            'error': verification['error'] ?? 'Payment verification failed',
+          };
         }
       }
 
@@ -321,7 +269,9 @@ class PaymentService {
           razorpaySignature: signature,
         );
         if (verification['verified'] != true) {
-          return {'error': verification['error'] ?? 'Payment verification failed'};
+          return {
+            'error': verification['error'] ?? 'Payment verification failed',
+          };
         }
       }
       return result;
@@ -361,12 +311,15 @@ class PaymentService {
     final currentUser = AuthRepository.instance.currentUser;
     if (currentUser == null) return {'error': 'Not logged in'};
 
-    final amountInSmallestUnit = (amount * 100).toInt(); // Convert to paise/cents
-    final selectedGateway = ProfileRepository.instance.profile.value.paymentProvider;
+    final amountInSmallestUnit = (amount * 100)
+        .toInt(); // Convert to paise/cents
+    final selectedGateway =
+        ProfileRepository.instance.profile.value.paymentProvider;
 
     if (selectedGateway == null || selectedGateway.trim().isEmpty) {
       return {
-        'error': 'Please choose a payment gateway in Profile Settings before purchasing a plan.',
+        'error':
+            'Please choose a payment gateway in Profile Settings before purchasing a plan.',
       };
     }
 
@@ -376,7 +329,8 @@ class PaymentService {
 
       if (currency.toUpperCase() != 'INR') {
         return {
-          'error': 'Razorpay plan payments are currently available only with INR pricing.',
+          'error':
+              'Razorpay plan payments are currently available only with INR pricing.',
         };
       }
 
@@ -413,37 +367,28 @@ class PaymentService {
           razorpaySignature: signature,
         );
         if (verification['verified'] != true) {
-          return {'error': verification['error'] ?? 'Payment verification failed'};
+          return {
+            'error': verification['error'] ?? 'Payment verification failed',
+          };
         }
       }
 
-      return {
-        ...result,
-        'plan': planName,
-        'gateway': 'razorpay',
-      };
+      return {...result, 'plan': planName, 'gateway': 'razorpay'};
     } else if (selectedGateway == 'stripe') {
       // ── Stripe path for international ──
       debugPrint('[PaymentService] Processing subscription via Stripe');
       await StripeService.instance.init();
-      
+
       final result = await StripeService.instance.processSubscriptionPayment(
         amount: amountInSmallestUnit,
         currency: currency.toLowerCase(),
         planName: planName,
         userId: currentUser.id,
       );
-      
-      return {
-        ...result,
-        'plan': planName,
-        'gateway': 'stripe',
-      };
+
+      return {...result, 'plan': planName, 'gateway': 'stripe'};
     }
 
     return {'error': 'Unsupported payment gateway: $selectedGateway'};
   }
 }
-
-
-

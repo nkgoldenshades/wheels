@@ -8,6 +8,7 @@ import 'auth_repository.dart' as auth;
 import 'vehicle_repository.dart';
 import 'slot_repository.dart';
 import 'booking_repository.dart';
+import '../models/demand_plan.dart';
 
 class ProfileInfo {
   // ── profiles_public ───────────────────────────────────────
@@ -20,6 +21,16 @@ class ProfileInfo {
   final String? preferredLanguage;
   final DateTime? createdAt;
   final DateTime? updatedAt;
+
+  // ── Rating fields (profiles_public) ───────────────────────
+  // Provider ratings (when providing service)
+  final double providerRating;
+  final int providerTotalReviews;
+  final int providerTotalTrips;
+  // Customer ratings (when using service)
+  final double customerRating;
+  final int customerTotalReviews;
+  final int customerTotalTrips;
 
   // ── profiles_contact (booking partners only) ──────────────
   final String? email;
@@ -44,6 +55,8 @@ class ProfileInfo {
   final String? paymentProvider;
   final String? stripeAccountId;
   final String? razorpayAccountId;
+  final String?
+  bankCurrency; // Currency of connected bank account (INR/USD/GBP/EUR)
   // Bank details
   final String? bankAccountHolder;
   final String? bankAccountNumber;
@@ -57,6 +70,10 @@ class ProfileInfo {
   final String? addressLine2;
   final String? city;
   final String? state;
+  // Subscription
+  final String subscriptionPlan; // 'basic', 'premium', 'expert'
+  final DateTime? subscriptionExpiresAt;
+  final String? subscriptionPaymentId;
 
   const ProfileInfo({
     required this.id,
@@ -68,6 +85,14 @@ class ProfileInfo {
     this.preferredLanguage,
     this.createdAt,
     this.updatedAt,
+    // Rating fields
+    this.providerRating = 0.0,
+    this.providerTotalReviews = 0,
+    this.providerTotalTrips = 0,
+    this.customerRating = 0.0,
+    this.customerTotalReviews = 0,
+    this.customerTotalTrips = 0,
+    // Contact
     this.email,
     this.phone,
     this.aiCredits = 50,
@@ -86,6 +111,7 @@ class ProfileInfo {
     this.paymentProvider,
     this.stripeAccountId,
     this.razorpayAccountId,
+    this.bankCurrency,
     this.bankAccountHolder,
     this.bankAccountNumber,
     this.bankName,
@@ -97,6 +123,9 @@ class ProfileInfo {
     this.addressLine2,
     this.city,
     this.state,
+    this.subscriptionPlan = 'basic',
+    this.subscriptionExpiresAt,
+    this.subscriptionPaymentId,
   });
 
   factory ProfileInfo.fromJson(Map<String, dynamic> json) {
@@ -109,8 +138,19 @@ class ProfileInfo {
       country: json['country'] as String?,
       bio: json['bio'] as String?,
       preferredLanguage: json['preferred_language'] as String?,
-      createdAt: json['created_at'] != null ? DateTime.parse(json['created_at'] as String) : null,
-      updatedAt: json['updated_at'] != null ? DateTime.parse(json['updated_at'] as String) : null,
+      createdAt: json['created_at'] != null
+          ? DateTime.parse(json['created_at'] as String)
+          : null,
+      updatedAt: json['updated_at'] != null
+          ? DateTime.parse(json['updated_at'] as String)
+          : null,
+      // Rating fields
+      providerRating: (json['provider_rating'] as num?)?.toDouble() ?? 0.0,
+      providerTotalReviews: json['provider_total_reviews'] as int? ?? 0,
+      providerTotalTrips: json['provider_total_trips'] as int? ?? 0,
+      customerRating: (json['customer_rating'] as num?)?.toDouble() ?? 0.0,
+      customerTotalReviews: json['customer_total_reviews'] as int? ?? 0,
+      customerTotalTrips: json['customer_total_trips'] as int? ?? 0,
       // profiles_contact
       email: json['email'] as String?,
       phone: json['phone_number'] as String?,
@@ -131,17 +171,25 @@ class ProfileInfo {
       paymentProvider: json['payment_provider'] as String?,
       stripeAccountId: json['stripe_account_id'] as String?,
       razorpayAccountId: json['razorpay_account_id'] as String?,
+      bankCurrency: json['bank_currency'] as String?,
       bankAccountHolder: json['bank_account_holder'] as String?,
       bankAccountNumber: json['bank_account_number'] as String?,
       bankName: json['bank_name'] as String?,
       bankIFSC: json['bank_ifsc'] as String?,
       bankAccountType: json['bank_account_type'] as String?,
       gender: json['gender'] as String?,
-      dateOfBirth: json['date_of_birth'] != null ? DateTime.tryParse(json['date_of_birth'] as String) : null,
+      dateOfBirth: json['date_of_birth'] != null
+          ? DateTime.tryParse(json['date_of_birth'] as String)
+          : null,
       addressLine1: json['address_line1'] as String?,
       addressLine2: json['address_line2'] as String?,
       city: json['city'] as String?,
       state: json['state'] as String?,
+      subscriptionPlan: json['subscription_plan'] as String? ?? 'basic',
+      subscriptionExpiresAt: json['subscription_expires_at'] != null
+          ? DateTime.parse(json['subscription_expires_at'] as String)
+          : null,
+      subscriptionPaymentId: json['subscription_payment_id'] as String?,
     );
   }
 
@@ -154,6 +202,13 @@ class ProfileInfo {
     if (country != null) 'country': country,
     if (bio != null) 'bio': bio,
     if (preferredLanguage != null) 'preferred_language': preferredLanguage,
+    // Rating fields (usually updated by system, not user)
+    'provider_rating': providerRating,
+    'provider_total_reviews': providerTotalReviews,
+    'provider_total_trips': providerTotalTrips,
+    'customer_rating': customerRating,
+    'customer_total_reviews': customerTotalReviews,
+    'customer_total_trips': customerTotalTrips,
   };
 
   // profiles_contact table
@@ -182,17 +237,24 @@ class ProfileInfo {
     if (paymentProvider != null) 'payment_provider': paymentProvider,
     if (stripeAccountId != null) 'stripe_account_id': stripeAccountId,
     if (razorpayAccountId != null) 'razorpay_account_id': razorpayAccountId,
+    if (bankCurrency != null) 'bank_currency': bankCurrency,
     if (bankAccountHolder != null) 'bank_account_holder': bankAccountHolder,
     if (bankAccountNumber != null) 'bank_account_number': bankAccountNumber,
     if (bankName != null) 'bank_name': bankName,
     if (bankIFSC != null) 'bank_ifsc': bankIFSC,
     if (bankAccountType != null) 'bank_account_type': bankAccountType,
     if (gender != null) 'gender': gender,
-    if (dateOfBirth != null) 'date_of_birth': dateOfBirth!.toIso8601String().split('T').first,
+    if (dateOfBirth != null)
+      'date_of_birth': dateOfBirth!.toIso8601String().split('T').first,
     if (addressLine1 != null) 'address_line1': addressLine1,
     if (addressLine2 != null) 'address_line2': addressLine2,
     if (city != null) 'city': city,
     if (state != null) 'state': state,
+    'subscription_plan': subscriptionPlan,
+    if (subscriptionExpiresAt != null)
+      'subscription_expires_at': subscriptionExpiresAt!.toIso8601String(),
+    if (subscriptionPaymentId != null)
+      'subscription_payment_id': subscriptionPaymentId,
   };
 
   ProfileInfo copyWith({
@@ -240,6 +302,8 @@ class ProfileInfo {
     bool setStripeNull = false,
     String? razorpayAccountId,
     bool setRazorpayNull = false,
+    String? bankCurrency,
+    bool setBankCurrencyNull = false,
     String? bankAccountHolder,
     bool setBankHolderNull = false,
     String? bankAccountNumber,
@@ -256,12 +320,17 @@ class ProfileInfo {
     String? addressLine2,
     String? city,
     String? state,
+    String? subscriptionPlan,
+    DateTime? subscriptionExpiresAt,
+    String? subscriptionPaymentId,
   }) {
     return ProfileInfo(
       id: id ?? this.id,
       profileName: profileName ?? this.profileName,
       avatarUrl: setAvatarNull ? null : avatarUrl ?? this.avatarUrl,
-      businessType: setBusinessTypeNull ? null : businessType ?? this.businessType,
+      businessType: setBusinessTypeNull
+          ? null
+          : businessType ?? this.businessType,
       country: setCountryNull ? null : country ?? this.country,
       bio: setBioNull ? null : bio ?? this.bio,
       preferredLanguage: preferredLanguage ?? this.preferredLanguage,
@@ -273,9 +342,15 @@ class ProfileInfo {
       aadhaar: setAadhaarNull ? null : aadhaar ?? this.aadhaar,
       pan: setPanNull ? null : pan ?? this.pan,
       drivingLicense: setDlNull ? null : drivingLicense ?? this.drivingLicense,
-      aadhaarFrontImage: setAadhaarFrontNull ? null : aadhaarFrontImage ?? this.aadhaarFrontImage,
-      aadhaarBackImage: setAadhaarBackNull ? null : aadhaarBackImage ?? this.aadhaarBackImage,
-      panFrontImage: setPanFrontNull ? null : panFrontImage ?? this.panFrontImage,
+      aadhaarFrontImage: setAadhaarFrontNull
+          ? null
+          : aadhaarFrontImage ?? this.aadhaarFrontImage,
+      aadhaarBackImage: setAadhaarBackNull
+          ? null
+          : aadhaarBackImage ?? this.aadhaarBackImage,
+      panFrontImage: setPanFrontNull
+          ? null
+          : panFrontImage ?? this.panFrontImage,
       panBackImage: setPanBackNull ? null : panBackImage ?? this.panBackImage,
       dlFrontImage: setDlFrontNull ? null : dlFrontImage ?? this.dlFrontImage,
       dlBackImage: setDlBackNull ? null : dlBackImage ?? this.dlBackImage,
@@ -283,19 +358,37 @@ class ProfileInfo {
       panVerified: panVerified ?? this.panVerified,
       dlVerified: dlVerified ?? this.dlVerified,
       paymentProvider: paymentProvider ?? this.paymentProvider,
-      stripeAccountId: setStripeNull ? null : stripeAccountId ?? this.stripeAccountId,
-      razorpayAccountId: setRazorpayNull ? null : razorpayAccountId ?? this.razorpayAccountId,
-      bankAccountHolder: setBankHolderNull ? null : bankAccountHolder ?? this.bankAccountHolder,
-      bankAccountNumber: setBankNumberNull ? null : bankAccountNumber ?? this.bankAccountNumber,
+      stripeAccountId: setStripeNull
+          ? null
+          : stripeAccountId ?? this.stripeAccountId,
+      razorpayAccountId: setRazorpayNull
+          ? null
+          : razorpayAccountId ?? this.razorpayAccountId,
+      bankCurrency: setBankCurrencyNull
+          ? null
+          : bankCurrency ?? this.bankCurrency,
+      bankAccountHolder: setBankHolderNull
+          ? null
+          : bankAccountHolder ?? this.bankAccountHolder,
+      bankAccountNumber: setBankNumberNull
+          ? null
+          : bankAccountNumber ?? this.bankAccountNumber,
       bankName: setBankNameNull ? null : bankName ?? this.bankName,
       bankIFSC: setBankIFSCNull ? null : bankIFSC ?? this.bankIFSC,
-      bankAccountType: setBankTypeNull ? null : bankAccountType ?? this.bankAccountType,
+      bankAccountType: setBankTypeNull
+          ? null
+          : bankAccountType ?? this.bankAccountType,
       gender: gender ?? this.gender,
       dateOfBirth: dateOfBirth ?? this.dateOfBirth,
       addressLine1: addressLine1 ?? this.addressLine1,
       addressLine2: addressLine2 ?? this.addressLine2,
       city: city ?? this.city,
       state: state ?? this.state,
+      subscriptionPlan: subscriptionPlan ?? this.subscriptionPlan,
+      subscriptionExpiresAt:
+          subscriptionExpiresAt ?? this.subscriptionExpiresAt,
+      subscriptionPaymentId:
+          subscriptionPaymentId ?? this.subscriptionPaymentId,
     );
   }
 }
@@ -316,7 +409,9 @@ class ProfileRepository {
       if (kDebugMode) print('🔧 ProfileRepository init starting...');
       await ProfileNameRegistry.instance.init();
 
-      firebase_auth.FirebaseAuth.instance.authStateChanges().listen((firebaseUser) async {
+      firebase_auth.FirebaseAuth.instance.authStateChanges().listen((
+        firebaseUser,
+      ) async {
         if (firebaseUser != null) {
           if (kDebugMode) print('✅ Firebase user ready: ${firebaseUser.uid}');
           try {
@@ -351,13 +446,27 @@ class ProfileRepository {
       if (kDebugMode) print('🔍 Loading profile for user: $userId');
 
       final results = await Future.wait([
-        _supabase.from('profiles_public').select().eq('id', userId).maybeSingle(),
-        _supabase.from('profiles_contact').select().eq('profile_id', userId).maybeSingle(),
-        _supabase.from('profiles_private').select().eq('profile_id', userId).maybeSingle(),
+        _supabase
+            .from('profiles_public')
+            .select()
+            .eq('id', userId)
+            .maybeSingle(),
+        _supabase
+            .from('profiles_contact')
+            .select()
+            .eq('profile_id', userId)
+            .maybeSingle(),
+        _supabase
+            .from('profiles_private')
+            .select()
+            .eq('profile_id', userId)
+            .maybeSingle(),
       ]);
 
       final publicData = results[0];
-      if (publicData == null) throw Exception('Profile not found for user: $userId');
+      if (publicData == null) {
+        throw Exception('Profile not found for user: $userId');
+      }
 
       final merged = {
         ...publicData,
@@ -391,8 +500,12 @@ class ProfileRepository {
 
       await Future.wait([
         _supabase.from('profiles_public').upsert(publicJson, onConflict: 'id'),
-        _supabase.from('profiles_contact').upsert(contactJson, onConflict: 'profile_id'),
-        _supabase.from('profiles_private').upsert(privateJson, onConflict: 'profile_id'),
+        _supabase
+            .from('profiles_contact')
+            .upsert(contactJson, onConflict: 'profile_id'),
+        _supabase
+            .from('profiles_private')
+            .upsert(privateJson, onConflict: 'profile_id'),
       ]);
 
       profile.value = profileInfo;
@@ -405,7 +518,12 @@ class ProfileRepository {
     }
   }
 
-  Future<void> saveDocument(String documentType, String side, String base64Image, {bool isVerified = false}) async {
+  Future<void> saveDocument(
+    String documentType,
+    String side,
+    String base64Image, {
+    bool isVerified = false,
+  }) async {
     final p = _currentProfile ?? profile.value;
     if (p.id.isEmpty) throw Exception('No profile loaded');
 
@@ -413,18 +531,36 @@ class ProfileRepository {
     switch (documentType) {
       case 'aadhaar':
         updated = side == 'front'
-            ? p.copyWith(aadhaarFrontImage: base64Image, aadhaarVerified: isVerified ? true : p.aadhaarVerified)
-            : p.copyWith(aadhaarBackImage: base64Image, aadhaarVerified: isVerified ? true : p.aadhaarVerified);
+            ? p.copyWith(
+                aadhaarFrontImage: base64Image,
+                aadhaarVerified: isVerified ? true : p.aadhaarVerified,
+              )
+            : p.copyWith(
+                aadhaarBackImage: base64Image,
+                aadhaarVerified: isVerified ? true : p.aadhaarVerified,
+              );
         break;
       case 'pan':
         updated = side == 'front'
-            ? p.copyWith(panFrontImage: base64Image, panVerified: isVerified ? true : p.panVerified)
-            : p.copyWith(panBackImage: base64Image, panVerified: isVerified ? true : p.panVerified);
+            ? p.copyWith(
+                panFrontImage: base64Image,
+                panVerified: isVerified ? true : p.panVerified,
+              )
+            : p.copyWith(
+                panBackImage: base64Image,
+                panVerified: isVerified ? true : p.panVerified,
+              );
         break;
       case 'dl':
         updated = side == 'front'
-            ? p.copyWith(dlFrontImage: base64Image, dlVerified: isVerified ? true : p.dlVerified)
-            : p.copyWith(dlBackImage: base64Image, dlVerified: isVerified ? true : p.dlVerified);
+            ? p.copyWith(
+                dlFrontImage: base64Image,
+                dlVerified: isVerified ? true : p.dlVerified,
+              )
+            : p.copyWith(
+                dlBackImage: base64Image,
+                dlVerified: isVerified ? true : p.dlVerified,
+              );
         break;
       default:
         throw Exception('Unknown document type: $documentType');
@@ -436,10 +572,14 @@ class ProfileRepository {
     final p = _currentProfile ?? profile.value;
     if (p.id.isEmpty) return null;
     switch (documentType) {
-      case 'aadhaar': return side == 'front' ? p.aadhaarFrontImage : p.aadhaarBackImage;
-      case 'pan': return side == 'front' ? p.panFrontImage : p.panBackImage;
-      case 'dl': return side == 'front' ? p.dlFrontImage : p.dlBackImage;
-      default: return null;
+      case 'aadhaar':
+        return side == 'front' ? p.aadhaarFrontImage : p.aadhaarBackImage;
+      case 'pan':
+        return side == 'front' ? p.panFrontImage : p.panBackImage;
+      case 'dl':
+        return side == 'front' ? p.dlFrontImage : p.dlBackImage;
+      default:
+        return null;
     }
   }
 
@@ -447,7 +587,9 @@ class ProfileRepository {
     await AppPreferences.instance.setAvatarBase64(base64);
     final p = _currentProfile ?? profile.value;
     if (p.id.isNotEmpty) {
-      await saveProfile(p.copyWith(avatarUrl: base64, setAvatarNull: base64 == null));
+      await saveProfile(
+        p.copyWith(avatarUrl: base64, setAvatarNull: base64 == null),
+      );
     }
   }
 
@@ -479,33 +621,42 @@ class ProfileRepository {
     if (profileName != null && profileName.trim().isNotEmpty) {
       final currentUser = auth.AuthRepository.instance.currentUser;
       if (currentUser != null) {
-        final isAvailable = await ProfileNameRegistry.instance.updateName(currentUser.id, profileName.trim());
-        if (!isAvailable) throw Exception('Profile name already taken. Please choose a different name.');
+        final isAvailable = await ProfileNameRegistry.instance.updateName(
+          currentUser.id,
+          profileName.trim(),
+        );
+        if (!isAvailable) {
+          throw Exception(
+            'Profile name already taken. Please choose a different name.',
+          );
+        }
       }
     }
 
-    await saveProfile(p.copyWith(
-      profileName: profileName,
-      email: email,
-      setEmailNull: setEmailNull,
-      phone: phone,
-      setPhoneNull: setPhoneNull,
-      aadhaar: aadhaar,
-      setAadhaarNull: setAadhaarNull,
-      pan: pan,
-      setPanNull: setPanNull,
-      avatarUrl: avatarUrl,
-      setAvatarNull: setAvatarNull,
-      businessType: businessType,
-      setBusinessTypeNull: setBusinessTypeNull,
-      bio: bio,
-      setBioNull: setBioNull,
-      gender: gender,
-      addressLine1: addressLine1,
-      addressLine2: addressLine2,
-      city: city,
-      state: state,
-    ));
+    await saveProfile(
+      p.copyWith(
+        profileName: profileName,
+        email: email,
+        setEmailNull: setEmailNull,
+        phone: phone,
+        setPhoneNull: setPhoneNull,
+        aadhaar: aadhaar,
+        setAadhaarNull: setAadhaarNull,
+        pan: pan,
+        setPanNull: setPanNull,
+        avatarUrl: avatarUrl,
+        setAvatarNull: setAvatarNull,
+        businessType: businessType,
+        setBusinessTypeNull: setBusinessTypeNull,
+        bio: bio,
+        setBioNull: setBioNull,
+        gender: gender,
+        addressLine1: addressLine1,
+        addressLine2: addressLine2,
+        city: city,
+        state: state,
+      ),
+    );
   }
 
   Future<void> updatePaymentProvider(String provider) async {
@@ -514,16 +665,29 @@ class ProfileRepository {
     await saveProfile(p.copyWith(paymentProvider: provider));
   }
 
-  Future<void> updateStripeAccount(String accountId) async {
+  Future<void> updateStripeAccount(String accountId, {String? currency}) async {
     final p = _currentProfile ?? profile.value;
     if (p.id.isEmpty) throw Exception('No profile loaded');
-    await saveProfile(p.copyWith(stripeAccountId: accountId));
+
+    // If currency not provided, try to detect or use default
+    final bankCurrency =
+        currency ??
+        (accountId.startsWith('acct_test_') ? 'USD' : null) ??
+        p.bankCurrency;
+
+    await saveProfile(
+      p.copyWith(stripeAccountId: accountId, bankCurrency: bankCurrency),
+    );
   }
 
   Future<void> updateRazorpayAccount(String accountId) async {
     final p = _currentProfile ?? profile.value;
     if (p.id.isEmpty) throw Exception('No profile loaded');
-    await saveProfile(p.copyWith(razorpayAccountId: accountId));
+
+    // Razorpay is India-only, always INR
+    await saveProfile(
+      p.copyWith(razorpayAccountId: accountId, bankCurrency: 'INR'),
+    );
   }
 
   Future<void> updateCountry(String country) async {
@@ -537,7 +701,9 @@ class ProfileRepository {
     if (p.id.isEmpty) throw Exception('No profile loaded');
     if (p.aiCredits < amount) return false;
     await saveProfile(p.copyWith(aiCredits: p.aiCredits - amount));
-    debugPrint('✅ Deducted $amount credits. Remaining: ${p.aiCredits - amount}');
+    debugPrint(
+      '✅ Deducted $amount credits. Remaining: ${p.aiCredits - amount}',
+    );
     return true;
   }
 
@@ -548,7 +714,29 @@ class ProfileRepository {
     debugPrint('✅ Added $amount credits. New balance: ${p.aiCredits + amount}');
   }
 
-  Future<Map<String, String?>> getBookingPartnerContact(String partnerId) async {
+  /// Update subscription plan after successful payment
+  Future<void> updateSubscription({
+    required String plan,
+    required DateTime expiresAt,
+    required String paymentId,
+  }) async {
+    final p = _currentProfile ?? profile.value;
+    if (p.id.isEmpty) throw Exception('No profile loaded');
+
+    await saveProfile(
+      p.copyWith(
+        subscriptionPlan: plan,
+        subscriptionExpiresAt: expiresAt,
+        subscriptionPaymentId: paymentId,
+      ),
+    );
+
+    debugPrint('✅ Subscription updated: $plan (expires: $expiresAt)');
+  }
+
+  Future<Map<String, String?>> getBookingPartnerContact(
+    String partnerId,
+  ) async {
     try {
       final data = await _supabase
           .from('profiles_contact')
@@ -567,5 +755,75 @@ class ProfileRepository {
   }
 }
 
+/// Extension to check if profile is verified
+extension ProfileVerification on ProfileInfo {
+  /// Returns true if profile has at least one document verified
+  bool get isVerified {
+    return aadhaarVerified || panVerified || dlVerified;
+  }
 
+  /// Returns verification level: 0 (none), 1 (partial), 2 (full)
+  int get verificationLevel {
+    int count = 0;
+    if (aadhaarVerified) count++;
+    if (panVerified) count++;
+    if (dlVerified) count++;
 
+    if (count == 0) return 0; // Not verified
+    if (count < 3) return 1; // Partially verified
+    return 2; // Fully verified (all 3 documents)
+  }
+
+  /// Returns a list of verified documents
+  List<String> get verifiedDocuments {
+    final docs = <String>[];
+    if (aadhaarVerified) docs.add('Aadhaar');
+    if (panVerified) docs.add('PAN');
+    if (dlVerified) docs.add('Driving License');
+    return docs;
+  }
+
+  /// Returns true if profile qualifies as "expert"
+  /// Expert = Has completed significant trips with good ratings
+  /// Uses whichever role (provider/customer) has more activity
+  bool get isExpert {
+    // Check provider stats
+    final providerQualifies = providerTotalTrips >= 50 && providerRating >= 4.5;
+
+    // Check customer stats
+    final customerQualifies = customerTotalTrips >= 50 && customerRating >= 4.5;
+
+    return providerQualifies || customerQualifies;
+  }
+
+  /// Returns true if profile meets the demand plan requirements
+  bool meetsDemandPlan(DemandPlan plan) {
+    switch (plan) {
+      case DemandPlan.basic:
+        return true; // Everyone qualifies for basic
+
+      case DemandPlan.verified:
+        return isVerified; // Need at least one verified document
+
+      case DemandPlan.expert:
+        return isExpert; // Need expert status (50+ trips, 4.5+ rating)
+    }
+  }
+
+  /// Returns true if user has an active paid subscription (Premium or Expert)
+  bool get hasActiveSubscription {
+    if (subscriptionPlan == 'basic') return false;
+    if (subscriptionExpiresAt == null) return false;
+    return subscriptionExpiresAt!.isAfter(DateTime.now());
+  }
+
+  /// Returns true if user has Premium plan (active)
+  bool get isPremium {
+    return subscriptionPlan == 'premium' && hasActiveSubscription;
+  }
+
+  /// Returns true if user has Expert plan (active)
+  bool get isExpertSubscriber {
+    return subscriptionPlan == 'expert' && hasActiveSubscription;
+  }
+}

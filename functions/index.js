@@ -1,6 +1,5 @@
 const functions = require('firebase-functions');
 const admin = require('firebase-admin');
-const Razorpay = require('razorpay');
 const crypto = require('crypto');
 
 // Load environment variables from .env file (for local development)
@@ -11,21 +10,40 @@ admin.initializeApp();
 // Initialize Firestore-based Stripe escrow functions
 const stripeEscrow = require('./stripe-escrow');
 
-// Get Razorpay keys from environment variables ONLY — never hardcode secrets
-// Set locally: add RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET to functions/.env
-// Set for deployment: use Firebase Secret Manager or .env files per environment
-const RAZORPAY_KEY_ID = process.env.RAZORPAY_KEY_ID;
-const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET;
+// ═══════════════════════════════════════════════════════════
+// 🔑 PAYMENT MODE SWITCH
+// Set USE_LIVE_KEYS=true in your .env or Firebase secrets to go live.
+// Default is TEST mode (safe for development).
+// ═══════════════════════════════════════════════════════════
+const USE_LIVE_KEYS = process.env.USE_LIVE_KEYS === 'true';
+
+console.log(`💳 Payment mode: ${USE_LIVE_KEYS ? '🔴 LIVE' : '🟡 TEST'}`);
+
+// Pick the right keys based on mode
+const RAZORPAY_KEY_ID = USE_LIVE_KEYS
+  ? process.env.RAZORPAY_KEY_ID_LIVE
+  : process.env.RAZORPAY_KEY_ID_TEST;
+
+const RAZORPAY_KEY_SECRET = USE_LIVE_KEYS
+  ? process.env.RAZORPAY_KEY_SECRET_LIVE
+  : process.env.RAZORPAY_KEY_SECRET_TEST;
 
 if (!RAZORPAY_KEY_ID || !RAZORPAY_KEY_SECRET) {
-  console.error('❌ RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET must be set in environment variables');
+  console.error(`❌ Razorpay ${USE_LIVE_KEYS ? 'LIVE' : 'TEST'} keys not set in environment variables`);
 }
 
-// Initialize Razorpay with your keys
-const razorpay = new Razorpay({
-  key_id: RAZORPAY_KEY_ID,
-  key_secret: RAZORPAY_KEY_SECRET,
-});
+// Initialize Razorpay lazily to avoid crash when keys are missing at startup
+let _razorpay = null;
+function getRazorpay() {
+  if (!_razorpay) {
+    if (!RAZORPAY_KEY_ID || !RAZORPAY_KEY_SECRET) {
+      throw new Error(`Razorpay ${USE_LIVE_KEYS ? 'LIVE' : 'TEST'} keys not configured`);
+    }
+    const Razorpay = require('razorpay');
+    _razorpay = new Razorpay({ key_id: RAZORPAY_KEY_ID, key_secret: RAZORPAY_KEY_SECRET });
+  }
+  return _razorpay;
+}
 
 /**
  * Create Razorpay Order
@@ -74,7 +92,7 @@ exports.createRazorpayOrder = functions.https.onCall(async (data, context) => {
     }
 
     // Create Razorpay order
-    const order = await razorpay.orders.create({
+    const order = await getRazorpay().orders.create({
       amount: amount, // amount in paise
       currency: currency,
       receipt: receipt || `receipt_${Date.now()}`,
@@ -146,7 +164,7 @@ exports.verifyRazorpayPayment = functions.https.onCall(async (data, context) => 
     }
 
     // Fetch payment details from Razorpay
-    const payment = await razorpay.payments.fetch(razorpay_payment_id);
+    const payment = await getRazorpay().payments.fetch(razorpay_payment_id);
 
     console.log('Payment verified:', razorpay_payment_id);
 

@@ -27,29 +27,47 @@ class CustomerSlotRepository {
 
   bool _initialized = false;
 
+  // Cache for vehicle profile images (vehicleId -> profileImageUrl)
+  final Map<String, String> _vehicleImageCache = {};
+
   Future<void> init() async {
     if (_initialized) return;
+
+    // Ensure CustomerVehicleRepository is initialized and loaded first
+    await CustomerVehicleRepository.instance.init();
+
     await _loadSlots();
-    
+
     // Listen to vehicle changes to rebuild slot entries
-    CustomerVehicleRepository.instance.vehiclesListenable.addListener(_buildSlotEntries);
-    
+    CustomerVehicleRepository.instance.vehiclesListenable.addListener(
+      _buildSlotEntries,
+    );
+
     _initialized = true;
   }
 
   void _buildSlotEntries() {
     final entries = <SlotEntry>[];
     for (final slot in _slots.value) {
-      final vehicle = CustomerVehicleRepository.instance.getById(slot.vehicleId);
-      
+      final vehicle = CustomerVehicleRepository.instance.getById(
+        slot.vehicleId,
+      );
+
       if (vehicle != null) {
         // Vehicle found - use it
         entries.add(SlotEntry(slot: slot, vehicle: vehicle));
       } else {
         // Vehicle not found - create placeholder
-        debugPrint('⚠️ Vehicle not found for user slot ${slot.id}, using placeholder');
+        debugPrint(
+          '⚠️ Vehicle not found for user slot ${slot.id}, using placeholder',
+        );
 
-        final providerName = ProfileNameRegistry.instance.getNameForUser(slot.profileId) ?? 'User ${slot.profileId.substring(0, 6)}';
+        final providerName =
+            ProfileNameRegistry.instance.getNameForUser(slot.profileId) ??
+            'User ${slot.profileId.substring(0, 6)}';
+
+        // Get cached vehicle image if available
+        final cachedImage = _vehicleImageCache[slot.vehicleId];
 
         final placeholderVehicle = Vehicle(
           id: slot.vehicleId,
@@ -59,6 +77,7 @@ class CustomerSlotRepository {
           type: slot.serviceType.name,
           capabilities: [slot.serviceType],
           seatingCapacity: slot.capacity,
+          profileImage: cachedImage, // Use cached image
           galleryImages: [],
           createdAt: slot.createdAt,
           gpsMode: VehicleGpsMode.manual,
@@ -76,12 +95,14 @@ class CustomerSlotRepository {
           currency: 'INR',
           countryCode: 'IN',
         );
-        
+
         entries.add(SlotEntry(slot: slot, vehicle: placeholderVehicle));
       }
     }
     slotsListenable.value = entries;
-    debugPrint('📊 Built ${entries.length} user slot entries from ${_slots.value.length} slots');
+    debugPrint(
+      '📊 Built ${entries.length} user slot entries from ${_slots.value.length} slots',
+    );
   }
 
   Future<void> _loadSlots() async {
@@ -89,53 +110,70 @@ class CustomerSlotRepository {
       // Load from Supabase first (source of truth)
       final supabase = Supabase.instance.client;
       final currentUser = AuthRepository.instance.currentUser;
-      
+
       if (currentUser == null) {
         debugPrint('⚠️ No user logged in - cannot load user posts');
         _slots.value = [];
         slotsListenable.value = [];
         return;
       }
-      
-      debugPrint('🔍 Loading user posts from Supabase for user: ${currentUser.id}');
-      
-      // Load ONLY posts created by the current user
+
+      debugPrint(
+        '🔍 Loading user posts from Supabase for user: ${currentUser.id}',
+      );
+
+      // Load only CUSTOMER request posts from Supabase
+      // Simplified: Just check post_type (no vehicle JOIN needed)
       final response = await supabase
           .from('posts')
           .select('*')
-          .eq('profile_id', currentUser.id) // CRITICAL: Filter by current user
           .eq('is_active', true)
+          .eq('post_type', 'request')
           .gt('end_time', DateTime.now().toUtc().toIso8601String())
           .order('created_at', ascending: false);
 
-      debugPrint('🔍 Supabase user_posts response: ${response.length} posts found');
-      
+      debugPrint(
+        '🔍 Supabase user_posts response: ${response.length} posts found',
+      );
+
       _slots.value = (response as List)
           .map((json) => Slot.fromJson(json as Map<String, dynamic>))
           .toList();
-      
+
       _buildSlotEntries();
       debugPrint('✅ Loaded ${_slots.value.length} user slots from Supabase');
-      
+
+      // Load profile names and vehicle images in background (non-blocking)
+      Future.microtask(() async {
+        await _loadProfileNames(_slots.value);
+        final imageMap = await _loadVehicleImages(_slots.value);
+        _vehicleImageCache.addAll(imageMap);
+        _buildSlotEntries(); // Rebuild with names and images
+      });
+
       // Save to local storage as cache
       await _saveSlots();
       return;
     } catch (e) {
-      debugPrint('⚠️ Failed to load user slots from Supabase, trying local: $e');
+      debugPrint(
+        '⚠️ Failed to load user slots from Supabase, trying local: $e',
+      );
     }
-    
+
     // Fallback to local storage
     try {
       final prefs = await SharedPreferences.getInstance();
       final jsonString = prefs.getString(_userSlotsKey);
-      
+
       if (jsonString != null) {
         final List<dynamic> jsonList = json.decode(jsonString);
         _slots.value = jsonList
             .map((json) => Slot.fromJson(json as Map<String, dynamic>))
             .toList();
         _buildSlotEntries();
-        debugPrint('✅ Loaded ${_slots.value.length} user slots from local storage');
+        debugPrint(
+          '✅ Loaded ${_slots.value.length} user slots from local storage',
+        );
       } else {
         _slots.value = [];
         slotsListenable.value = [];
@@ -144,6 +182,60 @@ class CustomerSlotRepository {
       debugPrint('❌ Failed to load user slots: $e');
       _slots.value = [];
       slotsListenable.value = [];
+    }
+  }
+
+  /// Public method to reload slots from Supabase (e.g., after creating a new post)
+  Future<void> loadSlots() async {
+    await _loadSlots();
+    // Force rebuild after reload in case vehicles loaded during the query
+    _buildSlotEntries();
+  }
+
+  /// Fetch ALL slots (including inactive) for a specific vehicle directly from Supabase
+  /// This is used in vehicle detail screen to show all posts history
+  Future<List<SlotEntry>> getAllSlotsForVehicle(String vehicleId) async {
+    try {
+      final supabase = Supabase.instance.client;
+      final response = await supabase
+          .from('posts')
+          .select('*')
+          .eq('vehicle_id', vehicleId)
+          .eq('post_type', 'request')
+          .order('created_at', ascending: false);
+
+      final slots = (response as List)
+          .map((json) => Slot.fromJson(json as Map<String, dynamic>))
+          .toList();
+
+      // Get the vehicle
+      final vehicle = CustomerVehicleRepository.instance.getById(vehicleId);
+      if (vehicle == null) return [];
+
+      // Build slot entries
+      return slots
+          .map((slot) => SlotEntry(slot: slot, vehicle: vehicle))
+          .toList();
+    } catch (e) {
+      debugPrint('❌ Failed to load all slots for vehicle $vehicleId: $e');
+      return [];
+    }
+  }
+
+  /// Get total count of ALL posts (including inactive) for a vehicle
+  Future<int> getTotalPostCountForVehicle(String vehicleId) async {
+    try {
+      final supabase = Supabase.instance.client;
+      final response = await supabase
+          .from('posts')
+          .select('id')
+          .eq('vehicle_id', vehicleId)
+          .eq('post_type', 'request');
+
+      return (response as List).length;
+    } catch (e) {
+      debugPrint('❌ Failed to get post count for vehicle $vehicleId: $e');
+      return 0;
     }
   }
 
@@ -157,6 +249,109 @@ class CustomerSlotRepository {
       debugPrint('✅ Saved ${_slots.value.length} user slots to local storage');
     } catch (e) {
       debugPrint('❌ Failed to save user slots: $e');
+    }
+  }
+
+  /// Load profile names and avatars from Supabase and cache them in ProfileNameRegistry
+  Future<void> _loadProfileNames(List<Slot> slots) async {
+    try {
+      // Get unique profile IDs
+      final profileIds = slots.map((s) => s.profileId).toSet().toList();
+
+      if (profileIds.isEmpty) {
+        debugPrint('📝 No profile IDs to load names for');
+        return;
+      }
+
+      debugPrint(
+        '📝 Loading profile names and avatars for ${profileIds.length} users',
+      );
+
+      final supabase = Supabase.instance.client;
+
+      // Fetch profile names and avatars from profiles_public table
+      final response = await supabase
+          .from('profiles_public')
+          .select('id, full_name, profile_photo_url')
+          .inFilter('id', profileIds);
+
+      debugPrint('📝 Fetched ${response.length} profiles from Supabase');
+
+      // Register each name and avatar in the ProfileNameRegistry
+      await ProfileNameRegistry.instance.init();
+
+      for (final profile in response) {
+        final id = profile['id'] as String;
+        final name = profile['full_name'] as String?;
+        final avatarUrl = profile['profile_photo_url'] as String?;
+
+        if (name != null && name.isNotEmpty) {
+          // Directly update the registry (bypass availability check)
+          await ProfileNameRegistry.instance.registerName(id, name);
+          debugPrint('📝 Registered name for user $id: $name');
+        }
+
+        if (avatarUrl != null && avatarUrl.isNotEmpty) {
+          await ProfileNameRegistry.instance.registerAvatar(id, avatarUrl);
+          debugPrint('📷 Registered avatar for user $id');
+        }
+      }
+
+      debugPrint('✅ Profile names and avatars loaded and cached');
+    } catch (e) {
+      debugPrint('⚠️ Failed to load profile data: $e');
+      // Don't throw - this is not critical enough to block loading
+    }
+  }
+
+  /// Load vehicle profile images from Supabase for missing vehicles
+  /// Returns a map of vehicleId -> profileImage
+  Future<Map<String, String>> _loadVehicleImages(List<Slot> slots) async {
+    try {
+      // Get unique vehicle IDs from slots where vehicle not found
+      final missingVehicleIds = <String>[];
+      for (final slot in slots) {
+        final vehicle = CustomerVehicleRepository.instance.getById(
+          slot.vehicleId,
+        );
+        if (vehicle == null) {
+          missingVehicleIds.add(slot.vehicleId);
+        }
+      }
+
+      if (missingVehicleIds.isEmpty) {
+        debugPrint('📷 No missing vehicle images to load');
+        return {};
+      }
+
+      debugPrint('📷 Loading images for ${missingVehicleIds.length} vehicles');
+
+      final supabase = Supabase.instance.client;
+
+      // Fetch vehicle profile images from vehicles table
+      final response = await supabase
+          .from('vehicles')
+          .select('id, vehicle_photo_url')
+          .inFilter('id', missingVehicleIds);
+
+      debugPrint('📷 Fetched ${response.length} vehicle images from Supabase');
+
+      // Build map of vehicleId -> profileImage
+      final imageMap = <String, String>{};
+      for (final vehicle in response) {
+        final id = vehicle['id'] as String;
+        final photoUrl = vehicle['vehicle_photo_url'] as String?;
+
+        if (photoUrl != null && photoUrl.isNotEmpty) {
+          imageMap[id] = photoUrl;
+          debugPrint('📷 Cached image for vehicle $id');
+        }
+      }
+
+      return imageMap;
+    } catch (e) {
+      debugPrint('⚠️ Failed to load vehicle images: $e');
+      return {};
     }
   }
 
@@ -183,7 +378,7 @@ class CustomerSlotRepository {
     _buildSlotEntries();
     await _saveSlots();
     debugPrint('✅ User slot created locally: ${slot.id}');
-    
+
     // Sync to Supabase
     await _syncSlotToSupabase(slot);
   }
@@ -195,13 +390,11 @@ class CustomerSlotRepository {
       return;
     }
 
-    _slots.value = _slots.value
-        .map((s) => s.id == slot.id ? slot : s)
-        .toList();
+    _slots.value = _slots.value.map((s) => s.id == slot.id ? slot : s).toList();
     _buildSlotEntries();
     await _saveSlots();
     debugPrint('✅ User slot updated locally: ${slot.id}');
-    
+
     // Sync to Supabase
     await _syncSlotToSupabase(slot, isUpdate: true);
   }
@@ -215,10 +408,7 @@ class CustomerSlotRepository {
     final supabase = Supabase.instance.client;
     final raw = await supabase.rpc(
       'safe_delete_post',
-      params: {
-        'p_post_id': id,
-        'p_profile_id': user.uid,
-      },
+      params: {'p_post_id': id, 'p_profile_id': user.uid},
     );
 
     debugPrint('🔍 safe_delete_post raw: $raw (${raw.runtimeType})');
@@ -270,14 +460,16 @@ class CustomerSlotRepository {
     try {
       final supabase = Supabase.instance.client;
       final currentUser = AuthRepository.instance.currentUser;
-      
+
       if (currentUser == null) {
         debugPrint('⚠️ No user logged in - skipping Supabase sync');
         return;
       }
 
       // Generate short 6-char reference code from timestamp
-      final refCode = slot.id.toString().substring(slot.id.toString().length - 6);
+      final refCode = slot.id.toString().substring(
+        slot.id.toString().length - 6,
+      );
 
       final data = {
         'id': slot.id,
@@ -295,6 +487,7 @@ class CustomerSlotRepository {
         'price': slot.price,
         'capacity': slot.capacity,
         'terms': slot.notes, // notes maps to terms in DB
+        // 'images': removed - posts use vehicle images
         'pickup_option': slot.pickupOption.name,
         // Parcel fields
         if (slot.maxWeight != null) 'max_weight': slot.maxWeight,
@@ -302,12 +495,16 @@ class CustomerSlotRepository {
         if (slot.maxWidth != null) 'max_width': slot.maxWidth,
         if (slot.maxHeight != null) 'max_height': slot.maxHeight,
         // Lease fields
-        if (slot.securityDeposit != null) 'security_deposit': slot.securityDeposit,
+        if (slot.securityDeposit != null)
+          'security_deposit': slot.securityDeposit,
         if (slot.fuelPolicy != null) 'fuel_policy': slot.fuelPolicy,
         'with_operator': slot.withOperator,
         // Post mode
         'postmode': slot.postMode.dbValue,
         'is_active': slot.isAvailable,
+        // Mark as customer post (request for service)
+        'post_type': 'request',
+        'currency_type': slot.currencyType,
         'updated_at': DateTime.now().toIso8601String(),
       };
 
@@ -322,9 +519,4 @@ class CustomerSlotRepository {
       debugPrint('❌ Failed to sync user slot to Supabase: $e');
     }
   }
-
 }
-
-
-
-

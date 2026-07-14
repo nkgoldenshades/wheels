@@ -34,6 +34,7 @@ SELECT
   -- Operator info (safe to expose)
   operator_name,
   operator_phone,
+  operator_gender,
   operator_profile_photo_url,
   
   -- Ownership flag (useful for UI)

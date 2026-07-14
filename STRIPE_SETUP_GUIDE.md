@@ -1,214 +1,158 @@
-# Stripe Integration Setup Guide
+# 🔧 Stripe Setup Guide - Fix Payment Failure
 
-## Overview
-Stripe is now integrated for international payments and escrow. This allows you to:
-- Accept payments from 135+ countries
-- Hold money in escrow until trip completes
-- Automatically transfer to providers worldwide
-- Support multiple currencies
-
-## Step 1: Get Stripe Keys
-
-1. Sign up at https://stripe.com
-2. Go to Developers → API Keys
-3. Copy your keys:
-   - Publishable key: `pk_test_...`
-   - Secret key: `sk_test_...`
-
-4. Update `lib/services/stripe_service.dart`:
-```dart
-static const String publishableKey = 'pk_test_YOUR_KEY';
-static const String secretKey = 'sk_test_YOUR_KEY';
+## ❌ Current Problem
+**Subscription payment is failing** with error:
+```
+Payment failed: ClientException: Failed to fetch, 
+uri=https://us-central1-quickohunt-app.cloudfunctions.net/createSubscriptionCheckoutSession
 ```
 
-## Step 2: Setup Backend (Firebase Functions)
+## 🔍 Root Cause
+The Firebase Cloud Function `createSubscriptionCheckoutSession` is deployed and working, but the **Stripe secret key is not configured** in the environment variables. The `.env` file has a placeholder value `sk_test_your_key_here` instead of your actual Stripe key.
 
-Create `functions/stripe.js`:
+---
 
-```javascript
-const functions = require('firebase-functions');
-const stripe = require('stripe')('sk_test_YOUR_SECRET_KEY');
+## ✅ Solution: Add Your Stripe Keys
 
-// Create payment intent with escrow
-exports.createPaymentIntent = functions.https.onRequest(async (req, res) => {
-  const { amount, currency, provider_id, application_fee } = req.body;
+### Step 1: Get Your Stripe Test Secret Key
 
-  try {
-    const paymentIntent = await stripe.paymentIntents.create({
-      amount: amount,
-      currency: currency,
-      application_fee_amount: application_fee,
-      transfer_data: {
-        destination: provider_id,
-      },
-    });
+1. **Go to Stripe Dashboard (TEST MODE)**
+   - Visit: https://dashboard.stripe.com/test/apikeys
+   - Make sure you're in **TEST mode** (toggle in top-left)
 
-    res.json({ clientSecret: paymentIntent.client_secret });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
+2. **Copy Your Secret Key**
+   - Look for the section **"Secret key"**
+   - Your key starts with: `sk_test_51...` (followed by random characters)
+   - Click **"Reveal test key"** if it's hidden
+   - Copy the entire key
 
-// Create connected account for provider
-exports.createConnectedAccount = functions.https.onRequest(async (req, res) => {
-  const { email, country } = req.body;
+### Step 2: Update the `.env` File
 
-  try {
-    const account = await stripe.accounts.create({
-      type: 'express',
-      country: country,
-      email: email,
-      capabilities: {
-        card_payments: { requested: true },
-        transfers: { requested: true },
-      },
-    });
+1. **Open the file**: `e:\quickohunt\functions\.env`
 
-    res.json({ account_id: account.id });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
+2. **Replace this line**:
+   ```env
+   STRIPE_SECRET_KEY_TEST=sk_test_your_key_here
+   ```
 
-// Release escrowed funds
-exports.releaseFunds = functions.https.onRequest(async (req, res) => {
-  const { payment_intent_id } = req.body;
+3. **With your actual key**:
+   ```env
+   STRIPE_SECRET_KEY_TEST=sk_test_51SvbBRPL6V2gHHHXYourActualSecretKeyHere...
+   ```
 
-  try {
-    // Funds are automatically transferred when payment succeeds
-    // This endpoint is for manual release if needed
-    const paymentIntent = await stripe.paymentIntents.retrieve(payment_intent_id);
-    
-    res.json({ status: 'released', payment_intent: paymentIntent });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-```
+   ⚠️ **IMPORTANT**: 
+   - Your secret key should start with `sk_test_51SvbBRPL6V2gHHHX` (same account as your publishable key)
+   - The secret key is about 107 characters long
+   - Never share this key publicly or commit it to Git
 
-## Step 3: Deploy Backend
+### Step 3: Deploy Updated Environment
+
+After updating the `.env` file, redeploy your functions:
 
 ```bash
-cd functions
-npm install stripe
+cd e:\quickohunt
 firebase deploy --only functions
 ```
 
-## Step 4: Update Service URLs
+This will upload your new environment variables to Firebase Cloud Functions.
 
-In `lib/services/stripe_service.dart`, update:
-```dart
-static const String backendUrl = 'https://YOUR_PROJECT.cloudfunctions.net';
+---
+
+## 🧪 Testing After Setup
+
+### Test 1: Check Function Logs
+```bash
+firebase functions:log
 ```
+Look for any "Stripe is not configured" errors - they should be gone.
 
-## Step 5: Initialize Stripe in App
+### Test 2: Try Subscription Payment Again
+1. Open your app
+2. Go to subscription payment screen
+3. Try to create a checkout session
+4. It should now redirect to Stripe checkout page
 
-In `lib/main.dart`, add to `main()`:
-```dart
-await StripeService.instance.init();
-```
+---
 
-## How Escrow Works
+## 📋 Your Current Configuration Status
 
-### Payment Flow:
-1. User books a ride for $100
-2. User pays via Stripe
-3. Money held in YOUR Stripe account (escrow)
-4. Trip completes
-5. Stripe automatically transfers $85 to provider (your 15% commission kept)
+### ✅ Already Configured:
+- **Flutter App Publishable Key**: `pk_test_51SvbBRPL6V2gHHHX...` ✓
+- **Razorpay Test Keys**: Configured ✓
+- **Firebase Functions**: Deployed ✓
+- **Function Exports**: `createSubscriptionCheckoutSession` exported ✓
 
-### Code Example:
-```dart
-// When user books
-final success = await StripeService.instance.processPayment(
-  amount: 10000,  // $100.00 in cents
-  currency: 'usd',
-  providerId: 'acct_PROVIDER_STRIPE_ID',
-  applicationFee: 1500,  // $15.00 commission
-);
+### ❌ Missing Configuration:
+- **Stripe Secret Key**: Needs your actual key from dashboard
+- **Supabase Anon Key**: Still has placeholder `your_anon_key_here`
 
-// Funds automatically released on successful payment
-// Provider gets $85, you keep $15
-```
+---
 
-## Provider Onboarding
+## 🔒 Security Best Practices
 
-Providers need to create Stripe Connect accounts:
+### DO:
+- ✅ Keep `.env` file in `.gitignore`
+- ✅ Use test keys during development
+- ✅ Store production keys in Firebase Secret Manager
+- ✅ Use different keys for test and production
 
-```dart
-final accountId = await StripeService.instance.createConnectedAccount(
-  email: providerEmail,
-  country: providerCountry,  // 'US', 'GB', 'IN', etc.
-);
+### DON'T:
+- ❌ Commit `.env` file to Git
+- ❌ Share secret keys publicly
+- ❌ Use production keys in test mode
+- ❌ Hardcode keys in source code
 
-// Save accountId to provider's profile
-```
+---
 
-## Supported Countries
+## 🚀 Going to Production Later
 
-Stripe Connect supports payouts to 40+ countries:
-- USA, Canada, Mexico
-- UK, Germany, France, Spain, Italy
-- Australia, New Zealand, Singapore
-- India, Japan, UAE
-- And more...
+When ready to accept real payments:
 
-## Fees
+1. **Switch to Live Keys**:
+   ```env
+   USE_LIVE_KEYS=true
+   ```
 
-- **Stripe fees**: 2.9% + $0.30 per transaction
-- **Your commission**: Set your own (e.g., 15%)
-- **Currency conversion**: 1% if needed
+2. **Get Live Stripe Keys**:
+   - Go to https://dashboard.stripe.com/apikeys (LIVE mode)
+   - Copy **live secret key** (starts with `sk_live_`)
+   - Update `STRIPE_SECRET_KEY_LIVE` in `.env`
 
-## Test Cards
+3. **Update Flutter App**:
+   - In `lib/services/stripe_service.dart`
+   - Change `useTestMode = false`
+   - Add your live publishable key
 
-Use these for testing:
-- Success: `4242 4242 4242 4242`
-- Decline: `4000 0000 0000 0002`
-- 3D Secure: `4000 0025 0000 3155`
+4. **Redeploy Everything**:
+   ```bash
+   firebase deploy --only functions
+   flutter build apk --release
+   ```
 
-CVV: Any 3 digits
-Expiry: Any future date
+---
 
-## Going Live
+## 📞 Need Help?
 
-1. Complete Stripe account verification
-2. Replace test keys with live keys:
-   - `pk_live_...`
-   - `sk_live_...`
-3. Test with real cards
-4. Enable in production
+If you encounter any issues:
 
-## Hybrid Setup (Razorpay + Stripe)
+1. Check Firebase Functions logs: `firebase functions:log`
+2. Verify your Stripe dashboard is in TEST mode
+3. Ensure the secret key matches your publishable key (same account)
+4. Make sure you redeployed after updating `.env`
 
-In your payment logic:
+---
 
-```dart
-Future<bool> processPayment(String userCountry, int amount) async {
-  if (userCountry == 'India') {
-    // Use Razorpay (cheaper for India)
-    return await RazorpayService.instance.processPayment(amount);
-  } else {
-    // Use Stripe (international)
-    return await StripeService.instance.processPayment(
-      amount: amount,
-      currency: getCurrencyForCountry(userCountry),
-      providerId: provider.stripeAccountId,
-      applicationFee: (amount * 0.15).toInt(),
-    );
-  }
-}
-```
+## 🎯 Quick Checklist
 
-## Security Notes
+- [ ] Logged into Stripe dashboard (test mode)
+- [ ] Copied secret key starting with `sk_test_51SvbBRPL6V2gHHHX...`
+- [ ] Updated `STRIPE_SECRET_KEY_TEST` in `functions/.env`
+- [ ] Saved the `.env` file
+- [ ] Ran `firebase deploy --only functions`
+- [ ] Waited for deployment to complete
+- [ ] Tested subscription payment in app
+- [ ] Checked Firebase logs for errors
 
-- Never expose secret keys in app code
-- Always use backend for sensitive operations
-- Validate amounts on backend
-- Log all transactions
-- Handle refunds properly
+---
 
-## Support
-
-- Stripe Docs: https://stripe.com/docs
-- Stripe Dashboard: https://dashboard.stripe.com
-- Test Mode: Use test keys for development
+**Note**: The same process applies to Supabase. You'll also need to update `SUPABASE_ANON_KEY` with your actual Supabase anonymous key from the Supabase dashboard.

@@ -1,99 +1,93 @@
-# 🚀 Quick Fix - Do This Now!
+# ⚡ QUICK FIX - Run This NOW!
 
-## ⚡ 2-Step Fix for "Unknown User"
+## 🔴 Error You're Seeing:
+```
+Could not find the 'bank_currency' column of 'profiles_private'
+```
 
-### Step 1: Run SQL (30 seconds)
+---
 
-Open Supabase SQL Editor and paste this:
+## ✅ Solution (2 Steps, 3 Minutes)
+
+### Step 1: Add bank_currency Column (Required!)
+
+**Copy and run this SQL:**
 
 ```sql
-DROP POLICY IF EXISTS "vehicles_select" ON vehicles;
+-- Add bank_currency column to profiles_private
+ALTER TABLE profiles_private 
+ADD COLUMN IF NOT EXISTS bank_currency TEXT;
 
-CREATE POLICY "vehicles_select_public" ON vehicles
-  FOR SELECT
-  TO anon, authenticated
-  USING (
-    profile_id = (auth.jwt() ->> 'sub'::text)
-    OR
-    is_active = true
-  );
+-- Set INR for Razorpay users
+UPDATE profiles_private
+SET bank_currency = 'INR'
+WHERE payment_provider = 'razorpay' 
+  AND (bank_currency IS NULL OR bank_currency = '');
+
+-- Set USD for Stripe users  
+UPDATE profiles_private
+SET bank_currency = 'USD'
+WHERE payment_provider = 'stripe' 
+  AND (bank_currency IS NULL OR bank_currency = '');
 ```
 
-Click **Run**.
+**Where to run:**
+- Supabase Dashboard → SQL Editor → Paste → Run
+- Or: `psql -U postgres -d your_db -f add_bank_currency_to_profiles.sql`
 
-**Verify it worked:**
+---
+
+### Step 2: Restart Your App
+
+1. **Hot restart** (not hot reload) your Flutter app
+2. Or wait 2-5 minutes for schema cache refresh
+
+---
+
+### Step 3: Test Again
+
+1. Go to **Settings → Payment Setup**
+2. Click **"🧪 Use Test Account"** button
+3. ✅ Should work now!
+
+---
+
+## 🎯 What This Does
+
+Adds the missing `bank_currency` column that stores:
+- **Razorpay** → `'INR'`
+- **Stripe** → `'USD'` (or GBP/EUR based on bank)
+
+This column is used to auto-detect currency when creating posts.
+
+---
+
+## ✅ Verify It Worked
+
 ```sql
-SELECT COUNT(*) FROM vehicles_public;
-```
+-- Check column exists
+SELECT column_name FROM information_schema.columns 
+WHERE table_name = 'profiles_private' AND column_name = 'bank_currency';
 
-Should return a number > 0 (not 0).
-
----
-
-### Step 2: Restart Flutter (1 minute)
-
-```bash
-flutter clean
-flutter pub get
-flutter run
-```
-
-**CRITICAL:** Must be full restart, not hot reload!
-
----
-
-## ✅ Check It Worked
-
-Look for these logs in Flutter console:
-
-```
-✅ Loaded 5 vehicles from Supabase  ← Should be > 0
-✅ Found vehicle: v123, userName=John Doe, name=Honda City
-```
-
-**NOT:**
-```
-✅ Loaded 0 vehicles from Supabase  ❌
-⚠️ Vehicle not found  ❌
+-- Should return 1 row
 ```
 
 ---
 
-## 🎯 Result
+## 🚀 Then Run Second Migration (Optional, for posts)
 
-Common Feed should now show:
-```
-┌─────────────────────┐
-│ John Doe           │  ✅ Real name
-│ Honda City         │  ✅ Real vehicle
-└─────────────────────┘
-```
+After fixing `bank_currency`, also run:
 
-Instead of:
-```
-┌─────────────────────┐
-│ Unknown User       │  ❌
-│ Unknown Vehicle    │
-└─────────────────────┘
+```sql
+-- Add currency_type to posts table
+ALTER TABLE posts 
+ADD COLUMN IF NOT EXISTS currency_type TEXT DEFAULT 'INR';
 ```
 
 ---
 
-## 🐛 If Still Not Working
+**That's it! Problem solved.** ✅
 
-Share these with me:
-
-1. **SQL result:** `SELECT COUNT(*) FROM vehicles_public;`
-2. **Flutter logs:** The `✅ Loaded X vehicles` line
-3. **Screenshot:** The "Unknown User" issue
-
----
-
-## 📁 Full Documentation
-
-- **`COMPLETE_FIX_UNKNOWN_USER.md`** - Detailed explanation
-- **`FIX_VEHICLES_PUBLIC_RLS.sql`** - Full SQL script with verification
-
----
-
-**That's it! Run the SQL, restart Flutter, and it should work!** 🚀
+**File to run:** `add_bank_currency_to_profiles.sql`  
+**Time:** 1 minute  
+**Effect:** Immediate (after schema refresh)

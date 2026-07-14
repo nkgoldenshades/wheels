@@ -35,11 +35,13 @@ class _MapLocationPickerState extends State<MapLocationPicker> {
   void initState() {
     super.initState();
     _mapController = MapController();
-    
+
     if (widget.initialLocation != null) {
       _centerPosition = widget.initialLocation!;
       _currentAddress = widget.initialAddress ?? 'Selected Location';
+      _isLoadingAddress = false; // Not loading if we have initial data
     } else {
+      _isLoadingAddress = true; // Show loading initially
       _getCurrentLocation();
     }
   }
@@ -98,49 +100,33 @@ class _MapLocationPickerState extends State<MapLocationPicker> {
   }
 
   Future<void> _updateAddress(LatLng position) async {
-    setState(() {
-      _isLoadingAddress = true;
-    });
-
-    try {
-      final address = await LocationAutocompleteService.instance.reverseGeocode(
-        position.latitude,
-        position.longitude,
-      );
-
-      if (mounted) {
-        setState(() {
-          _currentAddress = address?.displayName ?? 'Unknown location';
-          _isLoadingAddress = false;
-        });
-      }
-    } catch (e) {
-      debugPrint('Failed to get address: $e');
-      if (mounted) {
-        setState(() {
-          _currentAddress = 'Lat: ${position.latitude.toStringAsFixed(6)}, Lng: ${position.longitude.toStringAsFixed(6)}';
-          _isLoadingAddress = false;
-        });
-      }
+    // ⚠️ DISABLED: OpenStreetMap reverse geocoding to avoid external API calls
+    // Just show coordinates directly
+    if (mounted) {
+      setState(() {
+        _currentAddress =
+            'Lat: ${position.latitude.toStringAsFixed(4)}, Lng: ${position.longitude.toStringAsFixed(4)}';
+        _isLoadingAddress = false;
+      });
     }
   }
 
   void _onMapMoveEnd() {
     final center = _mapController.camera.center;
-    
+
     // Only update if moved significantly (>10 meters)
     final geodesy = Geodesy();
     final distance = geodesy.distanceBetweenTwoGeoPoints(
       LatLng(_centerPosition.latitude, _centerPosition.longitude),
       center,
     );
-    
+
     if (distance < 10) return; // Ignore small movements
-    
+
     setState(() {
       _centerPosition = center;
     });
-    
+
     // Debounce address updates
     _debounceTimer?.cancel();
     _debounceTimer = Timer(const Duration(milliseconds: 500), () {
@@ -188,7 +174,7 @@ class _MapLocationPickerState extends State<MapLocationPicker> {
                 userAgentPackageName: 'com.vaultwheels.app',
                 maxZoom: 19,
               ),
-              // ✅ Add radius circle if radiusInKm is provided
+              // ✅ Radius circle - shows service area range
               if (widget.radiusInKm != null)
                 CircleLayer(
                   circles: [
@@ -196,9 +182,11 @@ class _MapLocationPickerState extends State<MapLocationPicker> {
                       point: _centerPosition,
                       radius: widget.radiusInKm! * 1000, // Convert km to meters
                       useRadiusInMeter: true,
-                      color: Colors.blue.withValues(alpha: 0.2),
-                      borderColor: Colors.blue,
-                      borderStrokeWidth: 2,
+                      color: Colors.orange.withValues(
+                        alpha: 0.25,
+                      ), // Orange fill
+                      borderColor: Colors.orange[700]!, // Dark orange border
+                      borderStrokeWidth: 4, // Thick border for visibility
                     ),
                   ],
                 ),
@@ -242,11 +230,7 @@ class _MapLocationPickerState extends State<MapLocationPicker> {
                   children: [
                     Row(
                       children: [
-                        Icon(
-                          Icons.place,
-                          size: 20,
-                          color: Colors.blue[700],
-                        ),
+                        Icon(Icons.place, size: 20, color: Colors.blue[700]),
                         const SizedBox(width: 8),
                         const Text(
                           'Selected Location',
@@ -278,11 +262,30 @@ class _MapLocationPickerState extends State<MapLocationPicker> {
                     const SizedBox(height: 8),
                     Text(
                       'Lat: ${_centerPosition.latitude.toStringAsFixed(6)}, Lng: ${_centerPosition.longitude.toStringAsFixed(6)}',
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: Colors.grey[600],
-                      ),
+                      style: TextStyle(fontSize: 11, color: Colors.grey[600]),
                     ),
+                    // Show radius info if available
+                    if (widget.radiusInKm != null) ...[
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.circle_outlined,
+                            size: 14,
+                            color: Colors.orange[700],
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            'Service radius: ${widget.radiusInKm} km',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.orange[700],
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -303,10 +306,7 @@ class _MapLocationPickerState extends State<MapLocationPicker> {
                       height: 20,
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
-                  : Icon(
-                      Icons.my_location,
-                      color: Colors.blue[700],
-                    ),
+                  : Icon(Icons.my_location, color: Colors.blue[700]),
             ),
           ),
 
@@ -328,10 +328,7 @@ class _MapLocationPickerState extends State<MapLocationPicker> {
                   SizedBox(width: 8),
                   Text(
                     'Confirm Location',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                    ),
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                   ),
                 ],
               ),
@@ -342,6 +339,3 @@ class _MapLocationPickerState extends State<MapLocationPicker> {
     );
   }
 }
-
-
-

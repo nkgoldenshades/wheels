@@ -6,12 +6,20 @@ import '../services/auth_repository.dart';
 import '../services/profile_repository.dart';
 import '../services/payment_service.dart';
 import '../services/app_preferences.dart';
+import '../services/dispute_service.dart';
 import 'package:image_picker/image_picker.dart';
 // import 'package:speech_to_text/speech_to_text.dart'; // Commented out for Windows compatibility
 // import 'package:permission_handler/permission_handler.dart'; // Not needed
 
 class AIChatPage extends StatefulWidget {
-  const AIChatPage({super.key});
+  final int? conversationId; // Support loading existing conversation
+  final bool isDisputeMode;  // Flag to indicate dispute mediation mode
+  
+  const AIChatPage({
+    super.key,
+    this.conversationId,
+    this.isDisputeMode = false,
+  });
 
   @override
   State<AIChatPage> createState() => _AIChatPageState();
@@ -21,12 +29,14 @@ class _AIChatPageState extends State<AIChatPage> {
   final TextEditingController _messageController = TextEditingController();
   final List<ChatMessage> _messages = [];
   final ScrollController _scrollController = ScrollController();
+  final List<ConversationItem> _conversations = []; // ← ADD: Conversation list
 
   GenerativeModel? _model;
   ChatSession? _chat;
   bool _isLoading = false;
   bool _aiInitialized = false;
   int? _currentConversationId; // Track current conversation
+  bool _showSidebar = true; // ← ADD: Toggle sidebar
   
   // Guest user conversation limit
   static const int _guestConversationLimit = 10;
@@ -40,13 +50,23 @@ class _AIChatPageState extends State<AIChatPage> {
   
   // AI Toggle state
   bool _aiEnabled = true; // Toggle to enable/disable AI
+  
+  // Conversation filter state
+  String _conversationFilter = 'all'; // 'all', 'general', 'disputes'
 
   @override
   void initState() {
     super.initState();
     _loadAIToggleState();
     _checkGuestStatus();
-    _loadOrCreateConversation(); // Load or create conversation
+    
+    // Load specific conversation if provided
+    if (widget.conversationId != null) {
+      _currentConversationId = widget.conversationId;
+      _loadConversation(widget.conversationId!);
+    }
+    
+    _loadConversationHistory(); // Load conversation list
     _initializeFirebaseAI();
   }
   
@@ -91,15 +111,92 @@ class _AIChatPageState extends State<AIChatPage> {
     }
   }
 
+  // ← ADD: Load conversation history for sidebar
+  Future<void> _loadConversationHistory() async {
+    try {
+      final userId = AuthRepository.instance.currentUser?.id;
+      if (userId == null) return;
+
+      final response = await Supabase.instance.client
+          .from('ai_conversations')
+          .select()
+          .eq('profile_id', userId)
+          .order('updated_at', ascending: false)
+          .limit(20);
+
+      if (!mounted) return;
+      setState(() {
+        _conversations.clear();
+        for (final conv in response) {
+          _conversations.add(ConversationItem.fromJson(conv));
+        }
+      });
+      debugPrint('📥 Loaded ${_conversations.length} conversations');
+    } catch (e) {
+      debugPrint('⚠️ Failed to load conversation history: $e');
+    }
+  }
+
+  // ← ADD: Create new conversation
+  Future<void> _createNewConversation() async {
+    setState(() {
+      _currentConversationId = null;
+      _messages.clear();
+    });
+    _loadConversationHistory();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('✨ New conversation started'),
+        duration: Duration(seconds: 2),
+      ),
+    );
+  }
+
+  // ← ADD: Load specific conversation
+  Future<void> _loadConversation(int conversationId) async {
+    try {
+      final response = await Supabase.instance.client
+          .from('ai_conversations')
+          .select()
+          .eq('id', conversationId)
+          .single();
+
+      final messagesJson = response['messages'] as List;
+      final messages = messagesJson
+          .map((msg) => ChatMessage(
+                text: msg['content'] as String,
+                isUser: msg['role'] == 'user',
+                timestamp: DateTime.parse(msg['timestamp'] as String),
+                isError: msg['is_error'] as bool? ?? false,
+              ))
+          .toList();
+
+      if (!mounted) return;
+      setState(() {
+        _currentConversationId = conversationId;
+        _messages.clear();
+        _messages.addAll(messages);
+      });
+      debugPrint('📥 Loaded conversation $conversationId with ${messages.length} messages');
+    } catch (e) {
+      debugPrint('❌ Failed to load conversation: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to load conversation: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
   Future<void> _initializeFirebaseAI() async {
     try {
       debugPrint('🚀 Initializing Firebase Gemini API...');
       
-      // Use Firebase Gemini API (free tier available, no API key needed)
-      // This uses Google AI's Gemini API through Firebase
-      _model = FirebaseAI.googleAI().generativeModel(
-        model: 'gemini-2.5-flash',  // Latest, faster, lighter model
-        systemInstruction: Content.system('''
+      // Get system prompt based on mode (dispute or general)
+      String systemPrompt = '''
 You are a helpful AI assistant for QuickOHunt, a ride-sharing and vehicle rental app.
 
 Key features of QuickOHunt:
@@ -114,7 +211,32 @@ Key features of QuickOHunt:
 - Review and rating system
 
 Be conversational, helpful, and specific to ride-sharing context. Keep responses concise (2-3 sentences max). Always sound natural and friendly, never robotic. Always guide users to take action inside the app.
-        '''),
+''';
+
+      // If in dispute mode, use specialized dispute mediation prompt
+      if (widget.isDisputeMode && _currentConversationId != null) {
+        try {
+          final conv = await Supabase.instance.client
+              .from('ai_conversations')
+              .select('metadata, dispute_party')
+              .eq('id', _currentConversationId!)
+              .single();
+          
+          final metadata = conv['metadata'] as Map<String, dynamic>;
+          final party = conv['dispute_party'] as String;
+          
+          systemPrompt = DisputeService.getDisputeSystemPrompt(metadata, party);
+          debugPrint('🤖 Using dispute mediation prompt for $party');
+        } catch (e) {
+          debugPrint('⚠️ Failed to load dispute context: $e');
+        }
+      }
+      
+      // Use Firebase Gemini API (free tier available, no API key needed)
+      // This uses Google AI's Gemini API through Firebase
+      _model = FirebaseAI.googleAI().generativeModel(
+        model: 'gemini-2.5-flash',  // Latest, faster, lighter model
+        systemInstruction: Content.system(systemPrompt),
       );
 
       _chat = _model!.startChat();
@@ -135,8 +257,9 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
       if (!mounted) return;
       setState(() {
         _aiInitialized = true;
-        // Only add welcome message if no messages exist yet
-        if (_messages.isEmpty) {
+        // Only add welcome message if no messages exist yet AND not in dispute mode
+        // (dispute mode already has welcome message from DisputeService)
+        if (_messages.isEmpty && !widget.isDisputeMode) {
           final welcomeMessage = _isGuest
               ? "Hi there! Welcome to QuickOHunt. I'm your AI assistant here to help you with rides, vehicle rentals, bookings, and any questions about the app.\n\n⚠️ Guest Mode: You have $_guestConversationLimit free conversations. Login for unlimited access!\n\nWhat can I help you with today?"
               : "Hi there! Welcome to QuickOHunt. I'm your AI assistant here to help you with rides, vehicle rentals, bookings, and any questions about the app. What can I help you with today?";
@@ -369,7 +492,17 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
       }
     }
 
-    await _sendToFirebaseAI(text);
+    // FIXED: Wrap in try-finally to ensure _isLoading is always reset
+    try {
+      await _sendToFirebaseAI(text);
+    } catch (e) {
+      debugPrint('❌ Error in _sendMessage: $e');
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
   }
   
   void _showLoginPrompt() {
@@ -680,6 +813,7 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
         "⚠️ AI Assistant is temporarily unavailable. Please try again later.",
         isError: true,
       );
+      // FIXED: _isLoading was not being reset, causing button to stay loading
       return;
     }
 
@@ -749,12 +883,46 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
       }).toList();
 
       if (_currentConversationId == null) {
+        // Generate AI title after first exchange (user + assistant message)
+        String title = 'New Chat';
+        
+        if (_messages.length >= 2) {
+          // Let AI generate a smart title based on conversation
+          try {
+            final titlePrompt = 'Generate a short, concise title (max 40 characters) for this conversation. '
+                'Just respond with the title only, no quotes or extra text:\n\n'
+                'User: ${_messages.first.text}\n'
+                'Assistant: ${_messages[1].text}';
+            
+            final titleResponse = await _model?.generateContent([Content.text(titlePrompt)]);
+            if (titleResponse != null && titleResponse.text != null) {
+              title = titleResponse.text!.trim();
+              // Remove quotes if AI added them
+              title = title.replaceAll('"', '').replaceAll("'", '');
+              // Ensure max length
+              if (title.length > 40) {
+                title = '${title.substring(0, 37)}...';
+              }
+            }
+          } catch (e) {
+            // Fallback: Use first user message
+            final firstUserMessage = _messages.firstWhere(
+              (msg) => msg.isUser,
+              orElse: () => ChatMessage(text: 'New Chat', isUser: true, timestamp: DateTime.now()),
+            );
+            title = firstUserMessage.text.trim();
+            if (title.length > 40) {
+              title = '${title.substring(0, 37)}...';
+            }
+          }
+        }
+        
         // Create new conversation
         final response = await Supabase.instance.client
             .from('ai_conversations')
             .insert({
               'profile_id': userId,
-              'title': 'AI Assistant Chat',
+              'title': title,
               'messages': messagesJson,
               'context_type': 'general',
               'context_id': '',
@@ -765,7 +933,10 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
             .single();
         
         _currentConversationId = response['id'] as int;
-        debugPrint('💾 Created new conversation: $_currentConversationId');
+        debugPrint('💾 Created new conversation: $_currentConversationId with AI title: $title');
+        
+        // Refresh sidebar after creating new conversation
+        _loadConversationHistory();
       } else {
         // Update existing conversation
         await Supabase.instance.client
@@ -777,6 +948,9 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
             .eq('id', _currentConversationId!);
         
         debugPrint('💾 Updated conversation $_currentConversationId with ${messagesJson.length} messages');
+        
+        // Refresh sidebar to update timestamps
+        _loadConversationHistory();
       }
     } catch (e) {
       debugPrint('⚠️ Failed to save chat history: $e');
@@ -784,51 +958,71 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
     }
   }
 
-  // Load or create conversation from ai_conversations table
-  Future<void> _loadOrCreateConversation() async {
+  // Show delete confirmation dialog
+  Future<void> _showDeleteConfirmation(BuildContext context, ConversationItem conv) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete Conversation?'),
+        content: Text('Are you sure you want to delete "${conv.title}"?\n\nThis action cannot be undone.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: FilledButton.styleFrom(
+              backgroundColor: Colors.red,
+            ),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      await _deleteConversation(conv.id);
+    }
+  }
+
+  // Delete conversation
+  Future<void> _deleteConversation(int conversationId) async {
     try {
-      final userId = AuthRepository.instance.currentUser?.id;
-      if (userId == null) return;
-
-      // Get the most recent active conversation
-      final response = await Supabase.instance.client
+      await Supabase.instance.client
           .from('ai_conversations')
-          .select()
-          .eq('profile_id', userId)
-          .eq('is_active', true)
-          .eq('context_type', 'general')
-          .order('updated_at', ascending: false)
-          .limit(1)
-          .maybeSingle();
+          .delete()
+          .eq('id', conversationId);
 
-      if (response != null) {
-        // Load existing conversation
-        _currentConversationId = response['id'] as int;
-        final messagesJson = response['messages'] as List;
-        
-        final messages = messagesJson
-            .map((msg) => ChatMessage(
-                  text: msg['content'] as String,
-                  isUser: msg['role'] == 'user',
-                  timestamp: DateTime.parse(msg['timestamp'] as String),
-                  isError: msg['is_error'] as bool? ?? false,
-                ))
-            .toList();
-
-        if (mounted && messages.isNotEmpty) {
-          setState(() {
-            _messages.clear();
-            _messages.addAll(messages);
-          });
-          debugPrint('📥 Loaded conversation $_currentConversationId with ${messages.length} messages');
-        }
-      } else {
-        // No existing conversation - will create on first message
-        debugPrint('📝 No existing conversation found, will create new one');
+      // If deleted conversation was current, clear messages and create new
+      if (conversationId == _currentConversationId) {
+        setState(() {
+          _currentConversationId = null;
+          _messages.clear();
+        });
       }
+
+      // Refresh conversation list
+      await _loadConversationHistory();
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('🗑️ Conversation deleted'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+
+      debugPrint('🗑️ Deleted conversation: $conversationId');
     } catch (e) {
-      debugPrint('⚠️ Failed to load conversation: $e');
-      // Don't show error - just start fresh
+      debugPrint('❌ Failed to delete conversation: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to delete: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
     }
   }
 
@@ -845,12 +1039,36 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
       return;
     }
 
+    // Capture navigator before async gap
+    final navigator = Navigator.of(context);
+    final messenger = ScaffoldMessenger.of(context);
+
     // Show loading
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => const Center(
-        child: CircularProgressIndicator(),
+    navigator.push(
+      PageRouteBuilder(
+        opaque: false,
+        barrierDismissible: false,
+        pageBuilder: (context, animation, secondaryAnimation) => PopScope(
+          canPop: false,
+          child: Container(
+            color: Colors.black54,
+            child: const Center(
+              child: Card(
+                child: Padding(
+                  padding: EdgeInsets.all(24.0),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      CircularProgressIndicator(),
+                      SizedBox(height: 16),
+                      Text('Processing payment...'),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
       ),
     );
 
@@ -862,6 +1080,8 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
       final userPhone = profile.phone ?? '0000000000';
       final currency = AppPreferences.instance.currencyCode.value;
 
+      debugPrint('💳 Starting AI credit purchase: $credits credits for \$$price');
+
       // Process payment via PaymentService (uses same subscription flow)
       final result = await PaymentService.instance.processSubscriptionPayment(
         planName: 'AI Credits ($credits)',
@@ -872,11 +1092,18 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
         currency: currency,
       );
 
-      if (!context.mounted) return;
-      Navigator.pop(context); // Close loading
+      debugPrint('💳 Payment result received: ${result.keys.join(", ")}');
 
+      // Close loading - use the captured navigator
+      if (navigator.canPop()) {
+        navigator.pop();
+        debugPrint('💳 Closed loading dialog');
+      }
+
+      // Check for errors
       if (result['error'] != null) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        debugPrint('💳 Payment error: ${result['error']}');
+        messenger.showSnackBar(
           SnackBar(
             content: Text('Payment failed: ${result['error']}'),
             backgroundColor: Colors.red,
@@ -885,8 +1112,10 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
         return;
       }
 
+      // Check for web redirect
       if (result['web_redirect'] == true) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        debugPrint('💳 Web redirect required');
+        messenger.showSnackBar(
           const SnackBar(
             content: Text('Complete payment to receive your AI credits.'),
             backgroundColor: Colors.blue,
@@ -897,26 +1126,300 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
       }
 
       // Payment successful - add credits
+      debugPrint('💳 Payment successful, adding $credits credits');
       await ProfileRepository.instance.addAICredits(credits);
+      debugPrint('💳 Credits added successfully');
 
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
+      messenger.showSnackBar(
         SnackBar(
           content: Text('🎉 Added $credits AI credits!'),
           backgroundColor: Colors.green,
           duration: const Duration(seconds: 3),
         ),
       );
-    } catch (e) {
-      if (!context.mounted) return;
-      Navigator.pop(context); // Close loading
-      ScaffoldMessenger.of(context).showSnackBar(
+    } catch (e, stackTrace) {
+      debugPrint('💳 Exception in _purchaseAICredits: $e');
+      debugPrint('💳 Stack trace: $stackTrace');
+      
+      // Close loading dialog on error
+      if (navigator.canPop()) {
+        navigator.pop();
+        debugPrint('💳 Closed loading dialog (error path)');
+      }
+      
+      messenger.showSnackBar(
         SnackBar(
           content: Text('Payment error: $e'),
           backgroundColor: Colors.red,
         ),
       );
     }
+  }
+
+  // Build sidebar widget for conversation history
+  Widget _buildSidebar() {
+    // Filter conversations based on selected tab
+    final filteredConversations = _conversations.where((conv) {
+      if (_conversationFilter == 'all') return true;
+      if (_conversationFilter == 'general') return conv.contextType == 'general';
+      if (_conversationFilter == 'disputes') return conv.contextType.startsWith('dispute'); // Both 'dispute' and 'dispute_completed'
+      return true;
+    }).toList();
+    
+    return Container(
+      width: 250,
+      decoration: BoxDecoration(
+        color: Theme.of(context).scaffoldBackgroundColor,
+        border: Border(
+          right: BorderSide(color: Colors.grey[300]!),
+        ),
+      ),
+      child: Column(
+        children: [
+          // Header
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.inversePrimary.withValues(alpha: 0.3),
+              border: Border(
+                bottom: BorderSide(color: Colors.grey[300]!),
+              ),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.chat_bubble_outline, color: Theme.of(context).primaryColor, size: 20),
+                const SizedBox(width: 8),
+                const Expanded(
+                  child: Text(
+                    'Conversations',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  icon: Icon(Icons.add, color: Theme.of(context).primaryColor, size: 20),
+                  onPressed: _createNewConversation,
+                  tooltip: 'New Conversation',
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                ),
+              ],
+            ),
+          ),
+          
+          // Filter Tabs
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+            decoration: BoxDecoration(
+              border: Border(
+                bottom: BorderSide(color: Colors.grey[300]!),
+              ),
+            ),
+            child: Row(
+              children: [
+                _buildFilterTab('All', 'all', Icons.chat_bubble_outline),
+                const SizedBox(width: 4),
+                _buildFilterTab('General', 'general', Icons.chat),
+                // Disputes tab hidden for launch
+                // const SizedBox(width: 4),
+                // _buildFilterTab('Disputes', 'disputes', Icons.gavel),
+              ],
+            ),
+          ),
+          
+          // Conversations List
+          Expanded(
+            child: filteredConversations.isEmpty
+                ? Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Text(
+                        _conversationFilter == 'disputes' 
+                            ? 'No disputes yet.\nRaise a dispute from bookings!'
+                            : 'No conversations yet.\nStart chatting to create one!',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: Colors.grey[600],
+                          fontSize: 13,
+                        ),
+                      ),
+                    ),
+                  )
+                : ListView.builder(
+                    itemCount: filteredConversations.length,
+                    itemBuilder: (context, index) {
+                      final conv = filteredConversations[index];
+                      final isSelected = conv.id == _currentConversationId;
+                      
+                      return InkWell(
+                        onTap: () => _loadConversation(conv.id),
+                        onLongPress: () => _showDeleteConfirmation(context, conv),
+                        child: Container(
+                          margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: isSelected 
+                                ? Theme.of(context).primaryColor.withValues(alpha: 0.1)
+                                : (conv.contextType.startsWith('dispute')
+                                    ? (conv.contextType == 'dispute_completed'
+                                        ? Colors.green.withValues(alpha: 0.05)
+                                        : Colors.orange.withValues(alpha: 0.05))
+                                    : Colors.transparent),
+                            borderRadius: BorderRadius.circular(8),
+                            border: isSelected
+                                ? Border.all(color: Theme.of(context).primaryColor, width: 1)
+                                : (conv.contextType.startsWith('dispute')
+                                    ? Border.all(
+                                        color: conv.contextType == 'dispute_completed'
+                                            ? Colors.green.withValues(alpha: 0.4)
+                                            : Colors.orange.withValues(alpha: 0.3), 
+                                        width: 1)
+                                    : null),
+                          ),
+                          child: Row(
+                            children: [
+                              // Icon changes based on type
+                              Icon(
+                                conv.contextType.startsWith('dispute') ? Icons.gavel : Icons.chat,
+                                color: conv.contextType.startsWith('dispute')
+                                    ? (conv.contextType == 'dispute_completed'
+                                        ? Colors.green[700] 
+                                        : Colors.orange[700])
+                                    : (isSelected ? Theme.of(context).primaryColor : Colors.grey[600]),
+                                size: 16,
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Expanded(
+                                          child: Text(
+                                            conv.title,
+                                            style: TextStyle(
+                                              fontSize: 13,
+                                              fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                                              color: conv.contextType.startsWith('dispute') ? Colors.orange[900] : null,
+                                            ),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                        // Dispute badge - shows status based on context_type
+                                        if (conv.contextType.startsWith('dispute'))
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                                            decoration: BoxDecoration(
+                                              color: conv.contextType == 'dispute_completed' ? Colors.green : Colors.orange,
+                                              borderRadius: BorderRadius.circular(4),
+                                            ),
+                                            child: Text(
+                                              conv.contextType == 'dispute_completed' ? 'RESOLVED' : 'ACTIVE',
+                                              style: const TextStyle(
+                                                color: Colors.white,
+                                                fontSize: 8,
+                                                fontWeight: FontWeight.bold,
+                                              ),
+                                            ),
+                                          ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      _formatTimestamp(conv.updatedAt),
+                                      style: TextStyle(
+                                        color: Colors.grey[600],
+                                        fontSize: 11,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Format timestamp for sidebar
+  String _formatTimestamp(DateTime timestamp) {
+    final now = DateTime.now();
+    final difference = now.difference(timestamp);
+    
+    if (difference.inMinutes < 1) {
+      return 'Just now';
+    } else if (difference.inHours < 1) {
+      return '${difference.inMinutes}m ago';
+    } else if (difference.inHours < 24) {
+      return '${difference.inHours}h ago';
+    } else if (difference.inDays < 7) {
+      return '${difference.inDays}d ago';
+    } else {
+      return '${timestamp.day}/${timestamp.month}/${timestamp.year}';
+    }
+  }
+
+  // Build filter tab button
+  Widget _buildFilterTab(String label, String filter, IconData icon) {
+    final isSelected = _conversationFilter == filter;
+    return Expanded(
+      child: InkWell(
+        onTap: () {
+          setState(() {
+            _conversationFilter = filter;
+          });
+        },
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+          decoration: BoxDecoration(
+            color: isSelected 
+                ? Theme.of(context).primaryColor.withValues(alpha: 0.1)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(6),
+            border: isSelected
+                ? Border.all(color: Theme.of(context).primaryColor, width: 1)
+                : null,
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                icon,
+                size: 14,
+                color: isSelected 
+                    ? Theme.of(context).primaryColor 
+                    : Colors.grey[600],
+              ),
+              const SizedBox(width: 4),
+              Flexible(
+                child: Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                    color: isSelected 
+                        ? Theme.of(context).primaryColor 
+                        : Colors.grey[700],
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   @override
@@ -926,26 +1429,41 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
         title: Row(
           children: [
             Icon(
-              Icons.smart_toy,
+              widget.isDisputeMode ? Icons.gavel : Icons.smart_toy,
               color: _aiInitialized ? Colors.blue : Colors.orange,
             ),
             const SizedBox(width: 8),
-            const Text('AI Assistant'),
+            Text(widget.isDisputeMode ? 'Dispute Mediator' : 'AI Assistant'),
             const SizedBox(width: 8),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
               decoration: BoxDecoration(
-                color: _aiInitialized ? Colors.green : Colors.orange,
+                color: widget.isDisputeMode 
+                    ? Colors.orange 
+                    : (_aiInitialized ? Colors.green : Colors.orange),
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Text(
-                _aiInitialized ? 'Online' : 'Offline',
+                widget.isDisputeMode 
+                    ? 'Mediation' 
+                    : (_aiInitialized ? 'Online' : 'Offline'),
                 style: const TextStyle(color: Colors.white, fontSize: 10),
               ),
             ),
           ],
         ),
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+        leading: !_isGuest && !widget.isDisputeMode
+            ? IconButton(
+                icon: Icon(_showSidebar ? Icons.menu_open : Icons.menu),
+                onPressed: () {
+                  setState(() {
+                    _showSidebar = !_showSidebar;
+                  });
+                },
+                tooltip: _showSidebar ? 'Hide Sidebar' : 'Show Sidebar',
+              )
+            : null,
         actions: [
           // Credits widget for logged-in users (compact) - tap to see details
           if (!_isGuest)
@@ -1080,161 +1598,171 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
           ),
         ],
       ),
-      body: Column(
+      body: Row(
         children: [
-          // Messages list
+          // Left Sidebar - Conversations (only for logged-in users, not in dispute mode)
+          if (!_isGuest && _showSidebar && !widget.isDisputeMode) _buildSidebar(),
+          
+          // Main Chat Area
           Expanded(
-            child: _messages.isEmpty
-                ? const Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        CircularProgressIndicator(),
-                        SizedBox(height: 16),
-                        Text('Connecting to AI Assistant...'),
-                      ],
-                    ),
-                  )
-                : ListView.builder(
-                    controller: _scrollController,
-                    padding: const EdgeInsets.all(16),
-                    itemCount: _messages.length + (_isLoading ? 1 : 0),
-                    itemBuilder: (context, index) {
-                      // Show typing indicator as last item inside the list
-                      if (_isLoading && index == _messages.length) {
-                        return Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 4),
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.end,
-                            children: const [
-                              CircleAvatar(
-                                radius: 16,
-                                backgroundColor: Colors.blue,
-                                child: Icon(Icons.smart_toy, size: 16, color: Colors.white),
-                              ),
-                              SizedBox(width: 8),
-                              _TypingIndicator(),
+            child: Column(
+              children: [
+                // Messages list
+                Expanded(
+                  child: _messages.isEmpty
+                      ? const Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              CircularProgressIndicator(),
+                              SizedBox(height: 16),
+                              Text('Connecting to AI Assistant...'),
                             ],
                           ),
-                        );
-                      }
-                      return ChatBubble(message: _messages[index]);
-                    },
-                  ),
-          ),
+                        )
+                      : ListView.builder(
+                          controller: _scrollController,
+                          padding: const EdgeInsets.all(16),
+                          itemCount: _messages.length + (_isLoading ? 1 : 0),
+                          itemBuilder: (context, index) {
+                            // Show typing indicator as last item inside the list
+                            if (_isLoading && index == _messages.length) {
+                              return Padding(
+                                padding: const EdgeInsets.symmetric(vertical: 4),
+                                child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.end,
+                                  children: const [
+                                    CircleAvatar(
+                                      radius: 16,
+                                      backgroundColor: Colors.blue,
+                                      child: Icon(Icons.smart_toy, size: 16, color: Colors.white),
+                                    ),
+                                    SizedBox(width: 8),
+                                    _TypingIndicator(),
+                                  ],
+                                ),
+                              );
+                            }
+                            return ChatBubble(message: _messages[index]);
+                          },
+                        ),
+                ),
 
-          // Message input
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-            decoration: BoxDecoration(
-              color: Colors.grey[100],
-              border: Border(top: BorderSide(color: Colors.grey[300]!)),
-            ),
-            child: SafeArea(
-              top: false,
-              child: Row(
-                children: [
-                  // Image picker button
-                  IconButton(
-                    onPressed: _pickImage,
-                    icon: const Icon(Icons.image, color: Colors.grey),
-                    tooltip: 'Add Image',
+                // Message input
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: Colors.grey[100],
+                    border: Border(top: BorderSide(color: Colors.grey[300]!)),
                   ),
-                  // Mic button with continuous mode indicator
-                  Stack(
-                    alignment: Alignment.center,
-                    children: [
-                      // Pulsing animation when listening
-                      if (_isListening)
-                        Container(
-                          width: 48,
-                          height: 48,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: Colors.red.withValues(alpha: 0.2),
+                  child: SafeArea(
+                    top: false,
+                    child: Row(
+                      children: [
+                        // Image picker button
+                        IconButton(
+                          onPressed: _pickImage,
+                          icon: const Icon(Icons.image, color: Colors.grey),
+                          tooltip: 'Add Image',
+                        ),
+                        // Mic button with continuous mode indicator
+                        Stack(
+                          alignment: Alignment.center,
+                          children: [
+                            // Pulsing animation when listening
+                            if (_isListening)
+                              Container(
+                                width: 48,
+                                height: 48,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: Colors.red.withValues(alpha: 0.2),
+                                ),
+                              ),
+                            IconButton(
+                              onPressed: _toggleVoiceInput,
+                              icon: Icon(
+                                _isListening ? Icons.mic : Icons.mic_none,
+                                color: _isListening ? Colors.red : Colors.grey,
+                              ),
+                              tooltip: _isListening
+                                  ? 'Stop Voice Input (Continuous Mode Active)'
+                                  : 'Start Voice Input (Continuous Mode)',
+                            ),
+                          ],
+                        ),
+                        // Text input field
+                        Expanded(
+                          child: TextField(
+                            controller: _messageController,
+                            enabled: !_isLoading,
+                            decoration: InputDecoration(
+                              hintText: _isLoading
+                                  ? 'AI is responding...'
+                                  : 'Type your message...',
+                              border: const OutlineInputBorder(),
+                              contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 16, vertical: 12),
+                              isDense: true,
+                            ),
+                            onSubmitted: (_) => _sendMessage(),
                           ),
                         ),
-                      IconButton(
-                        onPressed: _toggleVoiceInput,
-                        icon: Icon(
-                          _isListening ? Icons.mic : Icons.mic_none,
-                          color: _isListening ? Colors.red : Colors.grey,
+                        const SizedBox(width: 8),
+                        // Send button
+                        FloatingActionButton(
+                          mini: true,
+                          onPressed: _isLoading ? null : _sendMessage,
+                          backgroundColor: _isLoading ? Colors.grey : null,
+                          child: _isLoading
+                              ? const SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Colors.white,
+                                  ),
+                                )
+                              : const Icon(Icons.send),
                         ),
-                        tooltip: _isListening
-                            ? 'Stop Voice Input (Continuous Mode Active)'
-                            : 'Start Voice Input (Continuous Mode)',
-                      ),
-                    ],
-                  ),
-                  // Text input field
-                  Expanded(
-                    child: TextField(
-                      controller: _messageController,
-                      enabled: !_isLoading,
-                      decoration: InputDecoration(
-                        hintText: _isLoading
-                            ? 'AI is responding...'
-                            : 'Type your message...',
-                        border: const OutlineInputBorder(),
-                        contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 16, vertical: 12),
-                        isDense: true,
-                      ),
-                      onSubmitted: (_) => _sendMessage(),
+                      ],
                     ),
                   ),
-                  const SizedBox(width: 8),
-                  // Send button
-                  FloatingActionButton(
-                    mini: true,
-                    onPressed: _isLoading ? null : _sendMessage,
-                    backgroundColor: _isLoading ? Colors.grey : null,
-                    child: _isLoading
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Colors.white,
-                            ),
-                          )
-                        : const Icon(Icons.send),
+                ),
+                
+                // Powered by VerveStrideAI branding
+                Container(
+                  padding: const EdgeInsets.symmetric(vertical: 6),
+                  decoration: BoxDecoration(
+                    color: Colors.grey[50],
+                    border: Border(top: BorderSide(color: Colors.grey[200]!)),
                   ),
-                ],
-              ),
-            ),
-          ),
-          
-          // Powered by VerveStrideAI branding
-          Container(
-            padding: const EdgeInsets.symmetric(vertical: 6),
-            decoration: BoxDecoration(
-              color: Colors.grey[50],
-              border: Border(top: BorderSide(color: Colors.grey[200]!)),
-            ),
-            child: Center(
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.auto_awesome, size: 12, color: Colors.grey[600]),
-                  const SizedBox(width: 4),
-                  Text(
-                    'Powered by ',
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: Colors.grey[600],
+                  child: Center(
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.auto_awesome, size: 12, color: Colors.grey[600]),
+                        const SizedBox(width: 4),
+                        Text(
+                          'Powered by ',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: Colors.grey[600],
+                          ),
+                        ),
+                        Text(
+                          'VerveStrideAI',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.blue[700],
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                  Text(
-                    'VerveStrideAI',
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.blue[700],
-                    ),
-                  ),
-                ],
-              ),
+                ),
+              ],
             ),
           ),
         ],
@@ -1672,3 +2200,32 @@ class AISettingsBottomSheet extends StatelessWidget {
 
 
 
+
+// ============================================================================
+// Conversation Item Model for Sidebar
+// ============================================================================
+class ConversationItem {
+  final int id;
+  final String title;
+  final DateTime updatedAt;
+  final bool isActive;
+  final String contextType; // 'general', 'dispute', or 'dispute_completed'
+
+  ConversationItem({
+    required this.id,
+    required this.title,
+    required this.updatedAt,
+    required this.isActive,
+    required this.contextType,
+  });
+
+  factory ConversationItem.fromJson(Map<String, dynamic> json) {
+    return ConversationItem(
+      id: json['id'] as int,
+      title: json['title'] as String? ?? 'New Conversation',
+      updatedAt: DateTime.parse(json['updated_at'] as String),
+      isActive: json['is_active'] as bool? ?? false,
+      contextType: json['context_type'] as String? ?? 'general',
+    );
+  }
+}

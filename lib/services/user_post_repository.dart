@@ -3,6 +3,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
 import '../models/service_type.dart';
 import '../models/slot_type.dart';
+import '../models/demand_plan.dart';
 import 'auth_repository.dart';
 
 enum UserPostStatus { active, archived }
@@ -23,6 +24,11 @@ class UserPost {
   final String? notes;
   final bool requiresVerifiedVehicle;
   final bool requiresExpertVehicle;
+  final DemandPlan demandPlan; // NEW: Who can view this post
+  final double? minRatings; // Minimum provider rating required (e.g., 4.0)
+  final double? maxRatings; // Maximum provider rating (optional upper bound)
+  final int? minNoRatings; // Minimum number of ratings required
+  final int? maxNoRatings; // Maximum number of ratings (optional upper bound)
   final DateTime createdAt;
   final UserPostStatus status;
   final bool isOnline;
@@ -32,6 +38,9 @@ class UserPost {
   final double? parcelLength; // cm
   final double? parcelWidth;  // cm
   final double? parcelHeight; // cm
+
+  // Escrow payment
+  final String? escrowPaymentId; // Razorpay payment ID for escrow
 
   static const Object _unset = Object();
 
@@ -51,6 +60,11 @@ class UserPost {
     this.notes,
     this.requiresVerifiedVehicle = false,
     this.requiresExpertVehicle = false,
+    this.demandPlan = DemandPlan.basic,
+    this.minRatings,
+    this.maxRatings,
+    this.minNoRatings,
+    this.maxNoRatings,
     required this.createdAt,
     required this.status,
     this.isOnline = true,
@@ -58,6 +72,7 @@ class UserPost {
     this.parcelLength,
     this.parcelWidth,
     this.parcelHeight,
+    this.escrowPaymentId,
   });
 
   UserPost copyWith({
@@ -76,6 +91,11 @@ class UserPost {
     Object? notes = _unset,
     bool? requiresVerifiedVehicle,
     bool? requiresExpertVehicle,
+    DemandPlan? demandPlan,
+    Object? minRatings = _unset,
+    Object? maxRatings = _unset,
+    Object? minNoRatings = _unset,
+    Object? maxNoRatings = _unset,
     DateTime? createdAt,
     UserPostStatus? status,
     bool? isOnline,
@@ -83,6 +103,7 @@ class UserPost {
     Object? parcelLength = _unset,
     Object? parcelWidth = _unset,
     Object? parcelHeight = _unset,
+    Object? escrowPaymentId = _unset,
   }) {
     return UserPost(
       id: id ?? this.id,
@@ -107,6 +128,11 @@ class UserPost {
       requiresVerifiedVehicle:
           requiresVerifiedVehicle ?? this.requiresVerifiedVehicle,
       requiresExpertVehicle: requiresExpertVehicle ?? this.requiresExpertVehicle,
+      demandPlan: demandPlan ?? this.demandPlan,
+      minRatings: identical(minRatings, _unset) ? this.minRatings : minRatings as double?,
+      maxRatings: identical(maxRatings, _unset) ? this.maxRatings : maxRatings as double?,
+      minNoRatings: identical(minNoRatings, _unset) ? this.minNoRatings : minNoRatings as int?,
+      maxNoRatings: identical(maxNoRatings, _unset) ? this.maxNoRatings : maxNoRatings as int?,
       createdAt: createdAt ?? this.createdAt,
       status: status ?? this.status,
       isOnline: isOnline ?? this.isOnline,
@@ -114,13 +140,15 @@ class UserPost {
       parcelLength: identical(parcelLength, _unset) ? this.parcelLength : parcelLength as double?,
       parcelWidth: identical(parcelWidth, _unset) ? this.parcelWidth : parcelWidth as double?,
       parcelHeight: identical(parcelHeight, _unset) ? this.parcelHeight : parcelHeight as double?,
+      escrowPaymentId: identical(escrowPaymentId, _unset) ? this.escrowPaymentId : escrowPaymentId as String?,
     );
   }
 
   Map<String, dynamic> toJson() {
     return {
       'id': id,
-      'user_id': userId,
+      // posts table uses profile_id, not user_id
+      'profile_id': userId,
       'service_type': serviceType.name,
       'slot_type': slotType == SlotType.fromTo ? 'from_to' : 'base_radius',
       'from_location': fromLocation,
@@ -134,19 +162,30 @@ class UserPost {
       'notes': notes,
       'requires_verified_vehicle': requiresVerifiedVehicle,
       'requires_expert_vehicle': requiresExpertVehicle,
+      'demand_plan': demandPlan.dbValue,
+      'min_ratings': minRatings,
+      'max_ratings': maxRatings,
+      'min_no_ratings': minNoRatings,
+      'max_no_ratings': maxNoRatings,
       'status': status.name,
       'is_online': isOnline,
       'parcel_weight': parcelWeight,
       'parcel_length': parcelLength,
       'parcel_width': parcelWidth,
       'parcel_height': parcelHeight,
+      'escrow_payment_id': escrowPaymentId,
+      // Marker: user request posts have no vehicle_id — used as discriminator
+      // when reading back from the shared posts table
     };
   }
 
   factory UserPost.fromJson(Map<String, dynamic> json) {
+    // posts table uses profile_id; user_id is the legacy local key
+    final userId = (json['profile_id'] ?? json['user_id']) as String;
+
     return UserPost(
       id: json['id'] as String,
-      userId: json['user_id'] as String,
+      userId: userId,
       serviceType: ServiceType.values.firstWhere(
         (e) => e.name == json['service_type'],
         orElse: () => ServiceType.passenger,
@@ -160,12 +199,19 @@ class UserPost {
       radius: json['radius'] != null ? (json['radius'] as num).toDouble() : null,
       startTime: DateTime.parse(json['start_time'] as String).toLocal(),
       endTime: DateTime.parse(json['end_time'] as String).toLocal(),
-      budget: (json['budget'] as num).toDouble(),
-      persons: json['persons'] as int,
+      // budget and persons are user-request-only fields; default safely for
+      // any provider row that accidentally passes the vehicle_id filter
+      budget: json['budget'] != null ? (json['budget'] as num).toDouble() : 0.0,
+      persons: json['persons'] as int? ?? 1,
       notes: json['notes'] as String?,
       requiresVerifiedVehicle:
           json['requires_verified_vehicle'] as bool? ?? false,
       requiresExpertVehicle: json['requires_expert_vehicle'] as bool? ?? false,
+      demandPlan: DemandPlanExtension.fromDbValue(json['demand_plan'] as String?),
+      minRatings: (json['min_ratings'] as num?)?.toDouble(),
+      maxRatings: (json['max_ratings'] as num?)?.toDouble(),
+      minNoRatings: json['min_no_ratings'] as int?,
+      maxNoRatings: json['max_no_ratings'] as int?,
       createdAt: DateTime.parse(json['created_at'] as String),
       status: UserPostStatus.values.firstWhere(
         (e) => e.name == json['status'],
@@ -176,6 +222,7 @@ class UserPost {
       parcelLength: (json['parcel_length'] as num?)?.toDouble(),
       parcelWidth: (json['parcel_width'] as num?)?.toDouble(),
       parcelHeight: (json['parcel_height'] as num?)?.toDouble(),
+      escrowPaymentId: json['escrow_payment_id'] as String?,
     );
   }
 }
@@ -212,10 +259,13 @@ class UserPostRepository {
         return;
       }
 
-      // Load ALL user posts (not just current user's) so providers can see requests
+      // User request posts have no vehicle_id — that's how they're distinguished
+      // from provider slot posts in the shared `posts` table.
+      // Load all active user request posts so providers can see and accept them.
       final response = await _supabase
           .from('posts')
           .select()
+          .filter('vehicle_id', 'is', null)
           .order('created_at', ascending: false);
 
       posts.value = (response as List)

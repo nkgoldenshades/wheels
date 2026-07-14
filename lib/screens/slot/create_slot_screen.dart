@@ -9,17 +9,15 @@ import '../../models/pickup_mode.dart';
 import '../../models/post_mode.dart';
 import '../../services/slot_repository.dart';
 import '../../services/auth_repository.dart';
+import '../../services/profile_repository.dart';
 import '../../services/content_filter_service.dart';
 import '../../services/app_preferences.dart';
 import '../../widgets/location_field.dart';
 
 class CreateSlotScreen extends StatefulWidget {
   final Vehicle vehicle;
-  
-  const CreateSlotScreen({
-    super.key,
-    required this.vehicle,
-  });
+
+  const CreateSlotScreen({super.key, required this.vehicle});
 
   @override
   State<CreateSlotScreen> createState() => _CreateSlotScreenState();
@@ -27,9 +25,10 @@ class CreateSlotScreen extends StatefulWidget {
 
 class _CreateSlotScreenState extends State<CreateSlotScreen> {
   SlotType _slotType = SlotType.fromTo;
-  ServiceType _serviceType = ServiceType.passenger; // Add service type selection
+  ServiceType _serviceType =
+      ServiceType.passenger; // Add service type selection
   PostMode _postMode = PostMode.instant; // Add post mode selection
-  
+
   // Controllers
   final _fromController = TextEditingController();
   final _toController = TextEditingController();
@@ -38,7 +37,7 @@ class _CreateSlotScreenState extends State<CreateSlotScreen> {
   final _capacityController = TextEditingController(text: '1');
   final _priceController = TextEditingController();
   final _notesController = TextEditingController();
-  
+
   DateTime? _startTime;
   DateTime? _endTime;
   bool _isCreating = false;
@@ -46,9 +45,10 @@ class _CreateSlotScreenState extends State<CreateSlotScreen> {
   @override
   void initState() {
     super.initState();
-    // Set default times
+    // Set default times — use Duration addition to handle day overflow
     final now = DateTime.now();
-    _startTime = DateTime(now.year, now.month, now.day, now.hour + 1, 0);
+    final start = now.add(const Duration(hours: 1));
+    _startTime = DateTime(start.year, start.month, start.day, start.hour, 0);
     _endTime = _startTime!.add(const Duration(hours: 4));
   }
 
@@ -62,6 +62,30 @@ class _CreateSlotScreenState extends State<CreateSlotScreen> {
     _priceController.dispose();
     _notesController.dispose();
     super.dispose();
+  }
+
+  /// Get currency symbol from provider's connected payment account
+  String _getProviderCurrencySymbol() {
+    final profile = ProfileRepository.instance.profile.value;
+    final currency = profile.bankCurrency;
+
+    if (currency != null && currency.isNotEmpty) {
+      final currencySymbols = {
+        'INR': '₹',
+        'USD': '\$',
+        'GBP': '£',
+        'EUR': '€',
+        'AED': 'د.إ',
+        'SGD': 'S\$',
+        'AUD': 'A\$',
+        'CAD': 'C\$',
+        'JPY': '¥',
+        'CNY': '¥',
+        'HKD': 'HK\$',
+      };
+      return currencySymbols[currency] ?? currency;
+    }
+    return AppPreferences.instance.currencySymbol;
   }
 
   @override
@@ -104,21 +128,22 @@ class _CreateSlotScreenState extends State<CreateSlotScreen> {
               ),
             ),
           ),
-          
+
           const SizedBox(height: 24),
-          
+
           // Service Type Selection
           const Text(
             'Service Type',
             style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 8),
-          
+
           // Service Type Options
           Column(
             children: [
               InkWell(
-                onTap: () => setState(() => _serviceType = ServiceType.passenger),
+                onTap: () =>
+                    setState(() => _serviceType = ServiceType.passenger),
                 child: Padding(
                   padding: const EdgeInsets.symmetric(vertical: 4.0),
                   child: Row(
@@ -126,7 +151,8 @@ class _CreateSlotScreenState extends State<CreateSlotScreen> {
                       Radio<ServiceType>(
                         value: ServiceType.passenger,
                         groupValue: _serviceType,
-                        onChanged: (value) => setState(() => _serviceType = value!),
+                        onChanged: (value) =>
+                            setState(() => _serviceType = value!),
                       ),
                       const Icon(Icons.people, color: Colors.blue),
                       const SizedBox(width: 8),
@@ -135,8 +161,13 @@ class _CreateSlotScreenState extends State<CreateSlotScreen> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text('Passenger', style: TextStyle(fontSize: 16)),
-                            Text('Transport people from one place to another', 
-                                 style: TextStyle(fontSize: 12, color: Colors.grey)),
+                            Text(
+                              'Transport people from one place to another',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey,
+                              ),
+                            ),
                           ],
                         ),
                       ),
@@ -153,7 +184,8 @@ class _CreateSlotScreenState extends State<CreateSlotScreen> {
                       Radio<ServiceType>(
                         value: ServiceType.parcel,
                         groupValue: _serviceType,
-                        onChanged: (value) => setState(() => _serviceType = value!),
+                        onChanged: (value) =>
+                            setState(() => _serviceType = value!),
                       ),
                       const Icon(Icons.local_shipping, color: Colors.orange),
                       const SizedBox(width: 8),
@@ -162,8 +194,13 @@ class _CreateSlotScreenState extends State<CreateSlotScreen> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text('Parcel', style: TextStyle(fontSize: 16)),
-                            Text('Deliver packages and goods', 
-                                 style: TextStyle(fontSize: 12, color: Colors.grey)),
+                            Text(
+                              'Deliver packages and goods',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey,
+                              ),
+                            ),
                           ],
                         ),
                       ),
@@ -180,7 +217,8 @@ class _CreateSlotScreenState extends State<CreateSlotScreen> {
                       Radio<ServiceType>(
                         value: ServiceType.lease,
                         groupValue: _serviceType,
-                        onChanged: (value) => setState(() => _serviceType = value!),
+                        onChanged: (value) =>
+                            setState(() => _serviceType = value!),
                       ),
                       const Icon(Icons.car_rental, color: Colors.green),
                       const SizedBox(width: 8),
@@ -189,8 +227,13 @@ class _CreateSlotScreenState extends State<CreateSlotScreen> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text('Lease', style: TextStyle(fontSize: 16)),
-                            Text('Rent out vehicle with or without operator', 
-                                 style: TextStyle(fontSize: 12, color: Colors.grey)),
+                            Text(
+                              'Rent out vehicle with or without operator',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey,
+                              ),
+                            ),
                           ],
                         ),
                       ),
@@ -200,16 +243,16 @@ class _CreateSlotScreenState extends State<CreateSlotScreen> {
               ),
             ],
           ),
-          
+
           const SizedBox(height: 24),
-          
+
           // Post Mode Selection
           const Text(
             'Booking Mode',
             style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 8),
-          
+
           // Post Mode Options
           Column(
             children: [
@@ -222,7 +265,8 @@ class _CreateSlotScreenState extends State<CreateSlotScreen> {
                       Radio<PostMode>(
                         value: PostMode.instant,
                         groupValue: _postMode,
-                        onChanged: (value) => setState(() => _postMode = value!),
+                        onChanged: (value) =>
+                            setState(() => _postMode = value!),
                       ),
                       const Icon(Icons.flash_on, color: Colors.blue),
                       const SizedBox(width: 8),
@@ -230,9 +274,17 @@ class _CreateSlotScreenState extends State<CreateSlotScreen> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text('Instant Booking', style: TextStyle(fontSize: 16)),
-                            Text('Customers can book individual seats immediately', 
-                                 style: TextStyle(fontSize: 12, color: Colors.grey)),
+                            Text(
+                              'Instant Booking',
+                              style: TextStyle(fontSize: 16),
+                            ),
+                            Text(
+                              'Customers can book individual seats immediately',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey,
+                              ),
+                            ),
                           ],
                         ),
                       ),
@@ -249,7 +301,8 @@ class _CreateSlotScreenState extends State<CreateSlotScreen> {
                       Radio<PostMode>(
                         value: PostMode.waitForFull,
                         groupValue: _postMode,
-                        onChanged: (value) => setState(() => _postMode = value!),
+                        onChanged: (value) =>
+                            setState(() => _postMode = value!),
                       ),
                       const Icon(Icons.groups, color: Colors.orange),
                       const SizedBox(width: 8),
@@ -257,9 +310,17 @@ class _CreateSlotScreenState extends State<CreateSlotScreen> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text('Wait for Full', style: TextStyle(fontSize: 16)),
-                            Text('Wait until all seats are filled before confirming', 
-                                 style: TextStyle(fontSize: 12, color: Colors.grey)),
+                            Text(
+                              'Wait for Full',
+                              style: TextStyle(fontSize: 16),
+                            ),
+                            Text(
+                              'Wait until all seats are filled before confirming',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey,
+                              ),
+                            ),
                           ],
                         ),
                       ),
@@ -276,7 +337,8 @@ class _CreateSlotScreenState extends State<CreateSlotScreen> {
                       Radio<PostMode>(
                         value: PostMode.fullPost,
                         groupValue: _postMode,
-                        onChanged: (value) => setState(() => _postMode = value!),
+                        onChanged: (value) =>
+                            setState(() => _postMode = value!),
                       ),
                       const Icon(Icons.directions_car, color: Colors.green),
                       const SizedBox(width: 8),
@@ -284,9 +346,17 @@ class _CreateSlotScreenState extends State<CreateSlotScreen> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text('Full Post Mode', style: TextStyle(fontSize: 16)),
-                            Text('Customer must book all remaining slots in this post', 
-                                 style: TextStyle(fontSize: 12, color: Colors.grey)),
+                            Text(
+                              'Full Post Mode',
+                              style: TextStyle(fontSize: 16),
+                            ),
+                            Text(
+                              'Customer must book all remaining slots in this post',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey,
+                              ),
+                            ),
                           ],
                         ),
                       ),
@@ -296,9 +366,9 @@ class _CreateSlotScreenState extends State<CreateSlotScreen> {
               ),
             ],
           ),
-          
+
           const SizedBox(height: 24),
-          
+
           // 1. Slot Type Selection
           const Text(
             'Slot Type',
@@ -321,7 +391,10 @@ class _CreateSlotScreenState extends State<CreateSlotScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text('Point to Point', style: TextStyle(fontSize: 16)),
-                        Text('Fixed route (e.g., Airport to City)', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                        Text(
+                          'Fixed route (e.g., Airport to City)',
+                          style: TextStyle(fontSize: 12, color: Colors.grey),
+                        ),
                       ],
                     ),
                   ),
@@ -345,7 +418,10 @@ class _CreateSlotScreenState extends State<CreateSlotScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text('Area Service', style: TextStyle(fontSize: 16)),
-                        Text('Service within radius (e.g., City taxi)', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                        Text(
+                          'Service within radius (e.g., City taxi)',
+                          style: TextStyle(fontSize: 12, color: Colors.grey),
+                        ),
                       ],
                     ),
                   ),
@@ -353,16 +429,16 @@ class _CreateSlotScreenState extends State<CreateSlotScreen> {
               ),
             ),
           ),
-          
+
           const SizedBox(height: 16),
-          
+
           // 2. Location Fields (conditional)
           const Text(
             'Location Details',
             style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 8),
-          
+
           if (_slotType == SlotType.fromTo) ...[
             LocationField(
               controller: _fromController,
@@ -394,9 +470,9 @@ class _CreateSlotScreenState extends State<CreateSlotScreen> {
               ),
             ),
           ],
-          
+
           const SizedBox(height: 24),
-          
+
           // 3. Time Selection
           const Text(
             'Time Schedule',
@@ -409,9 +485,9 @@ class _CreateSlotScreenState extends State<CreateSlotScreen> {
                 child: OutlinedButton.icon(
                   icon: const Icon(Icons.calendar_today),
                   label: Text(
-                    _startTime == null 
-                      ? 'Start Time *' 
-                      : _formatDateTime(_startTime!),
+                    _startTime == null
+                        ? 'Start Time *'
+                        : _formatDateTime(_startTime!),
                     style: const TextStyle(fontSize: 12),
                   ),
                   onPressed: () => _pickDateTime(isStart: true),
@@ -422,9 +498,9 @@ class _CreateSlotScreenState extends State<CreateSlotScreen> {
                 child: OutlinedButton.icon(
                   icon: const Icon(Icons.calendar_today),
                   label: Text(
-                    _endTime == null 
-                      ? 'End Time *' 
-                      : _formatDateTime(_endTime!),
+                    _endTime == null
+                        ? 'End Time *'
+                        : _formatDateTime(_endTime!),
                     style: const TextStyle(fontSize: 12),
                   ),
                   onPressed: () => _pickDateTime(isStart: false),
@@ -432,9 +508,9 @@ class _CreateSlotScreenState extends State<CreateSlotScreen> {
               ),
             ],
           ),
-          
+
           const SizedBox(height: 24),
-          
+
           // 4. Capacity & Price
           const Text(
             'Capacity & Pricing',
@@ -465,15 +541,15 @@ class _CreateSlotScreenState extends State<CreateSlotScreen> {
                     labelText: 'Price *',
                     hintText: '500',
                     border: const OutlineInputBorder(),
-                    prefixText: '${AppPreferences.instance.currencySymbol} ',
+                    prefixText: '${_getProviderCurrencySymbol()} ',
                   ),
                 ),
               ),
             ],
           ),
-          
+
           const SizedBox(height: 24),
-          
+
           // 5. Notes (Optional)
           const Text(
             'Additional Terms (Optional)',
@@ -488,9 +564,9 @@ class _CreateSlotScreenState extends State<CreateSlotScreen> {
               border: OutlineInputBorder(),
             ),
           ),
-          
+
           const SizedBox(height: 32),
-          
+
           // 6. Create Button
           FilledButton(
             onPressed: _isCreating ? null : _createSlot,
@@ -514,22 +590,22 @@ class _CreateSlotScreenState extends State<CreateSlotScreen> {
     // Pick date
     final date = await showDatePicker(
       context: context,
-      initialDate: isStart 
-          ? (_startTime ?? DateTime.now()) 
+      initialDate: isStart
+          ? (_startTime ?? DateTime.now())
           : (_endTime ?? DateTime.now().add(const Duration(hours: 4))),
       firstDate: DateTime.now(),
       lastDate: DateTime.now().add(const Duration(days: 365)),
     );
     if (date == null) return;
-    
+
     if (!mounted) return;
-    
+
     // Pick time
     final time = await showTimePicker(
       context: context,
       initialTime: TimeOfDay.fromDateTime(
-        isStart 
-            ? (_startTime ?? DateTime.now()) 
+        isStart
+            ? (_startTime ?? DateTime.now())
             : (_endTime ?? DateTime.now().add(const Duration(hours: 4))),
       ),
       builder: (ctx, child) => MediaQuery(
@@ -538,7 +614,7 @@ class _CreateSlotScreenState extends State<CreateSlotScreen> {
       ),
     );
     if (time == null) return;
-    
+
     final dateTime = DateTime(
       date.year,
       date.month,
@@ -546,7 +622,7 @@ class _CreateSlotScreenState extends State<CreateSlotScreen> {
       time.hour,
       time.minute,
     );
-    
+
     setState(() {
       if (isStart) {
         _startTime = dateTime;
@@ -563,7 +639,7 @@ class _CreateSlotScreenState extends State<CreateSlotScreen> {
   Future<void> _createSlot() async {
     // Validation
     if (_slotType == SlotType.fromTo) {
-      if (_fromController.text.trim().isEmpty || 
+      if (_fromController.text.trim().isEmpty ||
           _toController.text.trim().isEmpty) {
         _showError('Please enter both from and to locations');
         return;
@@ -579,29 +655,29 @@ class _CreateSlotScreenState extends State<CreateSlotScreen> {
         return;
       }
     }
-    
+
     if (_startTime == null || _endTime == null) {
       _showError('Please select start and end times');
       return;
     }
-    
+
     if (_endTime!.isBefore(_startTime!)) {
       _showError('End time must be after start time');
       return;
     }
-    
+
     final capacity = int.tryParse(_capacityController.text);
     if (capacity == null || capacity <= 0) {
       _showError('Please enter valid capacity');
       return;
     }
-    
+
     final price = double.tryParse(_priceController.text);
     if (price == null || price <= 0) {
       _showError('Please enter valid price');
       return;
     }
-    
+
     // Validate notes for contact information
     final notes = _notesController.text.trim();
     if (notes.isNotEmpty) {
@@ -611,9 +687,9 @@ class _CreateSlotScreenState extends State<CreateSlotScreen> {
         return;
       }
     }
-    
+
     setState(() => _isCreating = true);
-    
+
     try {
       // Guest-first: Check if user is logged in
       final currentUser = AuthRepository.instance.currentUser;
@@ -628,7 +704,7 @@ class _CreateSlotScreenState extends State<CreateSlotScreen> {
         Navigator.pushNamed(context, '/login');
         return;
       }
-      
+
       // Create slot
       final slot = Slot(
         id: DateTime.now().millisecondsSinceEpoch.toString(),
@@ -636,24 +712,24 @@ class _CreateSlotScreenState extends State<CreateSlotScreen> {
         vehicleId: widget.vehicle.id,
         serviceType: _serviceType,
         slotType: _slotType,
-        fromLocation: _slotType == SlotType.fromTo 
-            ? _fromController.text.trim() 
+        fromLocation: _slotType == SlotType.fromTo
+            ? _fromController.text.trim()
             : null,
-        toLocation: _slotType == SlotType.fromTo 
-            ? _toController.text.trim() 
+        toLocation: _slotType == SlotType.fromTo
+            ? _toController.text.trim()
             : null,
-        baseLocation: _slotType == SlotType.fromRange 
-            ? _baseController.text.trim() 
+        baseLocation: _slotType == SlotType.fromRange
+            ? _baseController.text.trim()
             : null,
-        radius: _slotType == SlotType.fromRange 
-            ? double.tryParse(_radiusController.text) 
+        radius: _slotType == SlotType.fromRange
+            ? double.tryParse(_radiusController.text)
             : null,
         startTime: _startTime!,
         endTime: _endTime!,
         price: price,
         capacity: capacity,
-        notes: _notesController.text.trim().isEmpty 
-            ? null 
+        notes: _notesController.text.trim().isEmpty
+            ? null
             : _notesController.text.trim(),
         images: [],
         isAvailable: true,
@@ -661,14 +737,16 @@ class _CreateSlotScreenState extends State<CreateSlotScreen> {
         pickupOption: PickupMode.providerPickup,
         withOperator: false, // Default to false for now
         postMode: _postMode, // Add post mode
-        waitForFullDeadlineHours: _postMode == PostMode.waitForFull ? 2 : null, // Default 2 hours
+        waitForFullDeadlineHours: _postMode == PostMode.waitForFull
+            ? 2
+            : null, // Default 2 hours
       );
-      
+
       // Save to Supabase
       await SlotRepository.instance.addSlot(slot);
-      
+
       if (!mounted) return;
-      
+
       // Show success and go back
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -676,7 +754,7 @@ class _CreateSlotScreenState extends State<CreateSlotScreen> {
           backgroundColor: Colors.green,
         ),
       );
-      
+
       Navigator.pop(context, slot);
     } catch (e) {
       if (!mounted) return;
@@ -690,10 +768,7 @@ class _CreateSlotScreenState extends State<CreateSlotScreen> {
 
   void _showError(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: Colors.red,
-      ),
+      SnackBar(content: Text(message), backgroundColor: Colors.red),
     );
   }
 
@@ -705,6 +780,3 @@ class _CreateSlotScreenState extends State<CreateSlotScreen> {
     return '$day/$month $hour:$minute';
   }
 }
-
-
-

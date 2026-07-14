@@ -5,15 +5,22 @@ import '../../services/user_post_repository.dart';
 import '../../services/user_post_acceptance_repository.dart';
 import '../../services/auth_repository.dart';
 import '../../services/payment_service.dart';
+import '../../services/vehicle_repository.dart';
+import '../../services/profile_repository.dart';
+import '../../services/booking_repository.dart';
 import '../../models/user_post_acceptance.dart';
 import '../../models/service_type.dart';
 import '../../models/slot_type.dart';
+import '../../models/demand_plan.dart';
+import '../../models/post_mode.dart';
+import '../../widgets/acceptance_confirm_sheet.dart';
 import 'package:razorpay_flutter/razorpay_flutter.dart';
 import '../../services/razorpay_service.dart';
 
 class UserPostDetailScreen extends StatefulWidget {
   final UserPost post;
-  final bool isProvider; // true if viewing as provider, false if viewing as post owner
+  final bool
+  isProvider; // true if viewing as provider, false if viewing as post owner
 
   const UserPostDetailScreen({
     super.key,
@@ -81,8 +88,16 @@ class _UserPostDetailScreenState extends State<UserPostDetailScreen> {
             ),
             const Divider(),
             const SizedBox(height: 8),
-            _buildDetailRow('Service', _getServiceTypeName(widget.post.serviceType)),
-            _buildDetailRow('Type', widget.post.slotType == SlotType.fromTo ? 'From-To' : 'Base-Range'),
+            _buildDetailRow(
+              'Service',
+              _getServiceTypeName(widget.post.serviceType),
+            ),
+            _buildDetailRow(
+              'Type',
+              widget.post.slotType == SlotType.fromTo
+                  ? 'From-To'
+                  : 'Base-Range',
+            ),
             if (widget.post.fromLocation != null)
               _buildDetailRow('From', widget.post.fromLocation!),
             if (widget.post.toLocation != null)
@@ -139,7 +154,11 @@ class _UserPostDetailScreenState extends State<UserPostDetailScreen> {
     );
   }
 
-  Widget _buildDetailRow(String label, String value, {bool isHighlighted = false}) {
+  Widget _buildDetailRow(
+    String label,
+    String value, {
+    bool isHighlighted = false,
+  }) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
@@ -192,12 +211,16 @@ class _UserPostDetailScreenState extends State<UserPostDetailScreen> {
     if (currentUser == null) return const SizedBox();
 
     final myAcceptance = acceptances.firstWhere(
-      (a) => a.providerId == currentUser.id && a.status != AcceptanceStatus.cancelled,
+      (a) =>
+          a.providerId == currentUser.id &&
+          a.status != AcceptanceStatus.cancelled,
       orElse: () => acceptances.first, // dummy
     );
 
     final hasAccepted = acceptances.any(
-      (a) => a.providerId == currentUser.id && a.status != AcceptanceStatus.cancelled,
+      (a) =>
+          a.providerId == currentUser.id &&
+          a.status != AcceptanceStatus.cancelled,
     );
 
     if (hasAccepted) {
@@ -281,7 +304,9 @@ class _UserPostDetailScreenState extends State<UserPostDetailScreen> {
             Row(
               children: [
                 CircleAvatar(
-                  child: Text(acceptance.providerId.substring(0, 2).toUpperCase()),
+                  child: Text(
+                    acceptance.providerId.substring(0, 2).toUpperCase(),
+                  ),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -386,11 +411,137 @@ class _UserPostDetailScreenState extends State<UserPostDetailScreen> {
         throw Exception('Please login to accept requests');
       }
 
-      await _acceptanceRepo.acceptPost(
-        postId: widget.post.id,
+      // ✅ CHECK DEMAND PLAN - Profile-based access control
+      final currentProfile = ProfileRepository.instance.profile.value;
+      if (currentProfile.id.isEmpty) {
+        throw Exception('Profile not found');
+      }
+
+      // Check if profile meets demand plan requirements
+      if (!currentProfile.meetsDemandPlan(widget.post.demandPlan)) {
+        switch (widget.post.demandPlan) {
+          case DemandPlan.verified:
+            throw Exception(
+              'This post requires a verified profile. '
+              'Please verify your Aadhaar, PAN, or Driving License.',
+            );
+          case DemandPlan.expert:
+            throw Exception(
+              'This post requires expert status. '
+              'Complete 50+ trips with 4.5+ rating to become an expert.',
+            );
+          case DemandPlan.basic:
+            break; // Everyone qualifies
+        }
+      }
+
+      // ✅ CHECK RATING REQUIREMENTS (if any)
+      // Get provider's vehicles to check if they meet requirements
+      final providerVehicles = VehicleRepository.instance.allVehicles
+          .where((v) => v.userId == currentUser.id)
+          .toList();
+
+      if (providerVehicles.isEmpty) {
+        throw Exception('You need to add a vehicle before accepting posts');
+      }
+
+      // Check if ANY of provider's vehicles meets the requirements
+      bool hasQualifiedVehicle = false;
+      String? failureReason;
+
+      for (final vehicle in providerVehicles) {
+        // Check min rating requirement
+        if (widget.post.minRatings != null &&
+            vehicle.averageRating < widget.post.minRatings!) {
+          failureReason =
+              'Vehicle rating ${vehicle.averageRating.toStringAsFixed(1)}⭐ is below required ${widget.post.minRatings!.toStringAsFixed(1)}⭐';
+          continue;
+        }
+
+        // Check min trips requirement
+        if (widget.post.minNoRatings != null &&
+            vehicle.totalBookings < widget.post.minNoRatings!) {
+          failureReason =
+              'Vehicle has ${vehicle.totalBookings} trips, but ${widget.post.minNoRatings}+ required';
+          continue;
+        }
+
+        // Check verified vehicle requirement (legacy)
+        if (widget.post.requiresVerifiedVehicle && !vehicle.isFullyVerified) {
+          failureReason = 'Post requires verified vehicle';
+          continue;
+        }
+
+        // Check expert vehicle requirement (legacy)
+        if (widget.post.requiresExpertVehicle && !vehicle.isExpertToggle) {
+          failureReason = 'Post requires expert vehicle';
+          continue;
+        }
+
+        // Vehicle qualifies!
+        hasQualifiedVehicle = true;
+        break;
+      }
+
+      if (!hasQualifiedVehicle) {
+        throw Exception(
+          failureReason ?? 'Your vehicle does not meet the post requirements',
+        );
+      }
+
+      // Use first qualified vehicle's operator details
+      final vehicle = providerVehicles.first;
+
+      // Show acceptance confirmation sheet (similar to booking sheet)
+      final acceptanceResult =
+          await showModalBottomSheet<AcceptanceConfirmResult>(
+            context: context,
+            isScrollControlled: true,
+            showDragHandle: true,
+            builder: (context) => AcceptanceConfirmSheet(post: widget.post),
+          );
+
+      if (!mounted) return;
+
+      if (acceptanceResult == null) {
+        // User cancelled
+        setState(() => _isProcessing = false);
+        return;
+      }
+
+      // Create booking directly (no acceptance table - goes straight to bookings)
+      final booking = await BookingRepository.instance.createBooking(
+        slotId: widget.post.id,
+        providerId: currentUser.id,
+        providerName: acceptanceResult.operatorName, // Operator name from sheet
+        providerPhone:
+            acceptanceResult.operatorPhone, // Operator phone from sheet
+        providerEmail: null,
+        providerAvatar: vehicle.profileImage,
         userId: widget.post.userId,
-        amount: widget.post.budget,
+        defaultCapacity: widget.post.persons,
+        price: widget.post.budget,
+        userName: 'Guest', // Customer details unknown at acceptance time
+        userPhone: null,
+        userAge: 18,
+        userGender: null,
+        serviceType: widget.post.serviceType,
+        vehicleId: acceptanceResult.vehicleId ?? vehicle.id,
+        slotStartTime: widget.post.startTime,
+        slotEndTime: widget.post.endTime,
+        slotCapacity: widget.post.persons,
+        postMode: PostMode.instant,
+        // Route snapshot
+        routeType: widget.post.slotType.name,
+        fromAddress: widget.post.fromLocation,
+        toAddress: widget.post.toLocation,
+        baseAddress: widget.post.baseLocation,
+        rangeKm: widget.post.radius,
       );
+
+      if (booking == null) {
+        throw Exception('Failed to create booking');
+      }
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -409,6 +560,7 @@ class _UserPostDetailScreenState extends State<UserPostDetailScreen> {
           SnackBar(
             content: Text('Failed to accept: $e'),
             backgroundColor: Colors.red,
+            duration: const Duration(seconds: 4),
           ),
         );
       }
@@ -422,9 +574,9 @@ class _UserPostDetailScreenState extends State<UserPostDetailScreen> {
   Future<void> _verifyOTPAndPay(UserPostAcceptance acceptance) async {
     final otp = _otpController.text.trim();
     if (otp.length != 6) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter 6-digit OTP')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Please enter 6-digit OTP')));
       return;
     }
 
@@ -446,12 +598,16 @@ class _UserPostDetailScreenState extends State<UserPostDetailScreen> {
         await _acceptanceRepo.updatePaymentDetails(
           acceptanceId: acceptance.id,
           razorpayOrderId: 'web_mock_${DateTime.now().millisecondsSinceEpoch}',
-          razorpayPaymentId: 'web_mock_pay_${DateTime.now().millisecondsSinceEpoch}',
+          razorpayPaymentId:
+              'web_mock_pay_${DateTime.now().millisecondsSinceEpoch}',
           status: AcceptanceStatus.paid,
         );
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Payment completed!'), backgroundColor: Colors.green),
+            const SnackBar(
+              content: Text('Payment completed!'),
+              backgroundColor: Colors.green,
+            ),
           );
           _otpController.clear();
         }
@@ -480,10 +636,7 @@ class _UserPostDetailScreenState extends State<UserPostDetailScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error: $e'),
-            backgroundColor: Colors.red,
-          ),
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
         );
       }
     } finally {
@@ -493,7 +646,10 @@ class _UserPostDetailScreenState extends State<UserPostDetailScreen> {
     }
   }
 
-  void _openRazorpay(Map<String, dynamic> orderData, UserPostAcceptance acceptance) {
+  void _openRazorpay(
+    Map<String, dynamic> orderData,
+    UserPostAcceptance acceptance,
+  ) {
     final currentUser = AuthRepository.instance.currentUser;
     if (currentUser == null) return;
 
@@ -504,13 +660,8 @@ class _UserPostDetailScreenState extends State<UserPostDetailScreen> {
       'name': 'VaultWheels',
       'description': 'Payment for service request',
       'order_id': orderData['id'],
-      'prefill': {
-        'email': currentUser.email,
-        'contact': '',
-      },
-      'theme': {
-        'color': '#3399cc',
-      },
+      'prefill': {'email': currentUser.email, 'contact': ''},
+      'theme': {'color': '#3399cc'},
     };
 
     try {
@@ -660,7 +811,10 @@ class _UserPostDetailScreenState extends State<UserPostDetailScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _buildPaymentDetailRow('Amount', '₹${amount.toStringAsFixed(2)}'),
+                  _buildPaymentDetailRow(
+                    'Amount',
+                    '₹${amount.toStringAsFixed(2)}',
+                  ),
                   const SizedBox(height: 8),
                   _buildPaymentDetailRow('Payment ID', paymentId),
                   const SizedBox(height: 8),
@@ -745,16 +899,10 @@ class _UserPostDetailScreenState extends State<UserPostDetailScreen> {
                 children: [
                   const Text(
                     'Error Details:',
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 14,
-                    ),
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
                   ),
                   const SizedBox(height: 8),
-                  Text(
-                    errorMessage,
-                    style: const TextStyle(fontSize: 13),
-                  ),
+                  Text(errorMessage, style: const TextStyle(fontSize: 13)),
                 ],
               ),
             ),
@@ -807,16 +955,10 @@ class _UserPostDetailScreenState extends State<UserPostDetailScreen> {
         Expanded(
           child: Text(
             value,
-            style: const TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-            ),
+            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
           ),
         ),
       ],
     );
   }
 }
-
-
-

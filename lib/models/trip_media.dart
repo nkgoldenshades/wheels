@@ -17,25 +17,40 @@ class TripMediaParty {
   final List<String> images;   // Supabase Storage URLs
   final String? videoUrl;      // Single Supabase Storage URL (≤30 sec)
   final DateTime? uploadedAt;  // When this party submitted their media
+  
+  // GPS tracking data
+  final double? gpsLat;        // GPS latitude when media uploaded
+  final double? gpsLng;        // GPS longitude when media uploaded
+  final double? gpsAccuracy;   // GPS accuracy in meters
 
   const TripMediaParty({
     this.images = const [],
     this.videoUrl,
     this.uploadedAt,
+    this.gpsLat,
+    this.gpsLng,
+    this.gpsAccuracy,
   });
 
   bool get hasMedia => images.isNotEmpty || videoUrl != null;
+  bool get hasGps => gpsLat != null && gpsLng != null;
 
   TripMediaParty copyWith({
     List<String>? images,
     String? videoUrl,
     DateTime? uploadedAt,
     bool clearVideo = false,
+    double? gpsLat,
+    double? gpsLng,
+    double? gpsAccuracy,
   }) {
     return TripMediaParty(
       images: images ?? this.images,
       videoUrl: clearVideo ? null : (videoUrl ?? this.videoUrl),
       uploadedAt: uploadedAt ?? this.uploadedAt,
+      gpsLat: gpsLat ?? this.gpsLat,
+      gpsLng: gpsLng ?? this.gpsLng,
+      gpsAccuracy: gpsAccuracy ?? this.gpsAccuracy,
     );
   }
 
@@ -43,6 +58,9 @@ class TripMediaParty {
         'images': images,
         'video_url': videoUrl,
         'uploaded_at': uploadedAt?.toUtc().toIso8601String(),
+        if (gpsLat != null) 'gps_lat': gpsLat,
+        if (gpsLng != null) 'gps_lng': gpsLng,
+        if (gpsAccuracy != null) 'gps_accuracy': gpsAccuracy,
       };
 
   factory TripMediaParty.fromJson(Map<String, dynamic>? json) {
@@ -57,6 +75,9 @@ class TripMediaParty {
       uploadedAt: rawUploadedAt != null
           ? DateTime.tryParse(rawUploadedAt as String)?.toLocal()
           : null,
+      gpsLat: (json['gps_lat'] as num?)?.toDouble(),
+      gpsLng: (json['gps_lng'] as num?)?.toDouble(),
+      gpsAccuracy: (json['gps_accuracy'] as num?)?.toDouble(),
     );
   }
 }

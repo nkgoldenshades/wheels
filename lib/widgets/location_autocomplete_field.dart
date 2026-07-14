@@ -27,8 +27,8 @@ class LocationAutocompleteField extends StatefulWidget {
       _LocationAutocompleteFieldState();
 }
 
-class _LocationAutocompleteFieldState
-    extends State<LocationAutocompleteField> with RouteAware {
+class _LocationAutocompleteFieldState extends State<LocationAutocompleteField>
+    with RouteAware {
   final LayerLink _layerLink = LayerLink();
   OverlayEntry? _overlayEntry;
   List<LocationSuggestion> _suggestions = [];
@@ -58,9 +58,11 @@ class _LocationAutocompleteFieldState
 
   void _onFocusChanged() {
     if (!mounted) return; // Safety check
-    
-    debugPrint('🔍 LocationAutocomplete focus changed: hasFocus=${_focusNode.hasFocus}, tapInProgress=$_tapInOverlayInProgress');
-    
+
+    debugPrint(
+      '🔍 LocationAutocomplete focus changed: hasFocus=${_focusNode.hasFocus}, tapInProgress=$_tapInOverlayInProgress',
+    );
+
     if (_focusNode.hasFocus) {
       // Only show overlay if no location is selected
       if (_selectedLocation == null || widget.controller.text.isEmpty) {
@@ -70,17 +72,8 @@ class _LocationAutocompleteFieldState
     } else {
       // Focus lost - always close overlay unless we're in the middle of selecting
       if (_tapInOverlayInProgress) {
-        debugPrint('📍 Tap in overlay in progress, delaying removal');
-        // Give a short delay for the tap to complete
-        Future.delayed(const Duration(milliseconds: 100), () {
-          if (mounted) {
-            _tapInOverlayInProgress = false;
-            if (!_focusNode.hasFocus) {
-              debugPrint('📍 Removing overlay after tap delay');
-              _safeRemoveOverlay();
-            }
-          }
-        });
+        debugPrint('📍 Tap in overlay in progress, not removing overlay');
+        // The action handler (_pickOnMap, _useCurrentLocation, etc.) will remove it
       } else {
         debugPrint('📍 Removing overlay immediately (focus lost)');
         _safeRemoveOverlay();
@@ -105,7 +98,8 @@ class _LocationAutocompleteFieldState
     debugPrint('📍 LocationAutocompleteField text changed: "$query"');
 
     // If a location is already selected and text hasn't changed, hide overlay
-    if (_selectedLocation != null && query == _getShortName(_selectedLocation!.displayName)) {
+    if (_selectedLocation != null &&
+        query == _getShortName(_selectedLocation!.displayName)) {
       _safeRemoveOverlay();
       return;
     }
@@ -130,7 +124,8 @@ class _LocationAutocompleteFieldState
       return;
     }
 
-    if (_selectedLocation != null && query != _getShortName(_selectedLocation!.displayName)) {
+    if (_selectedLocation != null &&
+        query != _getShortName(_selectedLocation!.displayName)) {
       if (mounted) setState(() => _selectedLocation = null);
     }
 
@@ -151,24 +146,21 @@ class _LocationAutocompleteFieldState
 
       debugPrint('📍 LocationAutocompleteField searching for: "$query"');
 
-      LocationAutocompleteService.instance.searchWithDebounce(
-        query,
-        (results) {
-          if (!mounted) return;
-          debugPrint(
-            '📍 LocationAutocompleteField got ${results.length} suggestions for: "$query"',
-          );
-          setState(() {
-            _suggestions = results;
-            _isLoading = false;
-          });
-          if (mounted && _focusNode.hasFocus) {
-            _refreshOverlay(); // Rebuild overlay with new suggestions
-          } else {
-            _safeRemoveOverlay();
-          }
-        },
-      );
+      LocationAutocompleteService.instance.searchWithDebounce(query, (results) {
+        if (!mounted) return;
+        debugPrint(
+          '📍 LocationAutocompleteField got ${results.length} suggestions for: "$query"',
+        );
+        setState(() {
+          _suggestions = results;
+          _isLoading = false;
+        });
+        if (mounted && _focusNode.hasFocus) {
+          _refreshOverlay(); // Rebuild overlay with new suggestions
+        } else {
+          _safeRemoveOverlay();
+        }
+      });
     } else {
       // Less than 3 characters, just show Current Location and Enter Manually
       if (mounted) {
@@ -196,10 +188,11 @@ class _LocationAutocompleteFieldState
     if (!mounted) return;
     if (!_focusNode.hasFocus) return;
     if (_selectedLocation != null &&
-        widget.controller.text == _getShortName(_selectedLocation!.displayName)) {
+        widget.controller.text ==
+            _getShortName(_selectedLocation!.displayName)) {
       return;
     }
-    
+
     // CRITICAL: Always remove existing overlay first
     _safeRemoveOverlay();
 
@@ -250,154 +243,185 @@ class _LocationAutocompleteFieldState
                           padding: EdgeInsets.zero,
                           shrinkWrap: true,
                           physics: const BouncingScrollPhysics(),
-                          itemCount: _suggestions.length + 3, // +3 for current location, map picker, and manual options
-                          separatorBuilder: (_, _) => const Divider(height: 1, thickness: 0.5),
+                          itemCount:
+                              _suggestions.length +
+                              3, // +3 for current location, map picker, and manual options
+                          separatorBuilder: (_, _) =>
+                              const Divider(height: 1, thickness: 0.5),
                           itemBuilder: (context, index) {
-                    // First item: Use Current Location
-                    if (index == 0) {
-                      return InkWell(
-                        onTapDown: (_) => _tapInOverlayInProgress = true,
-                        onTap: () => _useCurrentLocation(),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                          child: Row(
-                            children: [
-                              const Icon(
-                                Icons.my_location,
-                                size: 16,
-                                color: Colors.blue,
-                              ),
-                              const SizedBox(width: 12),
-                              const Text(
-                                'Use Current Location',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      );
-                    }
-                    
-                    // Second item: Pick on Map
-                    if (index == 1) {
-                      return InkWell(
-                        onTapDown: (_) => _tapInOverlayInProgress = true,
-                        onTap: () => _pickOnMap(),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                          child: Row(
-                            children: [
-                              const Icon(
-                                Icons.map,
-                                size: 16,
-                                color: Colors.green,
-                              ),
-                              const SizedBox(width: 12),
-                              const Text(
-                                'Pick on Map',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      );
-                    }
-                    
-                    // Third item: Enter Manually
-                    if (index == 2) {
-                      return InkWell(
-                        onTapDown: (_) => _tapInOverlayInProgress = true,
-                        onTap: () => _enterManually(),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                          child: Row(
-                            children: [
-                              const Icon(
-                                Icons.edit_location_alt,
-                                size: 16,
-                                color: Colors.orange,
-                              ),
-                              const SizedBox(width: 12),
-                              const Text(
-                                'Enter Manually',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      );
-                    }
-                    
-                    // Rest: Location suggestions
-                    final suggestion = _suggestions[index - 3];
-                    final geo = suggestion.geo;
-                    final flag = geo != null ? _flagEmoji(geo.countryCode) : '';
-                    final district = geo?.district ?? geo?.stateDistrict;
-                    final geoParts = <String>[
-                      ?district,
-                      if (geo?.state != null) geo!.state!,
-                      if (geo?.postcode != null) geo!.postcode!,
-                      if (geo?.country != null)
-                        geo!.countryCode != null
-                            ? '${geo.country!} (${geo.countryCode!.toUpperCase()})'
-                            : geo.country!,
-                    ];
-                    final geoLine = '${flag.isNotEmpty ? '$flag ' : ''}${geoParts.join(' · ')}';
-
-                    return InkWell(
-                      onTapDown: (_) => _tapInOverlayInProgress = true,
-                      onTap: () => _selectLocation(suggestion),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Padding(
-                              padding: const EdgeInsets.only(top: 2),
-                              child: Icon(
-                                _getIconForType(suggestion.type),
-                                size: 16,
-                                color: Colors.blue,
-                              ),
-                            ),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    _getShortName(suggestion.displayName),
-                                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
+                            // First item: Use Current Location
+                            if (index == 0) {
+                              return InkWell(
+                                onTapDown: (_) =>
+                                    _tapInOverlayInProgress = true,
+                                onTap: () => _useCurrentLocation(),
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 8,
                                   ),
-                                  if (geoLine.trim().isNotEmpty) ...[
-                                    const SizedBox(height: 2),
-                                    Text(
-                                      geoLine,
-                                      style: TextStyle(fontSize: 10, color: Colors.grey[600]),
-                                      maxLines: 2,
-                                      overflow: TextOverflow.ellipsis,
+                                  child: Row(
+                                    children: [
+                                      const Icon(
+                                        Icons.my_location,
+                                        size: 16,
+                                        color: Colors.blue,
+                                      ),
+                                      const SizedBox(width: 12),
+                                      const Text(
+                                        'Use Current Location',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            }
+
+                            // Second item: Pick on Map
+                            if (index == 1) {
+                              return InkWell(
+                                onTapDown: (_) =>
+                                    _tapInOverlayInProgress = true,
+                                onTap: () => _pickOnMap(),
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 8,
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      const Icon(
+                                        Icons.map,
+                                        size: 16,
+                                        color: Colors.green,
+                                      ),
+                                      const SizedBox(width: 12),
+                                      const Text(
+                                        'Pick on Map',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            }
+
+                            // Third item: Enter Manually
+                            if (index == 2) {
+                              return InkWell(
+                                onTapDown: (_) =>
+                                    _tapInOverlayInProgress = true,
+                                onTap: () => _enterManually(),
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 8,
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      const Icon(
+                                        Icons.edit_location_alt,
+                                        size: 16,
+                                        color: Colors.orange,
+                                      ),
+                                      const SizedBox(width: 12),
+                                      const Text(
+                                        'Enter Manually',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            }
+
+                            // Rest: Location suggestions
+                            final suggestion = _suggestions[index - 3];
+                            final geo = suggestion.geo;
+                            final flag = geo != null
+                                ? _flagEmoji(geo.countryCode)
+                                : '';
+                            final district =
+                                geo?.district ?? geo?.stateDistrict;
+                            final geoParts = <String>[
+                              ?district,
+                              if (geo?.state != null) geo!.state!,
+                              if (geo?.postcode != null) geo!.postcode!,
+                              if (geo?.country != null)
+                                geo!.countryCode != null
+                                    ? '${geo.country!} (${geo.countryCode!.toUpperCase()})'
+                                    : geo.country!,
+                            ];
+                            final geoLine =
+                                '${flag.isNotEmpty ? '$flag ' : ''}${geoParts.join(' · ')}';
+
+                            return InkWell(
+                              onTapDown: (_) => _tapInOverlayInProgress = true,
+                              onTap: () => _selectLocation(suggestion),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 8,
+                                ),
+                                child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Padding(
+                                      padding: const EdgeInsets.only(top: 2),
+                                      child: Icon(
+                                        _getIconForType(suggestion.type),
+                                        size: 16,
+                                        color: Colors.blue,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            _getShortName(
+                                              suggestion.displayName,
+                                            ),
+                                            style: const TextStyle(
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                          if (geoLine.trim().isNotEmpty) ...[
+                                            const SizedBox(height: 2),
+                                            Text(
+                                              geoLine,
+                                              style: TextStyle(
+                                                fontSize: 10,
+                                                color: Colors.grey[600],
+                                              ),
+                                              maxLines: 2,
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                          ],
+                                        ],
+                                      ),
                                     ),
                                   ],
-                                ],
+                                ),
                               ),
-                            ),
-                          ],
+                            );
+                          },
                         ),
-                      ),
-                    );
-                  },
-                ),
                       ),
                     ),
                   ),
@@ -421,9 +445,11 @@ class _LocationAutocompleteFieldState
 
   void _safeRemoveOverlay() {
     if (!mounted) return; // Don't try to remove if widget is unmounted
-    
-    debugPrint('📍 _safeRemoveOverlay called, overlayInserted=$_overlayInserted');
-    
+
+    debugPrint(
+      '📍 _safeRemoveOverlay called, overlayInserted=$_overlayInserted',
+    );
+
     if (_overlayEntry != null) {
       try {
         if (_overlayInserted) {
@@ -449,7 +475,7 @@ class _LocationAutocompleteFieldState
   void _selectLocation(LocationSuggestion suggestion) {
     if (!mounted) return;
     _tapInOverlayInProgress = false;
-    
+
     setState(() {
       _selectedLocation = suggestion;
       widget.controller.text = _getShortName(suggestion.displayName);
@@ -457,7 +483,7 @@ class _LocationAutocompleteFieldState
     });
 
     widget.onLocationSelected?.call(suggestion);
-    
+
     // Remove overlay first, then unfocus
     _safeRemoveOverlay();
     _focusNode.unfocus();
@@ -524,17 +550,17 @@ class _LocationAutocompleteFieldState
         _isLoading = false;
         _suggestions = [];
       });
-      
+
       // Ensure overlay is removed and field is unfocused
       _safeRemoveOverlay();
-      
+
       widget.onLocationSelected?.call(suggestion);
     } catch (e) {
       if (mounted) {
         setState(() => _isLoading = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to get location: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed to get location: $e')));
       }
     }
   }
@@ -546,8 +572,8 @@ class _LocationAutocompleteFieldState
 
     // Get initial location for map
     LatLng? initialLocation;
-    if (_selectedLocation != null && 
-        _selectedLocation!.lat != 0 && 
+    if (_selectedLocation != null &&
+        _selectedLocation!.lat != 0 &&
         _selectedLocation!.lon != 0) {
       initialLocation = LatLng(_selectedLocation!.lat, _selectedLocation!.lon);
     }
@@ -609,9 +635,8 @@ class _LocationAutocompleteFieldState
     // Show dialog to enter location manually with optional coordinates
     final result = await showDialog<Map<String, dynamic>>(
       context: context,
-      builder: (context) => _ManualLocationDialog(
-        initialLocation: widget.controller.text,
-      ),
+      builder: (context) =>
+          _ManualLocationDialog(initialLocation: widget.controller.text),
     );
 
     if (result == null || !mounted) return;
@@ -727,38 +752,47 @@ class _LocationAutocompleteFieldState
                   ),
                 )
               : widget.controller.text.isNotEmpty
-                  ? Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        if (_selectedLocation != null && _selectedLocation!.type != 'manual' && _selectedLocation!.type != 'map')
-                          const Icon(Icons.check_circle, color: Colors.green, size: 20),
-                        if (_selectedLocation != null && _selectedLocation!.type == 'map')
-                          const Icon(Icons.map, color: Colors.green, size: 20),
-                        if (_selectedLocation != null && _selectedLocation!.type == 'manual')
-                          const Icon(Icons.edit, color: Colors.orange, size: 20),
-                        IconButton(
-                          icon: const Icon(Icons.clear, size: 20),
-                          onPressed: () {
-                            widget.controller.clear();
-                            setState(() {
-                              _selectedLocation = null;
-                              _suggestions = [];
-                            });
-                            _focusNode.requestFocus();
-                          },
-                        ),
-                      ],
-                    )
-                  : null,
+              ? Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (_selectedLocation != null &&
+                        _selectedLocation!.type != 'manual' &&
+                        _selectedLocation!.type != 'map')
+                      const Icon(
+                        Icons.check_circle,
+                        color: Colors.green,
+                        size: 20,
+                      ),
+                    if (_selectedLocation != null &&
+                        _selectedLocation!.type == 'map')
+                      const Icon(Icons.map, color: Colors.green, size: 20),
+                    if (_selectedLocation != null &&
+                        _selectedLocation!.type == 'manual')
+                      const Icon(Icons.edit, color: Colors.orange, size: 20),
+                    IconButton(
+                      icon: const Icon(Icons.clear, size: 20),
+                      onPressed: () {
+                        widget.controller.clear();
+                        setState(() {
+                          _selectedLocation = null;
+                          _suggestions = [];
+                        });
+                        _focusNode.requestFocus();
+                      },
+                    ),
+                  ],
+                )
+              : null,
           border: const OutlineInputBorder(),
         ),
         validator: widget.validator,
         onTap: () {
-          final hasStableSelection = _selectedLocation != null &&
+          final hasStableSelection =
+              _selectedLocation != null &&
               widget.controller.text ==
                   _getShortName(_selectedLocation!.displayName);
           if (!_overlayInserted && !hasStableSelection) {
-             _showOverlay();
+            _showOverlay();
           }
         },
         onFieldSubmitted: (_) => _handleFieldSubmit(),
@@ -767,14 +801,11 @@ class _LocationAutocompleteFieldState
   }
 }
 
-
 // Manual Location Entry Dialog
 class _ManualLocationDialog extends StatefulWidget {
   final String initialLocation;
 
-  const _ManualLocationDialog({
-    required this.initialLocation,
-  });
+  const _ManualLocationDialog({required this.initialLocation});
 
   @override
   State<_ManualLocationDialog> createState() => _ManualLocationDialogState();
@@ -792,7 +823,7 @@ class _ManualLocationDialogState extends State<_ManualLocationDialog> {
     _locationController = TextEditingController(text: widget.initialLocation);
     _latController = TextEditingController();
     _lonController = TextEditingController();
-    
+
     // Automatically get current location
     _getCurrentLocation();
   }
@@ -807,7 +838,7 @@ class _ManualLocationDialogState extends State<_ManualLocationDialog> {
       final permission = await Geolocator.checkPermission();
       if (permission == LocationPermission.denied) {
         final requested = await Geolocator.requestPermission();
-        if (requested == LocationPermission.denied || 
+        if (requested == LocationPermission.denied ||
             requested == LocationPermission.deniedForever) {
           if (mounted) {
             setState(() {
@@ -895,10 +926,7 @@ class _ManualLocationDialogState extends State<_ManualLocationDialog> {
               children: [
                 const Text(
                   'GPS Coordinates (Required)',
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.bold,
-                  ),
+                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
                 ),
                 const Spacer(),
                 if (_loadingLocation)
@@ -911,9 +939,15 @@ class _ManualLocationDialogState extends State<_ManualLocationDialog> {
                   TextButton.icon(
                     onPressed: _getCurrentLocation,
                     icon: const Icon(Icons.my_location, size: 16),
-                    label: const Text('Use Current', style: TextStyle(fontSize: 12)),
+                    label: const Text(
+                      'Use Current',
+                      style: TextStyle(fontSize: 12),
+                    ),
                     style: TextButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
                       minimumSize: Size.zero,
                       tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                     ),
@@ -974,7 +1008,7 @@ class _ManualLocationDialogState extends State<_ManualLocationDialog> {
                   ),
                   const SizedBox(height: 8),
                   const Text(
-                    '1. Open Google Maps\n'
+                    '1. Open OpenStreetMap or any map app\n'
                     '2. Long press on your location\n'
                     '3. Copy the coordinates shown\n'
                     '4. Paste them here',
@@ -1007,7 +1041,9 @@ class _ManualLocationDialogState extends State<_ManualLocationDialog> {
             if (lat == null || lon == null) {
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(
-                  content: Text('GPS coordinates are required. Please enter valid numbers.'),
+                  content: Text(
+                    'GPS coordinates are required. Please enter valid numbers.',
+                  ),
                   backgroundColor: Colors.red,
                 ),
               );
@@ -1047,6 +1083,3 @@ class _ManualLocationDialogState extends State<_ManualLocationDialog> {
     );
   }
 }
-
-
-

@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../controllers/seat_layout_controller.dart';
 import '../../models/booking.dart';
@@ -10,6 +11,7 @@ import '../../models/seat_layout.dart';
 import '../../models/service_type.dart';
 import '../../services/booking_repository.dart';
 import '../../services/slot_repository.dart';
+import '../../services/auth_repository.dart';
 
 class SeatLayoutBuilderScreen extends StatefulWidget {
   final SeatLayoutController controller;
@@ -30,7 +32,7 @@ class SeatLayoutBuilderScreen extends StatefulWidget {
 
 class _SeatLayoutBuilderScreenState extends State<SeatLayoutBuilderScreen> {
   static const double _cellSize = 56;
-  
+
   // Image picker for seat layout
   final ImagePicker _imagePicker = ImagePicker();
 
@@ -63,9 +65,9 @@ class _SeatLayoutBuilderScreenState extends State<SeatLayoutBuilderScreen> {
 
   Future<void> _pickImage() async {
     if (widget.controller.layout.images.length >= 4) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Maximum 4 images allowed')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Maximum 4 images allowed')));
       return;
     }
 
@@ -78,10 +80,56 @@ class _SeatLayoutBuilderScreenState extends State<SeatLayoutBuilderScreen> {
       );
 
       if (image != null) {
+        if (!mounted) return;
+
+        // Show uploading indicator
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Uploading image...')));
+
         final bytes = await File(image.path).readAsBytes();
-        final base64Image = base64Encode(bytes);
-        
-        widget.controller.addImage(base64Image);
+
+        // Upload to Supabase Storage
+        final supabase = Supabase.instance.client;
+        final timestamp = DateTime.now().millisecondsSinceEpoch;
+        final userId = AuthRepository.instance.currentUser?.id ?? 'anonymous';
+        final fileName = 'layout_${userId}_$timestamp.jpg';
+        final filePath = '$userId/$fileName';
+
+        try {
+          await supabase.storage
+              .from('layout-images')
+              .uploadBinary(filePath, bytes);
+
+          // Get public URL
+          final imageUrl = supabase.storage
+              .from('layout-images')
+              .getPublicUrl(filePath);
+
+          widget.controller.addImage(imageUrl);
+
+          if (mounted) {
+            ScaffoldMessenger.of(context).clearSnackBars();
+            ScaffoldMessenger.of(
+              context,
+            ).showSnackBar(const SnackBar(content: Text('✅ Image uploaded!')));
+          }
+        } catch (e) {
+          debugPrint('❌ Failed to upload to Supabase Storage: $e');
+
+          // Fallback to base64 (for offline or if storage fails)
+          final base64Image = base64Encode(bytes);
+          widget.controller.addImage(base64Image);
+
+          if (mounted) {
+            ScaffoldMessenger.of(context).clearSnackBars();
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('⚠️ Image saved locally (upload failed)'),
+              ),
+            );
+          }
+        }
       }
     } catch (e) {
       if (mounted) {
@@ -93,6 +141,34 @@ class _SeatLayoutBuilderScreenState extends State<SeatLayoutBuilderScreen> {
   }
 
   void _removeImage(int index) {
+    final imageUrl = widget.controller.layout.images[index];
+
+    // If it's a Supabase Storage URL, delete from storage
+    if (imageUrl.contains('supabase.co/storage')) {
+      try {
+        final supabase = Supabase.instance.client;
+        final uri = Uri.parse(imageUrl);
+        final pathSegments = uri.pathSegments;
+
+        // Extract file path from URL
+        // URL format: https://[project].supabase.co/storage/v1/object/public/layout-images/[userId]/[fileName]
+        final bucketIndex = pathSegments.indexOf('layout-images');
+        if (bucketIndex != -1 && bucketIndex < pathSegments.length - 1) {
+          final filePath = pathSegments.sublist(bucketIndex + 1).join('/');
+
+          supabase.storage
+              .from('layout-images')
+              .remove([filePath])
+              .then(
+                (_) => debugPrint('✅ Deleted image from storage: $filePath'),
+              )
+              .catchError((e) => debugPrint('⚠️ Failed to delete image: $e'));
+        }
+      } catch (e) {
+        debugPrint('⚠️ Failed to parse storage URL: $e');
+      }
+    }
+
     widget.controller.removeImage(index);
   }
 
@@ -123,70 +199,77 @@ class _SeatLayoutBuilderScreenState extends State<SeatLayoutBuilderScreen> {
           ),
         ],
       ),
-      body: AnimatedBuilder(
-        animation: widget.controller,
-        builder: (context, _) {
-          final layout = widget.controller.layout;
-          return InteractiveViewer(
-            minScale: 0.5,
-            maxScale: 2.5,
-            constrained: false,
-            child: SizedBox(
-              width: layout.cols * _cellSize,
-              height: layout.rows * _cellSize,
-              child: GridView.builder(
-                physics: const NeverScrollableScrollPhysics(),
-                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: layout.cols,
-                  childAspectRatio: 1,
-                ),
-                itemCount: layout.rows * layout.cols,
-                itemBuilder: (context, index) {
-                  final row = index ~/ layout.cols;
-                  final col = index % layout.cols;
+      body: ValueListenableBuilder<List<Booking>>(
+        // Listen to booking changes to refresh seat availability
+        valueListenable: BookingRepository.instance.bookings,
+        builder: (context, _, _) {
+          return AnimatedBuilder(
+            animation: widget.controller,
+            builder: (context, _) {
+              final layout = widget.controller.layout;
+              return InteractiveViewer(
+                minScale: 0.5,
+                maxScale: 2.5,
+                constrained: false,
+                child: SizedBox(
+                  width: layout.cols * _cellSize,
+                  height: layout.rows * _cellSize,
+                  child: GridView.builder(
+                    physics: const NeverScrollableScrollPhysics(),
+                    gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: layout.cols,
+                      childAspectRatio: 1,
+                    ),
+                    itemCount: layout.rows * layout.cols,
+                    itemBuilder: (context, index) {
+                      final row = index ~/ layout.cols;
+                      final col = index % layout.cols;
 
-                  final stored = widget.controller.cellAt(row, col);
-                  final type = stored?.type ?? CellType.empty;
+                      final stored = widget.controller.cellAt(row, col);
+                      final type = stored?.type ?? CellType.empty;
 
-                  final isSelected =
-                      widget.controller.selectedRow == row &&
-                      widget.controller.selectedCol == col;
+                      final isSelected =
+                          widget.controller.selectedRow == row &&
+                          widget.controller.selectedCol == col;
 
-                  return SizedBox(
-                    width: _cellSize,
-                    height: _cellSize,
-                    child: InkWell(
-                      onTap: () => _onTapCell(context, row, col),
-                      child: Container(
-                        margin: const EdgeInsets.all(2),
-                        decoration: BoxDecoration(
-                          color: _bgColor(type),
-                          borderRadius: BorderRadius.circular(6),
-                          border: Border.all(
-                            color: isSelected
-                                ? Colors.blue
-                                : (type == CellType.seat
-                                      ? ((stored?.gender ?? SeatGender.any) ==
-                                              SeatGender.male
-                                          ? Colors.blue
-                                          : ((stored?.gender ??
-                                                      SeatGender.any) ==
-                                                  SeatGender.female
-                                              ? Colors.pink
-                                              : Colors.grey.shade400))
-                                      : (type == CellType.empty
-                                            ? Colors.grey.shade300
-                                            : Colors.grey.shade400)),
-                            width: isSelected ? 2 : 1,
+                      return SizedBox(
+                        width: _cellSize,
+                        height: _cellSize,
+                        child: InkWell(
+                          onTap: () => _onTapCell(context, row, col),
+                          child: Container(
+                            margin: const EdgeInsets.all(2),
+                            decoration: BoxDecoration(
+                              color: _bgColor(type),
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(
+                                color: isSelected
+                                    ? Colors.blue
+                                    : (type == CellType.seat
+                                          ? ((stored?.gender ??
+                                                        SeatGender.any) ==
+                                                    SeatGender.male
+                                                ? Colors.blue
+                                                : ((stored?.gender ??
+                                                              SeatGender.any) ==
+                                                          SeatGender.female
+                                                      ? Colors.pink
+                                                      : Colors.grey.shade400))
+                                          : (type == CellType.empty
+                                                ? Colors.grey.shade300
+                                                : Colors.grey.shade400)),
+                                width: isSelected ? 2 : 1,
+                              ),
+                            ),
+                            child: _cellChild(stored),
                           ),
                         ),
-                        child: _cellChild(stored),
-                      ),
-                    ),
-                  );
-                },
-              ),
-            ),
+                      );
+                    },
+                  ),
+                ),
+              );
+            },
           );
         },
       ),
@@ -289,200 +372,256 @@ class _SeatLayoutBuilderScreenState extends State<SeatLayoutBuilderScreen> {
                       mainAxisSize: MainAxisSize.min,
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                    const Text(
-                      'Grid Settings (Matrix)',
-                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                    ),
-                    const SizedBox(height: 16),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: TextField(
-                            controller: rowsController,
-                            keyboardType: TextInputType.number,
-                            decoration: const InputDecoration(
-                              labelText: 'Rows',
-                              border: OutlineInputBorder(),
-                            ),
+                        const Text(
+                          'Grid Settings (Matrix)',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
                           ),
                         ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: TextField(
-                            controller: colsController,
-                            keyboardType: TextInputType.number,
-                            decoration: const InputDecoration(
-                              labelText: 'Columns',
-                              border: OutlineInputBorder(),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
-                    SizedBox(
-                      width: double.infinity,
-                      child: FilledButton.icon(
-                        onPressed: () {
-                          final r = int.tryParse(rowsController.text) ?? curRows;
-                          final c = int.tryParse(colsController.text) ?? curCols;
-                          widget.controller.resize(r, c);
-                          setModalState(() {});
-                        },
-                        icon: const Icon(Icons.aspect_ratio),
-                        label: const Text('Update Grid Size'),
-                      ),
-                    ),
-                    const Divider(height: 32),
-                    const Text(
-                      'Auto-Fill Seats',
-                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                    ),
-                    const SizedBox(height: 8),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: TextField(
-                            controller: priceController,
-                            keyboardType: TextInputType.number,
-                            decoration: const InputDecoration(
-                              labelText: 'Seat Price',
-                              prefixIcon: Icon(Icons.currency_rupee),
-                              border: OutlineInputBorder(),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        FilledButton(
-                          onPressed: () {
-                            final p = int.tryParse(priceController.text) ?? 0;
-                            widget.controller.fillAllSeats(p);
-                            setModalState(() {});
-                          },
-                          child: const Text('Fill All'),
-                        ),
-                      ],
-                    ),
-                    const Divider(height: 32),
-                    
-                    // Images Section
-                    const Text(
-                      '📷 Layout Images (Optional)',
-                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                    ),
-                    const SizedBox(height: 8),
-                    
-                    // Image Grid
-                    if (widget.controller.layout.images.isNotEmpty) ...[
-                      GridView.builder(
-                        shrinkWrap: true,
-                        physics: const NeverScrollableScrollPhysics(),
-                        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: 2,
-                          crossAxisSpacing: 8,
-                          mainAxisSpacing: 8,
-                          childAspectRatio: 1,
-                        ),
-                        itemCount: widget.controller.layout.images.length,
-                        itemBuilder: (context, index) {
-                          return Stack(
-                            children: [
-                              Container(
-                                decoration: BoxDecoration(
-                                  borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(color: Colors.grey.shade300),
-                                ),
-                                child: ClipRRect(
-                                  borderRadius: BorderRadius.circular(8),
-                                  child: Image.memory(
-                                    base64Decode(widget.controller.layout.images[index]),
-                                    width: double.infinity,
-                                    height: double.infinity,
-                                    fit: BoxFit.cover,
-                                  ),
+                        const SizedBox(height: 16),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: TextField(
+                                controller: rowsController,
+                                keyboardType: TextInputType.number,
+                                decoration: const InputDecoration(
+                                  labelText: 'Rows',
+                                  border: OutlineInputBorder(),
                                 ),
                               ),
-                              Positioned(
-                                top: 4,
-                                right: 4,
-                                child: GestureDetector(
-                                  onTap: () {
-                                    _removeImage(index);
-                                    setModalState(() {});
-                                  },
-                                  child: Container(
-                                    padding: const EdgeInsets.all(4),
-                                    decoration: const BoxDecoration(
-                                      color: Colors.red,
-                                      shape: BoxShape.circle,
-                                    ),
-                                    child: const Icon(
-                                      Icons.close,
-                                      color: Colors.white,
-                                      size: 16,
-                                    ),
-                                  ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: TextField(
+                                controller: colsController,
+                                keyboardType: TextInputType.number,
+                                decoration: const InputDecoration(
+                                  labelText: 'Columns',
+                                  border: OutlineInputBorder(),
                                 ),
                               ),
-                            ],
-                          );
-                        },
-                      ),
-                      const SizedBox(height: 12),
-                    ],
-                    
-                    // Add Image Button
-                    if (widget.controller.layout.images.length < 4)
-                      GestureDetector(
-                        onTap: () async {
-                          await _pickImage();
-                          setModalState(() {});
-                        },
-                        child: Container(
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+                        SizedBox(
                           width: double.infinity,
-                          padding: const EdgeInsets.all(16),
-                          decoration: BoxDecoration(
-                            border: Border.all(
-                              color: Colors.grey.shade300,
-                              style: BorderStyle.solid,
-                            ),
-                            borderRadius: BorderRadius.circular(8),
-                            color: Colors.grey.shade50,
-                          ),
-                          child: Column(
-                            children: [
-                              Icon(
-                                Icons.add_photo_alternate_outlined,
-                                size: 32,
-                                color: Colors.grey.shade600,
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                'Add Layout Images (${widget.controller.layout.images.length}/4)',
-                                style: TextStyle(
-                                  color: Colors.grey.shade600,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                'Tap to select from gallery',
-                                style: TextStyle(
-                                  color: Colors.grey.shade500,
-                                  fontSize: 12,
-                                ),
-                              ),
-                            ],
+                          child: FilledButton.icon(
+                            onPressed: () {
+                              final r =
+                                  int.tryParse(rowsController.text) ?? curRows;
+                              final c =
+                                  int.tryParse(colsController.text) ?? curCols;
+                              widget.controller.resize(r, c);
+                              setModalState(() {});
+                            },
+                            icon: const Icon(Icons.aspect_ratio),
+                            label: const Text('Update Grid Size'),
                           ),
                         ),
-                      ),
-                    const SizedBox(height: 16),
-                  ],
-                ), // Column
-              ), // SingleChildScrollView
-            ), // Padding
-          ), // SafeArea
-        ); // ConstrainedBox
+                        const Divider(height: 32),
+                        const Text(
+                          'Auto-Fill Seats',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: TextField(
+                                controller: priceController,
+                                keyboardType: TextInputType.number,
+                                decoration: const InputDecoration(
+                                  labelText: 'Seat Price',
+                                  prefixIcon: Icon(Icons.currency_rupee),
+                                  border: OutlineInputBorder(),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            FilledButton(
+                              onPressed: () {
+                                final p =
+                                    int.tryParse(priceController.text) ?? 0;
+                                widget.controller.fillAllSeats(p);
+                                setModalState(() {});
+                              },
+                              child: const Text('Fill All'),
+                            ),
+                          ],
+                        ),
+                        const Divider(height: 32),
+
+                        // Images Section
+                        const Text(
+                          '📷 Layout Images (Optional)',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+
+                        // Image Grid
+                        if (widget.controller.layout.images.isNotEmpty) ...[
+                          GridView.builder(
+                            shrinkWrap: true,
+                            physics: const NeverScrollableScrollPhysics(),
+                            gridDelegate:
+                                const SliverGridDelegateWithFixedCrossAxisCount(
+                                  crossAxisCount: 2,
+                                  crossAxisSpacing: 8,
+                                  mainAxisSpacing: 8,
+                                  childAspectRatio: 1,
+                                ),
+                            itemCount: widget.controller.layout.images.length,
+                            itemBuilder: (context, index) {
+                              final imageData =
+                                  widget.controller.layout.images[index];
+                              final isUrl = imageData.startsWith('http');
+
+                              return Stack(
+                                children: [
+                                  Container(
+                                    decoration: BoxDecoration(
+                                      borderRadius: BorderRadius.circular(8),
+                                      border: Border.all(
+                                        color: Colors.grey.shade300,
+                                      ),
+                                    ),
+                                    child: ClipRRect(
+                                      borderRadius: BorderRadius.circular(8),
+                                      child: isUrl
+                                          ? Image.network(
+                                              imageData,
+                                              width: double.infinity,
+                                              height: double.infinity,
+                                              fit: BoxFit.cover,
+                                              loadingBuilder: (context, child, loadingProgress) {
+                                                if (loadingProgress == null) {
+                                                  return child;
+                                                }
+                                                return Center(
+                                                  child: CircularProgressIndicator(
+                                                    value:
+                                                        loadingProgress
+                                                                .expectedTotalBytes !=
+                                                            null
+                                                        ? loadingProgress
+                                                                  .cumulativeBytesLoaded /
+                                                              loadingProgress
+                                                                  .expectedTotalBytes!
+                                                        : null,
+                                                  ),
+                                                );
+                                              },
+                                              errorBuilder:
+                                                  (context, error, stackTrace) {
+                                                    return Container(
+                                                      color:
+                                                          Colors.grey.shade200,
+                                                      child: const Icon(
+                                                        Icons.broken_image,
+                                                        size: 48,
+                                                        color: Colors.grey,
+                                                      ),
+                                                    );
+                                                  },
+                                            )
+                                          : Image.memory(
+                                              base64Decode(imageData),
+                                              width: double.infinity,
+                                              height: double.infinity,
+                                              fit: BoxFit.cover,
+                                            ),
+                                    ),
+                                  ),
+                                  Positioned(
+                                    top: 4,
+                                    right: 4,
+                                    child: GestureDetector(
+                                      onTap: () {
+                                        _removeImage(index);
+                                        setModalState(() {});
+                                      },
+                                      child: Container(
+                                        padding: const EdgeInsets.all(4),
+                                        decoration: const BoxDecoration(
+                                          color: Colors.red,
+                                          shape: BoxShape.circle,
+                                        ),
+                                        child: const Icon(
+                                          Icons.close,
+                                          color: Colors.white,
+                                          size: 16,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              );
+                            },
+                          ),
+                          const SizedBox(height: 12),
+                        ],
+
+                        // Add Image Button
+                        if (widget.controller.layout.images.length < 4)
+                          GestureDetector(
+                            onTap: () async {
+                              await _pickImage();
+                              setModalState(() {});
+                            },
+                            child: Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.all(16),
+                              decoration: BoxDecoration(
+                                border: Border.all(
+                                  color: Colors.grey.shade300,
+                                  style: BorderStyle.solid,
+                                ),
+                                borderRadius: BorderRadius.circular(8),
+                                color: Colors.grey.shade50,
+                              ),
+                              child: Column(
+                                children: [
+                                  Icon(
+                                    Icons.add_photo_alternate_outlined,
+                                    size: 32,
+                                    color: Colors.grey.shade600,
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    'Add Layout Images (${widget.controller.layout.images.length}/4)',
+                                    style: TextStyle(
+                                      color: Colors.grey.shade600,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    'Tap to select from gallery',
+                                    style: TextStyle(
+                                      color: Colors.grey.shade500,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        const SizedBox(height: 16),
+                      ],
+                    ), // Column
+                  ), // SingleChildScrollView
+                ), // Padding
+              ), // SafeArea
+            ); // ConstrainedBox
           },
         );
       },
@@ -517,7 +656,9 @@ class _SeatLayoutBuilderScreenState extends State<SeatLayoutBuilderScreen> {
               ),
               if (type == CellType.empty) ...[
                 ListTile(
-                  leading: Icon(isParcel ? Icons.inventory_2 : Icons.event_seat),
+                  leading: Icon(
+                    isParcel ? Icons.inventory_2 : Icons.event_seat,
+                  ),
                   title: Text(isParcel ? 'Add parcel compartment' : 'Add seat'),
                   onTap: () async {
                     Navigator.pop(context);
@@ -535,8 +676,12 @@ class _SeatLayoutBuilderScreenState extends State<SeatLayoutBuilderScreen> {
               ],
               if (type == CellType.space) ...[
                 ListTile(
-                  leading: Icon(isParcel ? Icons.inventory_2 : Icons.event_seat),
-                  title: Text(isParcel ? 'Convert to compartment' : 'Convert to seat'),
+                  leading: Icon(
+                    isParcel ? Icons.inventory_2 : Icons.event_seat,
+                  ),
+                  title: Text(
+                    isParcel ? 'Convert to compartment' : 'Convert to seat',
+                  ),
                   onTap: () async {
                     Navigator.pop(context);
                     await _showSeatForm(row, col, existing: null);
@@ -612,24 +757,53 @@ class _SeatLayoutBuilderScreenState extends State<SeatLayoutBuilderScreen> {
     required LayoutCell? existing,
   }) async {
     final isParcel = widget.serviceType == ServiceType.parcel;
-    
-    final nameController = TextEditingController(
-      text: existing?.seatName ?? '',
-    );
+
+    // Parse existing parcel data — dimensions are encoded into seatName as
+    // "CompartmentName|L:10|B:20|H:30|W:5|T:Normal" on save.
+    // Split it back out so the fields pre-fill correctly when editing.
+    String existingName = existing?.seatName ?? '';
+    String existingLength = '';
+    String existingBreadth = '';
+    String existingHeight = '';
+    String existingWeight = '';
+    String existingParcelType = 'Normal';
+
+    if (isParcel && existingName.contains('|')) {
+      final parts = existingName.split('|');
+      existingName = parts[0];
+      for (final part in parts.skip(1)) {
+        if (part.startsWith('L:')) {
+          existingLength = part.substring(2);
+        } else if (part.startsWith('B:')) {
+          existingBreadth = part.substring(2);
+        } else if (part.startsWith('H:')) {
+          existingHeight = part.substring(2);
+        } else if (part.startsWith('W:')) {
+          existingWeight = part.substring(2);
+        } else if (part.startsWith('T:')) {
+          existingParcelType = part.substring(2);
+        }
+      }
+    }
+
+    final nameController = TextEditingController(text: existingName);
     final priceController = TextEditingController(
       text: existing?.price?.toString() ?? '',
     );
-    
-    // Parcel-specific controllers
-    final lengthController = TextEditingController();
-    final heightController = TextEditingController();
-    final weightController = TextEditingController();
-    final breadthController = TextEditingController();
-    
+    final securityDepositController = TextEditingController(
+      text: existing?.securityDeposit?.toString() ?? '',
+    );
+
+    // Parcel-specific controllers — pre-filled from parsed data
+    final lengthController = TextEditingController(text: existingLength);
+    final heightController = TextEditingController(text: existingHeight);
+    final weightController = TextEditingController(text: existingWeight);
+    final breadthController = TextEditingController(text: existingBreadth);
+
     var locked = existing?.isLocked ?? false;
     var seatKind = existing?.seatKind ?? SeatKind.seat;
     var gender = existing?.gender ?? SeatGender.any;
-    var parcelType = 'Normal'; // Default parcel type
+    var parcelType = existingParcelType;
 
     final ok = await showModalBottomSheet<bool>(
       context: context,
@@ -650,7 +824,7 @@ class _SeatLayoutBuilderScreenState extends State<SeatLayoutBuilderScreen> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      existing == null 
+                      existing == null
                           ? (isParcel ? 'Add parcel compartment' : 'Add seat')
                           : (isParcel ? 'Edit compartment' : 'Edit seat'),
                       style: const TextStyle(
@@ -675,8 +849,19 @@ class _SeatLayoutBuilderScreenState extends State<SeatLayoutBuilderScreen> {
                         border: OutlineInputBorder(),
                       ),
                     ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: securityDepositController,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                        labelText: 'Security Deposit (optional)',
+                        border: OutlineInputBorder(),
+                        helperText:
+                            'Refundable deposit for this compartment/seat',
+                      ),
+                    ),
                     const SizedBox(height: 8),
-                    
+
                     // Parcel-specific fields
                     if (isParcel) ...[
                       const SizedBox(height: 12),
@@ -771,7 +956,7 @@ class _SeatLayoutBuilderScreenState extends State<SeatLayoutBuilderScreen> {
                         },
                       ),
                     ],
-                    
+
                     // Passenger-specific fields
                     if (!isParcel) ...[
                       SwitchListTile(
@@ -837,12 +1022,58 @@ class _SeatLayoutBuilderScreenState extends State<SeatLayoutBuilderScreen> {
                         ],
                       ),
                     ],
-                    
+
                     const SizedBox(height: 12),
                     SizedBox(
                       width: double.infinity,
                       child: FilledButton(
-                        onPressed: () => Navigator.pop(context, true),
+                        onPressed: () {
+                          // Validate price is filled
+                          final price = int.tryParse(
+                            priceController.text.trim(),
+                          );
+                          if (price == null || price <= 0) {
+                            ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+                              const SnackBar(
+                                content: Text('Please enter a price'),
+                                backgroundColor: Colors.red,
+                              ),
+                            );
+                            return;
+                          }
+                          // Validate dimensions for parcel
+                          if (isParcel) {
+                            final l = double.tryParse(
+                              lengthController.text.trim(),
+                            );
+                            final b = double.tryParse(
+                              breadthController.text.trim(),
+                            );
+                            final h = double.tryParse(
+                              heightController.text.trim(),
+                            );
+                            final w = double.tryParse(
+                              weightController.text.trim(),
+                            );
+                            if (l == null ||
+                                l <= 0 ||
+                                b == null ||
+                                b <= 0 ||
+                                h == null ||
+                                h <= 0 ||
+                                w == null ||
+                                w <= 0) {
+                              ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+                                const SnackBar(
+                                  content: Text('Please fill all dimensions'),
+                                  backgroundColor: Colors.red,
+                                ),
+                              );
+                              return;
+                            }
+                          }
+                          Navigator.pop(context, true);
+                        },
                         child: const Text('Save'),
                       ),
                     ),
@@ -868,17 +1099,22 @@ class _SeatLayoutBuilderScreenState extends State<SeatLayoutBuilderScreen> {
         final breadth = breadthController.text.trim();
         final height = heightController.text.trim();
         final weight = weightController.text.trim();
-        
-        if (length.isNotEmpty || breadth.isNotEmpty || height.isNotEmpty || weight.isNotEmpty) {
-          finalSeatName = '$finalSeatName|L:$length|B:$breadth|H:$height|W:$weight|T:$parcelType';
+
+        if (length.isNotEmpty ||
+            breadth.isNotEmpty ||
+            height.isNotEmpty ||
+            weight.isNotEmpty) {
+          finalSeatName =
+              '$finalSeatName|L:$length|B:$breadth|H:$height|W:$weight|T:$parcelType';
         }
       }
-      
+
       widget.controller.setSeat(
         row: row,
         col: col,
         seatName: finalSeatName,
         price: int.tryParse(priceController.text.trim()),
+        securityDeposit: int.tryParse(securityDepositController.text.trim()),
         seatKind: seatKind,
         gender: gender,
         locked: locked,
@@ -891,6 +1127,3 @@ class _SeatLayoutBuilderScreenState extends State<SeatLayoutBuilderScreen> {
     }
   }
 }
-
-
-

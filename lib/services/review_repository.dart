@@ -86,6 +86,7 @@ class ReviewRepository {
     required ReviewType type,
     required double rating,
     String? comment,
+    List<String> mediaUrls = const [],
   }) async {
     final review = Review(
       id: DateTime.now().microsecondsSinceEpoch.toString(),
@@ -95,6 +96,7 @@ class ReviewRepository {
       type: type,
       rating: rating,
       comment: comment,
+      mediaUrls: mediaUrls,
       createdAt: DateTime.now(),
     );
 
@@ -110,26 +112,30 @@ class ReviewRepository {
   Future<void> _syncReviewToSupabase(Review review) async {
     try {
       final supabase = Supabase.instance.client;
-      
-      // Map enum to database format
-      String reviewType;
-      switch (review.type) {
-        case ReviewType.userToProvider:
-          reviewType = 'customer_to_provider';
-          break;
-        case ReviewType.providerToUser:
-          reviewType = 'provider_to_customer';
-          break;
-      }
-      
+
+      // Map enum to reviewer_role (DB column name)
+      final reviewerRole = review.type == ReviewType.userToProvider
+          ? 'customer'
+          : 'provider';
+
+      // Determine customer/provider IDs based on role
+      final customerId = review.type == ReviewType.userToProvider
+          ? review.reviewerId
+          : review.revieweeId;
+      final providerId = review.type == ReviewType.userToProvider
+          ? review.revieweeId
+          : review.reviewerId;
+
       await supabase.from('reviews').insert({
         'id': review.id,
-        'booking_id': review.bookingId,
+        'booking_id': int.tryParse(review.bookingId) ?? review.bookingId,
         'reviewer_id': review.reviewerId,
-        'reviewee_id': review.revieweeId,
-        'rating': review.rating,
+        'profile_customer_id': customerId,
+        'profile_provider_id': providerId,
+        'reviewer_role': reviewerRole,
+        'rating': review.rating.round(),
         'comment': review.comment,
-        'review_type': reviewType,
+        'media_urls': review.mediaUrls.isEmpty ? null : review.mediaUrls,
         'created_at': review.createdAt.toIso8601String(),
       });
 
