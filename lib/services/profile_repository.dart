@@ -784,15 +784,18 @@ extension ProfileVerification on ProfileInfo {
   }
 
   /// Returns true if profile qualifies as "expert"
-  /// Expert = Has completed significant trips with good ratings
-  /// Uses whichever role (provider/customer) has more activity
+  /// Expert = Paid subscription with expert plan
+  /// This is manually approved by admin and requires payment
   bool get isExpert {
-    // Check provider stats
+    // Expert is now subscription-based (not auto-earned)
+    return subscriptionPlan == 'expert' && hasActiveSubscription;
+  }
+
+  /// Returns true if profile has enough experience to potentially qualify for expert
+  /// (50+ trips with 4.5+ rating) - for admin reference only
+  bool get hasExpertLevelExperience {
     final providerQualifies = providerTotalTrips >= 50 && providerRating >= 4.5;
-
-    // Check customer stats
     final customerQualifies = customerTotalTrips >= 50 && customerRating >= 4.5;
-
     return providerQualifies || customerQualifies;
   }
 

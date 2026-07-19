@@ -1106,6 +1106,107 @@ class BookingRepository {
     }
   }
 
+  /// Smart refund with location verification
+  /// Returns full amount + deposit if customer was verified at location
+  /// 🛡️ SECURITY: If security deposit exists, GPS verification is MANDATORY
+  Future<Map<String, dynamic>> markRefundedWithVerification({
+    required String bookingId,
+    required bool customerAtLocation,
+  }) async {
+    final currentUser = AuthRepository.instance.currentUser;
+    if (currentUser == null) {
+      return {'success': false, 'message': 'Not logged in'};
+    }
+
+    final booking = bookings.value.firstWhere(
+      (b) => b.id == bookingId,
+      orElse: () => throw Exception('Booking not found'),
+    );
+
+    // Verify this is the customer requesting refund
+    final isCustomer = booking.userId == currentUser.id;
+    if (!isCustomer) {
+      return {
+        'success': false,
+        'message': 'Only customers can request location-verified refunds',
+      };
+    }
+
+    // 🛡️ SECURITY: Check if this booking has security deposit
+    final hasSecurityDeposit =
+        booking.securityDeposit != null && booking.securityDeposit! > 0;
+
+    // If security deposit exists and customer wasn't at location, reject refund
+    if (hasSecurityDeposit && !customerAtLocation) {
+      return {
+        'success': false,
+        'message':
+            'GPS verification required for refunds on bookings with security deposit. You were not at the pickup location.',
+      };
+    }
+
+    // Determine refund type based on location verification
+    final refundType = customerAtLocation && !booking.otpVerified
+        ? 'full_with_deposit' // Customer was there, provider no-show
+        : 'standard'; // Normal refund
+
+    try {
+      // Call enhanced database function
+      final result = await Supabase.instance.client.rpc(
+        'refund_booking_with_location',
+        params: {
+          'booking_id': int.parse(bookingId),
+          'user_id': currentUser.id,
+          'refund_type': refundType,
+          'customer_location_verified': customerAtLocation,
+        },
+      );
+
+      final success = result['success'] as bool? ?? false;
+      final message = result['message'] as String? ?? '';
+      final refundedAmount = result['refunded_amount'] as num? ?? 0;
+      final depositReturned = result['deposit_returned'] as bool? ?? false;
+
+      if (success) {
+        debugPrint(
+          '✅ Location-verified refund: $message (amount: $refundedAmount, deposit: $depositReturned)',
+        );
+
+        // Free up capacity
+        final currentRemaining =
+            remainingCapacityBySlotId.value[booking.slotId] ?? 0;
+        remainingCapacityBySlotId.value = {
+          ...remainingCapacityBySlotId.value,
+          booking.slotId: currentRemaining + 1,
+        };
+
+        // Update local state
+        bookings.value = bookings.value
+            .map(
+              (b) => b.id == bookingId
+                  ? b.copyWith(status: BookingStatus.refunded)
+                  : b,
+            )
+            .toList(growable: false);
+
+        await _persist();
+
+        return {
+          'success': true,
+          'message': message,
+          'amount': refundedAmount,
+          'deposit_returned': depositReturned,
+        };
+      } else {
+        debugPrint('❌ Location-verified refund failed: $message');
+        return {'success': false, 'message': message};
+      }
+    } catch (e) {
+      debugPrint('❌ Location-verified refund error: $e');
+      return {'success': false, 'message': 'Refund failed: $e'};
+    }
+  }
+
   /// Update trip_media for a booking — called by TripMediaWidget after upload.
   /// Patches only the trip_media JSON column in Supabase and updates local state.
   /// GPS data is stored INSIDE trip_media JSON (no separate columns needed).

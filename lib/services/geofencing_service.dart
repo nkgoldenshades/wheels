@@ -21,7 +21,7 @@ class GeofencingService {
   StreamSubscription<Position>? _positionStream;
   final Set<String> _monitoredBookingIds = {};
   final Map<String, bool> _startArrivalMarked = {}; // bookingId -> marked
-  final Map<String, bool> _endArrivalMarked = {};   // bookingId -> marked
+  final Map<String, bool> _endArrivalMarked = {}; // bookingId -> marked
 
   /// Start monitoring location for active bookings
   Future<void> startMonitoring() async {
@@ -41,17 +41,18 @@ class GeofencingService {
     debugPrint('🌍 Starting geofencing service...');
 
     // Start listening to position updates
-    _positionStream = Geolocator.getPositionStream(
-      locationSettings: const LocationSettings(
-        accuracy: LocationAccuracy.high,
-        distanceFilter: 10, // Update every 10 meters
-      ),
-    ).listen(
-      _onLocationUpdate,
-      onError: (error) {
-        debugPrint('⚠️ Geofencing error: $error');
-      },
-    );
+    _positionStream =
+        Geolocator.getPositionStream(
+          locationSettings: const LocationSettings(
+            accuracy: LocationAccuracy.high,
+            distanceFilter: 10, // Update every 10 meters
+          ),
+        ).listen(
+          _onLocationUpdate,
+          onError: (error) {
+            debugPrint('⚠️ Geofencing error: $error');
+          },
+        );
 
     debugPrint('✅ Geofencing service started');
   }
@@ -69,13 +70,13 @@ class GeofencingService {
   /// Add a booking to monitor
   void monitorBooking(Booking booking) {
     if (_monitoredBookingIds.contains(booking.id)) return;
-    
+
     _monitoredBookingIds.add(booking.id);
     _startArrivalMarked[booking.id] = false;
     _endArrivalMarked[booking.id] = false;
-    
+
     debugPrint('📍 Monitoring booking ${booking.id}');
-    
+
     // Start monitoring if not already started
     if (_positionStream == null) {
       startMonitoring();
@@ -87,9 +88,9 @@ class GeofencingService {
     _monitoredBookingIds.remove(bookingId);
     _startArrivalMarked.remove(bookingId);
     _endArrivalMarked.remove(bookingId);
-    
+
     debugPrint('📍 Stopped monitoring booking $bookingId');
-    
+
     // Stop service if no bookings to monitor
     if (_monitoredBookingIds.isEmpty) {
       stopMonitoring();
@@ -97,11 +98,33 @@ class GeofencingService {
   }
 
   /// Called on each location update
+  /// ⚠️ SECURITY: Only uses real device GPS, ignores manual/fake locations
   Future<void> _onLocationUpdate(Position position) async {
+    // 🛡️ SECURITY: Detect mock/fake GPS locations
+    if (position.isMocked) {
+      debugPrint('⚠️ MOCK LOCATION DETECTED - Ignoring spoofed GPS');
+      onNotification?.call(
+        'Mock GPS detected. Real location required for bookings with security deposit.',
+        isSuccess: false,
+      );
+      return; // Reject fake GPS
+    }
+
+    // 🛡️ SECURITY: Check GPS accuracy for high-value bookings
+    // Low accuracy = likely spoofed or unreliable
+    if (position.accuracy > 100) {
+      // More than 100 meters error
+      debugPrint(
+        '⚠️ LOW GPS ACCURACY (${position.accuracy}m) - Ignoring unreliable location',
+      );
+      return; // Reject low-accuracy GPS
+    }
     final currentUser = AuthRepository.instance.currentUser;
     if (currentUser == null) return;
 
-    debugPrint('📍 Location update: ${position.latitude}, ${position.longitude}');
+    debugPrint(
+      '📍 Location update: ${position.latitude}, ${position.longitude}',
+    );
 
     // Check each monitored booking
     for (final bookingId in _monitoredBookingIds.toList()) {
@@ -129,21 +152,13 @@ class GeofencingService {
 
       // Check START location arrival
       if (!(_startArrivalMarked[bookingId] ?? false)) {
-        await _checkStartArrival(
-          booking,
-          position,
-          isProvider: isProvider,
-        );
+        await _checkStartArrival(booking, position, isProvider: isProvider);
       }
 
       // Check END location arrival (only after start is marked)
       if ((_startArrivalMarked[bookingId] ?? false) &&
           !(_endArrivalMarked[bookingId] ?? false)) {
-        await _checkEndArrival(
-          booking,
-          position,
-          isProvider: isProvider,
-        );
+        await _checkEndArrival(booking, position, isProvider: isProvider);
       }
     }
   }
@@ -168,7 +183,9 @@ class GeofencingService {
       lng2: position.longitude,
     );
 
-    debugPrint('📏 Distance to START: ${(distance * 1000).toStringAsFixed(0)}m');
+    debugPrint(
+      '📏 Distance to START: ${(distance * 1000).toStringAsFixed(0)}m',
+    );
 
     // Check if within geofence (100 meters)
     if (distance <= GpsVerificationHelper.maxAllowedDistanceKm) {
@@ -251,8 +268,10 @@ class GeofencingService {
         updatedConfirmations,
       );
 
-      debugPrint('✅ START arrival marked for ${isProvider ? 'provider' : 'customer'}');
-      
+      debugPrint(
+        '✅ START arrival marked for ${isProvider ? 'provider' : 'customer'}',
+      );
+
       // Show notification
       onNotification?.call(
         '✅ Location Confirmed at Pickup Point',
@@ -299,14 +318,16 @@ class GeofencingService {
         updatedConfirmations,
       );
 
-      debugPrint('✅ END arrival marked for ${isProvider ? 'provider' : 'customer'}');
-      
+      debugPrint(
+        '✅ END arrival marked for ${isProvider ? 'provider' : 'customer'}',
+      );
+
       // Show notification
       onNotification?.call(
         '✅ Location Confirmed at Dropoff Point',
         isSuccess: true,
       );
-      
+
       // Stop monitoring this booking after end is marked
       stopMonitoringBooking(booking.id);
     } catch (e) {

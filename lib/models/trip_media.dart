@@ -13,15 +13,55 @@
 /// }
 library;
 
+/// GPS Source - tracks where GPS coordinates came from for security
+enum GpsSource {
+  device, // Real-time GPS from device (Geolocator) - TRUSTED ✅
+  manual, // Manual coordinates entered by user - NOT TRUSTED ❌
+  external, // External GPS link/tracker - PARTIALLY TRUSTED ⚠️
+  unknown, // Legacy data or source not specified
+}
+
+extension GpsSourceExtension on GpsSource {
+  String get value {
+    switch (this) {
+      case GpsSource.device:
+        return 'device';
+      case GpsSource.manual:
+        return 'manual';
+      case GpsSource.external:
+        return 'external';
+      case GpsSource.unknown:
+        return 'unknown';
+    }
+  }
+
+  static GpsSource fromString(String? value) {
+    switch (value) {
+      case 'device':
+        return GpsSource.device;
+      case 'manual':
+        return GpsSource.manual;
+      case 'external':
+        return GpsSource.external;
+      default:
+        return GpsSource.unknown;
+    }
+  }
+
+  /// Whether this GPS source is trusted for refund verification
+  bool get isTrusted => this == GpsSource.device;
+}
+
 class TripMediaParty {
-  final List<String> images;   // Supabase Storage URLs
-  final String? videoUrl;      // Single Supabase Storage URL (≤30 sec)
-  final DateTime? uploadedAt;  // When this party submitted their media
-  
+  final List<String> images; // Supabase Storage URLs
+  final String? videoUrl; // Single Supabase Storage URL (≤30 sec)
+  final DateTime? uploadedAt; // When this party submitted their media
+
   // GPS tracking data
-  final double? gpsLat;        // GPS latitude when media uploaded
-  final double? gpsLng;        // GPS longitude when media uploaded
-  final double? gpsAccuracy;   // GPS accuracy in meters
+  final double? gpsLat; // GPS latitude when media uploaded
+  final double? gpsLng; // GPS longitude when media uploaded
+  final double? gpsAccuracy; // GPS accuracy in meters
+  final GpsSource gpsSource; // Where GPS came from (device/manual/external)
 
   const TripMediaParty({
     this.images = const [],
@@ -30,6 +70,7 @@ class TripMediaParty {
     this.gpsLat,
     this.gpsLng,
     this.gpsAccuracy,
+    this.gpsSource = GpsSource.unknown, // Default to unknown for legacy data
   });
 
   bool get hasMedia => images.isNotEmpty || videoUrl != null;
@@ -43,6 +84,7 @@ class TripMediaParty {
     double? gpsLat,
     double? gpsLng,
     double? gpsAccuracy,
+    GpsSource? gpsSource,
   }) {
     return TripMediaParty(
       images: images ?? this.images,
@@ -51,17 +93,18 @@ class TripMediaParty {
       gpsLat: gpsLat ?? this.gpsLat,
       gpsLng: gpsLng ?? this.gpsLng,
       gpsAccuracy: gpsAccuracy ?? this.gpsAccuracy,
+      gpsSource: gpsSource ?? this.gpsSource,
     );
   }
 
   Map<String, dynamic> toJson() => {
-        'images': images,
-        'video_url': videoUrl,
-        'uploaded_at': uploadedAt?.toUtc().toIso8601String(),
-        if (gpsLat != null) 'gps_lat': gpsLat,
-        if (gpsLng != null) 'gps_lng': gpsLng,
-        if (gpsAccuracy != null) 'gps_accuracy': gpsAccuracy,
-      };
+    'images': images,
+    'video_url': videoUrl,
+    'uploaded_at': uploadedAt?.toUtc().toIso8601String(),
+    if (gpsLat != null) 'gps_lat': gpsLat,
+    if (gpsLng != null) 'gps_lng': gpsLng,
+    if (gpsAccuracy != null) 'gps_accuracy': gpsAccuracy,
+  };
 
   factory TripMediaParty.fromJson(Map<String, dynamic>? json) {
     if (json == null) return const TripMediaParty();
@@ -104,17 +147,19 @@ class TripMediaPhase {
   }
 
   Map<String, dynamic> toJson() => {
-        'provider': provider.toJson(),
-        'customer': customer.toJson(),
-      };
+    'provider': provider.toJson(),
+    'customer': customer.toJson(),
+  };
 
   factory TripMediaPhase.fromJson(Map<String, dynamic>? json) {
     if (json == null) return const TripMediaPhase();
     return TripMediaPhase(
-      provider:
-          TripMediaParty.fromJson(json['provider'] as Map<String, dynamic>?),
-      customer:
-          TripMediaParty.fromJson(json['customer'] as Map<String, dynamic>?),
+      provider: TripMediaParty.fromJson(
+        json['provider'] as Map<String, dynamic>?,
+      ),
+      customer: TripMediaParty.fromJson(
+        json['customer'] as Map<String, dynamic>?,
+      ),
     );
   }
 }
@@ -128,20 +173,14 @@ class TripMedia {
     this.end = const TripMediaPhase(),
   });
 
-  TripMedia copyWith({
-    TripMediaPhase? start,
-    TripMediaPhase? end,
-  }) {
-    return TripMedia(
-      start: start ?? this.start,
-      end: end ?? this.end,
-    );
+  TripMedia copyWith({TripMediaPhase? start, TripMediaPhase? end}) {
+    return TripMedia(start: start ?? this.start, end: end ?? this.end);
   }
 
   Map<String, dynamic> toJson() => {
-        'start': start.toJson(),
-        'end': end.toJson(),
-      };
+    'start': start.toJson(),
+    'end': end.toJson(),
+  };
 
   factory TripMedia.fromJson(Map<String, dynamic>? json) {
     if (json == null) return const TripMedia();
@@ -155,6 +194,3 @@ class TripMedia {
 
   bool get isEmpty => !start.hasAnyMedia && !end.hasAnyMedia;
 }
-
-
-

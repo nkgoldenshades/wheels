@@ -772,6 +772,185 @@ exports.refundPayment = functions.https.onRequest(async (req, res) => {
 });
 
 /**
+ * Manual refund with location verification
+ * Called when customer clicks "Refund + Deposit" button
+ * Processes immediate payment refund based on GPS verification
+ */
+exports.manualRefundWithLocation = stripeSupabaseRuntime.https.onRequest(async (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  if (req.method === 'OPTIONS') {
+    res.set('Access-Control-Allow-Methods', 'POST');
+    res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    return res.status(204).send('');
+  }
+
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  // Get auth user
+  let callerUid = null;
+  try {
+    callerUid = await _getAuthUid(req);
+  } catch (e) {
+    return res.status(401).json({ error: 'Invalid auth token' });
+  }
+  if (!callerUid) {
+    return res.status(401).json({ error: 'Missing auth token' });
+  }
+
+  const {
+    booking_id,
+    refund_amount,
+    customer_location_verified,
+    refund_type,
+  } = req.body;
+
+  if (!booking_id || !refund_amount || refund_type == null) {
+    return res.status(400).json({ error: 'Missing required fields' });
+  }
+
+  try {
+    // Get booking details from database
+    const { data: booking, error: bookingError } = await supabase
+      .from('bookings')
+      .select('*')
+      .eq('id', booking_id)
+      .single();
+
+    if (bookingError || !booking) {
+      console.error('Booking lookup error:', bookingError);
+      return res.status(404).json({ error: 'Booking not found' });
+    }
+
+    // Security: Only customer can request refund
+    if (booking.profile_customer_id !== callerUid) {
+      return res.status(403).json({ error: 'Only customer can request refund' });
+    }
+
+    // Already refunded?
+    if (booking.status === 'refunded') {
+      return res.status(400).json({ error: 'Already refunded' });
+    }
+
+    const refundAmountPaise = Math.round(refund_amount * 100); // Convert to paise/cents
+
+    // Process refund based on payment method
+    let refundResult = null;
+
+    // ── Razorpay refund ──
+    if (booking.razorpay_payment_id) {
+      console.log(`Processing Razorpay refund for booking ${booking_id}: ${refundAmountPaise} paise`);
+      
+      try {
+        refundResult = await getRazorpay().payments.refund(
+          booking.razorpay_payment_id,
+          {
+            amount: refundAmountPaise,
+            notes: {
+              reason: customer_location_verified 
+                ? 'location_verified_full_refund' 
+                : 'standard_refund',
+              booking_id: booking_id,
+              refund_type: refund_type,
+            },
+          },
+        );
+
+        console.log(`Razorpay refund successful: ${refundResult.id}`);
+
+        return res.json({
+          success: true,
+          refund_id: refundResult.id,
+          amount: refund_amount,
+          gateway: 'razorpay',
+          message: 'Refund processed via Razorpay',
+        });
+      } catch (razorpayError) {
+        console.error('Razorpay refund error:', razorpayError);
+        return res.status(500).json({
+          error: 'Razorpay refund failed: ' + razorpayError.message,
+        });
+      }
+    }
+
+    // ── Stripe refund ──
+    if (booking.stripe_payment_intent_id) {
+      console.log(`Processing Stripe refund for booking ${booking_id}: ${refundAmountPaise} cents`);
+
+      try {
+        // Check payment intent status first
+        const paymentIntent = await stripe.paymentIntents.retrieve(
+          booking.stripe_payment_intent_id,
+        );
+
+        // If requires_capture, cancel instead of refund
+        if (paymentIntent.status === 'requires_capture') {
+          const cancelled = await stripe.paymentIntents.cancel(
+            booking.stripe_payment_intent_id,
+            {
+              cancellation_reason: 'requested_by_customer',
+            },
+          );
+
+          console.log(`Stripe payment cancelled: ${cancelled.id}`);
+
+          return res.json({
+            success: true,
+            refund_id: cancelled.id,
+            amount: refund_amount,
+            gateway: 'stripe',
+            message: 'Payment hold cancelled (not yet captured)',
+          });
+        }
+
+        // If already captured/succeeded, do refund
+        if (paymentIntent.status === 'succeeded') {
+          refundResult = await stripe.refunds.create({
+            payment_intent: booking.stripe_payment_intent_id,
+            amount: refundAmountPaise,
+            reason: 'requested_by_customer',
+            metadata: {
+              booking_id: booking_id.toString(),
+              refund_type: refund_type,
+              location_verified: customer_location_verified.toString(),
+            },
+          });
+
+          console.log(`Stripe refund successful: ${refundResult.id}`);
+
+          return res.json({
+            success: true,
+            refund_id: refundResult.id,
+            amount: refund_amount,
+            gateway: 'stripe',
+            message: 'Refund processed via Stripe',
+          });
+        }
+
+        // Payment in unexpected state
+        return res.status(400).json({
+          error: `Payment in unexpected state: ${paymentIntent.status}`,
+        });
+      } catch (stripeError) {
+        console.error('Stripe refund error:', stripeError);
+        return res.status(500).json({
+          error: 'Stripe refund failed: ' + stripeError.message,
+        });
+      }
+    }
+
+    // No payment ID found
+    return res.status(400).json({
+      error: 'No payment information found for this booking',
+    });
+  } catch (error) {
+    console.error('Manual refund error:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+/**
  * Release funds manually (for admin/support)
  */
 exports.releaseFunds = functions.https.onRequest(async (req, res) => {

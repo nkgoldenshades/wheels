@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../services/auth_repository.dart';
 import '../../services/profile_name_registry.dart';
 import 'login_screen.dart';
@@ -26,7 +28,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     _nameController.dispose();
     super.dispose();
   }
-  
+
   Future<void> _checkNameAvailability(String name) async {
     if (name.trim().isEmpty) {
       setState(() {
@@ -35,11 +37,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
       });
       return;
     }
-    
+
     setState(() => _isCheckingName = true);
-    
+
     try {
-      final available = await ProfileNameRegistry.instance.checkNameAvailability(name.trim());
+      final available = await ProfileNameRegistry.instance
+          .checkNameAvailability(name.trim());
       setState(() {
         _isNameAvailable = available;
         _isCheckingName = false;
@@ -52,15 +55,34 @@ class _RegisterScreenState extends State<RegisterScreen> {
     }
   }
 
+  Future<void> _launchURL(String url) async {
+    final uri = Uri.parse(url);
+    try {
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      } else {
+        if (!mounted) return;
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Could not open $url')));
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Error opening link: $e')));
+    }
+  }
+
   Future<void> _signUp() async {
     final email = _emailController.text.trim();
     final password = _passwordController.text.trim();
     final name = _nameController.text.trim();
-    
+
     if (email.isEmpty || password.isEmpty || name.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please fill all fields')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Please fill all fields')));
       return;
     }
 
@@ -72,22 +94,22 @@ class _RegisterScreenState extends State<RegisterScreen> {
     }
 
     setState(() => _isLoading = true);
-    
+
     try {
       await AuthRepository.instance.signUpWithEmail(
         email: email,
         password: password,
         profileName: name,
       );
-      
+
       if (!mounted) return;
       Navigator.pushReplacementNamed(context, '/main');
     } catch (e) {
       if (!mounted) return;
       setState(() => _isLoading = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.toString())),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(e.toString())));
     }
   }
 
@@ -124,28 +146,28 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   labelText: 'Full Name',
                   prefixIcon: const Icon(Icons.person),
                   border: const OutlineInputBorder(),
-                  errorText: _isNameAvailable == false 
-                      ? 'Name already taken' 
+                  errorText: _isNameAvailable == false
+                      ? 'Name already taken'
                       : null,
                   suffixIcon: _nameController.text.trim().isEmpty
                       ? null
                       : _isCheckingName
-                          ? const Padding(
-                              padding: EdgeInsets.all(12.0),
-                              child: SizedBox(
-                                width: 16,
-                                height: 16,
-                                child: CircularProgressIndicator(strokeWidth: 2),
-                              ),
-                            )
-                          : Icon(
-                              _isNameAvailable == true 
-                                  ? Icons.check_circle 
-                                  : Icons.error,
-                              color: _isNameAvailable == true 
-                                  ? Colors.green 
-                                  : Colors.red,
-                            ),
+                      ? const Padding(
+                          padding: EdgeInsets.all(12.0),
+                          child: SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                        )
+                      : Icon(
+                          _isNameAvailable == true
+                              ? Icons.check_circle
+                              : Icons.error,
+                          color: _isNameAvailable == true
+                              ? Colors.green
+                              : Colors.red,
+                        ),
                 ),
                 onChanged: (value) {
                   // Debounce the check
@@ -176,7 +198,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   border: const OutlineInputBorder(),
                   suffixIcon: IconButton(
                     icon: Icon(
-                      _obscurePassword ? Icons.visibility : Icons.visibility_off,
+                      _obscurePassword
+                          ? Icons.visibility
+                          : Icons.visibility_off,
                     ),
                     onPressed: () {
                       setState(() => _obscurePassword = !_obscurePassword);
@@ -208,25 +232,71 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         ),
                 ),
               ),
+              const SizedBox(height: 12),
+              // Terms acceptance text - Simple approach
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8.0),
+                child: RichText(
+                  textAlign: TextAlign.center,
+                  text: TextSpan(
+                    style: const TextStyle(fontSize: 11, color: Colors.grey),
+                    children: [
+                      const TextSpan(
+                        text: 'By clicking Sign Up, you agree to our ',
+                      ),
+                      TextSpan(
+                        text: 'Terms & Conditions',
+                        style: const TextStyle(
+                          color: Colors.blue,
+                          decoration: TextDecoration.underline,
+                        ),
+                        recognizer: TapGestureRecognizer()
+                          ..onTap = () => _launchURL(
+                            'https://vaultwheels.web.app/terms.html',
+                          ),
+                      ),
+                      const TextSpan(text: ' and '),
+                      TextSpan(
+                        text: 'Privacy Policy',
+                        style: const TextStyle(
+                          color: Colors.blue,
+                          decoration: TextDecoration.underline,
+                        ),
+                        recognizer: TapGestureRecognizer()
+                          ..onTap = () => _launchURL(
+                            'https://vaultwheels.web.app/privacy.html',
+                          ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
               const SizedBox(height: 16),
               TextButton(
                 onPressed: () {
-                  Navigator.pushReplacement(context, 
-                    MaterialPageRoute(builder: (_) => const LoginScreen()));
+                  Navigator.pushReplacement(
+                    context,
+                    MaterialPageRoute(builder: (_) => const LoginScreen()),
+                  );
                 },
                 child: const Text('Already have an account? Sign In'),
               ),
               const SizedBox(height: 16),
               // Guest mode button
               OutlinedButton.icon(
-                onPressed: _isLoading ? null : () {
-                  // Navigate to main screen without logging in
-                  Navigator.pushReplacementNamed(context, '/main');
-                },
+                onPressed: _isLoading
+                    ? null
+                    : () {
+                        // Navigate to main screen without logging in
+                        Navigator.pushReplacementNamed(context, '/main');
+                      },
                 icon: const Icon(Icons.person_outline),
                 label: const Text('Continue as Guest'),
                 style: OutlinedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
+                  padding: const EdgeInsets.symmetric(
+                    vertical: 16,
+                    horizontal: 24,
+                  ),
                   side: BorderSide(color: Theme.of(context).primaryColor),
                 ),
               ),
@@ -243,6 +313,3 @@ class _RegisterScreenState extends State<RegisterScreen> {
     );
   }
 }
-
-
-

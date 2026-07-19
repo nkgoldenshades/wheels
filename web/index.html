@@ -13,6 +13,33 @@
   <meta name="apple-mobile-web-app-title" content="VaultWheels">
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
   
+  <!-- 🔒 SECURITY HEADERS -->
+  <meta http-equiv="X-Content-Type-Options" content="nosniff">
+  <meta http-equiv="X-Frame-Options" content="SAMEORIGIN">
+  <meta http-equiv="X-XSS-Protection" content="1; mode=block">
+  <meta http-equiv="Referrer-Policy" content="strict-origin-when-cross-origin">
+  <meta http-equiv="Permissions-Policy" content="geolocation=(self), camera=(self), microphone=(self)">
+  
+  <!-- Primary Meta Tags -->
+  <title>VaultWheels - Secure Global Ride-Sharing Platform</title>
+  <meta name="title" content="VaultWheels - Secure Global Ride-Sharing Platform">
+  <meta name="description" content="Book rides or post your vehicle with VaultWheels. Secure escrow payments, OTP verification, lowest fees globally. Join the fastest growing international ride-share community!">
+  <meta name="keywords" content="ride sharing, car rental, bike rental, vehicle booking, escrow payment, secure payment, global transport, carpooling, VaultWheels, cheap rides, international payment, Razorpay, Stripe, affordable travel">
+  <meta name="author" content="VaultWheels">
+  <meta name="robots" content="index, follow">
+  
+  <!-- Open Graph / Facebook -->
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://vaultwheels.web.app/">
+  <meta property="og:title" content="VaultWheels - Secure Global Ride-Sharing Platform">
+  <meta property="og:description" content="Book rides or post your vehicle with VaultWheels. Secure escrow payments, OTP verification, lowest fees globally. Join now!">
+  
+  <!-- Twitter -->
+  <meta property="twitter:card" content="summary_large_image">
+  <meta property="twitter:url" content="https://vaultwheels.web.app/">
+  <meta property="twitter:title" content="VaultWheels - Secure Global Ride-Sharing Platform">
+  <meta property="twitter:description" content="Book rides or post your vehicle. Secure escrow payments, OTP verification, lowest fees globally. Join now!">
+  
   <!-- Favicon -->
   <link rel="icon" type="image/png" href="favicon.png"/>
   
@@ -23,6 +50,99 @@
   <style>
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
   </style>
+
+  <!-- 🔒 DISABLE DEVELOPER CONSOLE IN PRODUCTION -->
+  <script>
+    // Only block console in production (deployed websites)
+    // Allow console in development (localhost)
+    (function() {
+      const isProduction = window.location.hostname !== 'localhost' 
+                        && window.location.hostname !== '127.0.0.1'
+                        && !window.location.hostname.includes('.local');
+      
+      if (isProduction) {
+        // Disable console methods
+        console.log = function() {};
+        console.warn = function() {};
+        console.error = function() {};
+        console.info = function() {};
+        console.debug = function() {};
+        
+        // Disable right-click (context menu)
+        document.addEventListener('contextmenu', function(e) {
+          e.preventDefault();
+          return false;
+        });
+        
+        // Disable F12, Ctrl+Shift+I, Ctrl+Shift+J, Ctrl+U
+        document.addEventListener('keydown', function(e) {
+          if (e.keyCode === 123 || 
+              (e.ctrlKey && e.shiftKey && e.keyCode === 73) ||
+              (e.ctrlKey && e.shiftKey && e.keyCode === 74) ||
+              (e.ctrlKey && e.shiftKey && e.keyCode === 67) ||
+              (e.ctrlKey && e.keyCode === 85)) {
+            e.preventDefault();
+            return false;
+          }
+        });
+      } else {
+        console.log('🔧 Development mode - Console enabled');
+      }
+    })();
+  </script>
+
+  <!-- Razorpay Checkout.js for web payments -->
+  <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+  
+  <!-- Razorpay Flutter Bridge -->
+  <script>
+    window.openRazorpay = function(options) {
+      return new Promise(function(resolve, reject) {
+        try {
+          var rzpOptions = {
+            key: options.key,
+            amount: options.amount,
+            currency: options.currency || 'INR',
+            name: options.name || 'VaultWheels',
+            description: options.description || '',
+            prefill: {
+              name: options.prefill_name || '',
+              email: options.prefill_email || '',
+              contact: options.prefill_contact || '',
+            },
+            theme: { color: options.theme_color || '#1976D2' },
+            modal: {
+              ondismiss: function() {
+                resolve(JSON.stringify({ error: 'Payment cancelled by user' }));
+              }
+            },
+            handler: function(response) {
+              resolve(JSON.stringify({
+                payment_id: response.razorpay_payment_id,
+                order_id: response.razorpay_order_id || '',
+                signature: response.razorpay_signature || '',
+              }));
+            }
+          };
+
+          if (options.order_id && options.order_id !== '') {
+            rzpOptions.order_id = options.order_id;
+          }
+
+          var rzp = new Razorpay(rzpOptions);
+          rzp.on('payment.failed', function(response) {
+            resolve(JSON.stringify({
+              error: response.error.description || 'Payment failed',
+              code: response.error.code || '',
+            }));
+          });
+          rzp.open();
+        } catch(e) {
+          resolve(JSON.stringify({ error: e.toString() }));
+        }
+      });
+    };
+  </script>
 
   <!-- Web Speech API polyfill hint for browsers -->
   <script>

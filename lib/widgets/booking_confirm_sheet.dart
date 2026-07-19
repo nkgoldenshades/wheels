@@ -19,6 +19,7 @@ import '../services/stripe_service.dart';
 import '../services/payment_service.dart';
 import '../services/auth_repository.dart';
 import '../services/vehicle_repository.dart';
+import '../widgets/payment_method_info.dart';
 
 class PassengerFormData {
   final TextEditingController nameController;
@@ -912,6 +913,18 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
                   ),
               ],
               const SizedBox(height: 16),
+              // Payment Method Guide - Show before payment
+              ValueListenableBuilder<String>(
+                valueListenable: AppPreferences.instance.currencyCode,
+                builder: (context, currency, _) {
+                  return PaymentMethodInfo(
+                    currency: currency,
+                    amount: totalPrice.toDouble(),
+                    showDetailed: false, // Compact version
+                  );
+                },
+              ),
+              const SizedBox(height: 16),
               Row(
                 children: [
                   Expanded(
@@ -1207,7 +1220,8 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
                                           false)
                                       ? widget.slot.fromLocation
                                       : widget.slot.baseLocation;
-                                  final currency = widget.slot.currencyType.toLowerCase();
+                                  final currency = widget.slot.currencyType
+                                      .toLowerCase();
                                   final isINR = currency == 'inr';
                                   final countryCode =
                                       PaymentService.countryCodeFromLocation(

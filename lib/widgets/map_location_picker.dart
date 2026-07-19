@@ -4,7 +4,6 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:geodesy/geodesy.dart';
 import 'dart:async';
-import '../services/location_autocomplete_service.dart';
 
 /// Uber/Ola style map picker - drag map to select location
 class MapLocationPicker extends StatefulWidget {
