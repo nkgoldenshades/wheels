@@ -669,14 +669,46 @@ class ProfileRepository {
     final p = _currentProfile ?? profile.value;
     if (p.id.isEmpty) throw Exception('No profile loaded');
 
-    // If currency not provided, try to detect or use default
-    final bankCurrency =
-        currency ??
-        (accountId.startsWith('acct_test_') ? 'USD' : null) ??
-        p.bankCurrency;
+    // Determine bank currency from Stripe account
+    // Priority:
+    // 1. Explicit currency parameter (if provided)
+    // 2. Existing bank currency (if already set)
+    // 3. Default to USD for test accounts (temporary until Stripe API integration)
+    String? bankCurrency;
+
+    if (currency != null && currency.isNotEmpty) {
+      // Use provided currency (highest priority)
+      bankCurrency = currency.toUpperCase();
+      debugPrint('✅ Using provided currency: $bankCurrency');
+    } else if (p.bankCurrency != null && p.bankCurrency!.isNotEmpty) {
+      // Keep existing currency if already set (don't override)
+      bankCurrency = p.bankCurrency;
+      debugPrint('✅ Keeping existing currency: $bankCurrency');
+    } else {
+      // Default fallback for new accounts
+      // TODO: Fetch actual currency from Stripe API using account ID
+      // For now, default based on account type
+      if (accountId.startsWith('acct_test_')) {
+        // Test accounts - default to USD
+        bankCurrency = 'USD';
+        debugPrint(
+          '⚠️ Test account detected, defaulting to USD. Set currency manually if needed.',
+        );
+      } else {
+        // Live accounts - require explicit currency or keep existing
+        bankCurrency = p.bankCurrency ?? 'USD';
+        debugPrint(
+          '⚠️ Live account without currency. Defaulting to: $bankCurrency',
+        );
+      }
+    }
 
     await saveProfile(
       p.copyWith(stripeAccountId: accountId, bankCurrency: bankCurrency),
+    );
+
+    debugPrint(
+      '✅ Stripe account updated: $accountId (Currency: $bankCurrency)',
     );
   }
 
