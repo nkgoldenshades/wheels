@@ -57,12 +57,9 @@ class ProfileInfo {
   final String? razorpayAccountId;
   final String?
   bankCurrency; // Currency of connected bank account (INR/USD/GBP/EUR)
-  // Bank details
-  final String? bankAccountHolder;
-  final String? bankAccountNumber;
-  final String? bankName;
-  final String? bankIFSC;
-  final String? bankAccountType;
+  // Bank details - REMOVED for PCI-DSS compliance
+  // Bank account details are now managed by Razorpay/Stripe directly
+  // We only store account IDs, not actual bank details
   // Personal
   final String? gender;
   final DateTime? dateOfBirth;
@@ -112,11 +109,6 @@ class ProfileInfo {
     this.stripeAccountId,
     this.razorpayAccountId,
     this.bankCurrency,
-    this.bankAccountHolder,
-    this.bankAccountNumber,
-    this.bankName,
-    this.bankIFSC,
-    this.bankAccountType,
     this.gender,
     this.dateOfBirth,
     this.addressLine1,
@@ -172,11 +164,6 @@ class ProfileInfo {
       stripeAccountId: json['stripe_account_id'] as String?,
       razorpayAccountId: json['razorpay_account_id'] as String?,
       bankCurrency: json['bank_currency'] as String?,
-      bankAccountHolder: json['bank_account_holder'] as String?,
-      bankAccountNumber: json['bank_account_number'] as String?,
-      bankName: json['bank_name'] as String?,
-      bankIFSC: json['bank_ifsc'] as String?,
-      bankAccountType: json['bank_account_type'] as String?,
       gender: json['gender'] as String?,
       dateOfBirth: json['date_of_birth'] != null
           ? DateTime.tryParse(json['date_of_birth'] as String)
@@ -238,11 +225,6 @@ class ProfileInfo {
     if (stripeAccountId != null) 'stripe_account_id': stripeAccountId,
     if (razorpayAccountId != null) 'razorpay_account_id': razorpayAccountId,
     if (bankCurrency != null) 'bank_currency': bankCurrency,
-    if (bankAccountHolder != null) 'bank_account_holder': bankAccountHolder,
-    if (bankAccountNumber != null) 'bank_account_number': bankAccountNumber,
-    if (bankName != null) 'bank_name': bankName,
-    if (bankIFSC != null) 'bank_ifsc': bankIFSC,
-    if (bankAccountType != null) 'bank_account_type': bankAccountType,
     if (gender != null) 'gender': gender,
     if (dateOfBirth != null)
       'date_of_birth': dateOfBirth!.toIso8601String().split('T').first,
@@ -304,16 +286,6 @@ class ProfileInfo {
     bool setRazorpayNull = false,
     String? bankCurrency,
     bool setBankCurrencyNull = false,
-    String? bankAccountHolder,
-    bool setBankHolderNull = false,
-    String? bankAccountNumber,
-    bool setBankNumberNull = false,
-    String? bankName,
-    bool setBankNameNull = false,
-    String? bankIFSC,
-    bool setBankIFSCNull = false,
-    String? bankAccountType,
-    bool setBankTypeNull = false,
     String? gender,
     DateTime? dateOfBirth,
     String? addressLine1,
@@ -367,17 +339,6 @@ class ProfileInfo {
       bankCurrency: setBankCurrencyNull
           ? null
           : bankCurrency ?? this.bankCurrency,
-      bankAccountHolder: setBankHolderNull
-          ? null
-          : bankAccountHolder ?? this.bankAccountHolder,
-      bankAccountNumber: setBankNumberNull
-          ? null
-          : bankAccountNumber ?? this.bankAccountNumber,
-      bankName: setBankNameNull ? null : bankName ?? this.bankName,
-      bankIFSC: setBankIFSCNull ? null : bankIFSC ?? this.bankIFSC,
-      bankAccountType: setBankTypeNull
-          ? null
-          : bankAccountType ?? this.bankAccountType,
       gender: gender ?? this.gender,
       dateOfBirth: dateOfBirth ?? this.dateOfBirth,
       addressLine1: addressLine1 ?? this.addressLine1,
@@ -423,7 +384,10 @@ class ProfileRepository {
             if (kDebugMode) print('⚠️ Profile not found, creating default: $e');
             final defaultProfile = ProfileInfo(
               id: firebaseUser.uid,
-              profileName: firebaseUser.email?.split('@').first ?? 'User',
+              profileName:
+                  firebaseUser.displayName ??
+                  firebaseUser.email?.split('@').first ??
+                  'User',
               email: firebaseUser.email,
               businessType: 'solo',
             );
@@ -475,10 +439,31 @@ class ProfileRepository {
       };
 
       final profileInfo = ProfileInfo.fromJson(merged);
-      profile.value = profileInfo;
-      _currentProfile = profileInfo;
 
-      if (kDebugMode) print('✅ Profile loaded: ${profileInfo.profileName}');
+      // Fix for existing users: If profile name is "User" or "Unknown User",
+      // try to update it from Firebase displayName
+      if ((profileInfo.profileName == 'User' ||
+              profileInfo.profileName == 'Unknown User') &&
+          firebase_auth.FirebaseAuth.instance.currentUser?.displayName !=
+              null) {
+        final firebaseUser = firebase_auth.FirebaseAuth.instance.currentUser!;
+        if (kDebugMode) {
+          print(
+            '⚠️ Fixing profile name from Firebase: ${firebaseUser.displayName}',
+          );
+        }
+        final updatedInfo = profileInfo.copyWith(
+          profileName: firebaseUser.displayName!,
+        );
+        await saveProfile(updatedInfo);
+        profile.value = updatedInfo;
+        _currentProfile = updatedInfo;
+      } else {
+        profile.value = profileInfo;
+        _currentProfile = profileInfo;
+      }
+
+      if (kDebugMode) print('✅ Profile loaded: ${profile.value.profileName}');
       return profileInfo;
     } catch (e) {
       if (kDebugMode) print('❌ Failed to load profile: $e');
@@ -518,14 +503,32 @@ class ProfileRepository {
     }
   }
 
+  /// Helper method to ensure profile is loaded for new users
+  Future<ProfileInfo> _ensureProfileLoaded() async {
+    final p = _currentProfile ?? profile.value;
+    if (p.id.isNotEmpty) return p;
+
+    // For new users, try to reload profile first
+    final firebaseUser = firebase_auth.FirebaseAuth.instance.currentUser;
+    if (firebaseUser != null) {
+      try {
+        await loadProfile(firebaseUser.uid);
+        final reloadedProfile = _currentProfile ?? profile.value;
+        if (reloadedProfile.id.isNotEmpty) return reloadedProfile;
+      } catch (e) {
+        debugPrint('⚠️ Could not load profile: $e');
+      }
+    }
+    throw Exception('No profile loaded. Please try logging in again.');
+  }
+
   Future<void> saveDocument(
     String documentType,
     String side,
     String base64Image, {
     bool isVerified = false,
   }) async {
-    final p = _currentProfile ?? profile.value;
-    if (p.id.isEmpty) throw Exception('No profile loaded');
+    final p = await _ensureProfileLoaded();
 
     ProfileInfo updated;
     switch (documentType) {
@@ -585,12 +588,10 @@ class ProfileRepository {
 
   Future<void> setLocalAvatarBase64(String? base64) async {
     await AppPreferences.instance.setAvatarBase64(base64);
-    final p = _currentProfile ?? profile.value;
-    if (p.id.isNotEmpty) {
-      await saveProfile(
-        p.copyWith(avatarUrl: base64, setAvatarNull: base64 == null),
-      );
-    }
+    final p = await _ensureProfileLoaded();
+    await saveProfile(
+      p.copyWith(avatarUrl: base64, setAvatarNull: base64 == null),
+    );
   }
 
   Future<void> update({
@@ -615,8 +616,7 @@ class ProfileRepository {
     String? city,
     String? state,
   }) async {
-    final p = _currentProfile ?? profile.value;
-    if (p.id.isEmpty) throw Exception('No profile loaded');
+    final currentProfile = await _ensureProfileLoaded();
 
     if (profileName != null && profileName.trim().isNotEmpty) {
       final currentUser = auth.AuthRepository.instance.currentUser;
@@ -634,7 +634,7 @@ class ProfileRepository {
     }
 
     await saveProfile(
-      p.copyWith(
+      currentProfile.copyWith(
         profileName: profileName,
         email: email,
         setEmailNull: setEmailNull,
@@ -660,14 +660,12 @@ class ProfileRepository {
   }
 
   Future<void> updatePaymentProvider(String provider) async {
-    final p = _currentProfile ?? profile.value;
-    if (p.id.isEmpty) throw Exception('No profile loaded');
+    final p = await _ensureProfileLoaded();
     await saveProfile(p.copyWith(paymentProvider: provider));
   }
 
   Future<void> updateStripeAccount(String accountId, {String? currency}) async {
-    final p = _currentProfile ?? profile.value;
-    if (p.id.isEmpty) throw Exception('No profile loaded');
+    final p = await _ensureProfileLoaded();
 
     // Determine bank currency from Stripe account
     // Priority:
@@ -713,8 +711,7 @@ class ProfileRepository {
   }
 
   Future<void> updateRazorpayAccount(String accountId) async {
-    final p = _currentProfile ?? profile.value;
-    if (p.id.isEmpty) throw Exception('No profile loaded');
+    final p = await _ensureProfileLoaded();
 
     // Razorpay is India-only, always INR
     await saveProfile(
@@ -723,14 +720,12 @@ class ProfileRepository {
   }
 
   Future<void> updateCountry(String country) async {
-    final p = _currentProfile ?? profile.value;
-    if (p.id.isEmpty) throw Exception('No profile loaded');
+    final p = await _ensureProfileLoaded();
     await saveProfile(p.copyWith(country: country));
   }
 
   Future<bool> deductAICredits(int amount) async {
-    final p = _currentProfile ?? profile.value;
-    if (p.id.isEmpty) throw Exception('No profile loaded');
+    final p = await _ensureProfileLoaded();
     if (p.aiCredits < amount) return false;
     await saveProfile(p.copyWith(aiCredits: p.aiCredits - amount));
     debugPrint(
@@ -740,8 +735,7 @@ class ProfileRepository {
   }
 
   Future<void> addAICredits(int amount) async {
-    final p = _currentProfile ?? profile.value;
-    if (p.id.isEmpty) throw Exception('No profile loaded');
+    final p = await _ensureProfileLoaded();
     await saveProfile(p.copyWith(aiCredits: p.aiCredits + amount));
     debugPrint('✅ Added $amount credits. New balance: ${p.aiCredits + amount}');
   }
@@ -752,8 +746,7 @@ class ProfileRepository {
     required DateTime expiresAt,
     required String paymentId,
   }) async {
-    final p = _currentProfile ?? profile.value;
-    if (p.id.isEmpty) throw Exception('No profile loaded');
+    final p = await _ensureProfileLoaded();
 
     await saveProfile(
       p.copyWith(
@@ -801,9 +794,9 @@ extension ProfileVerification on ProfileInfo {
     if (panVerified) count++;
     if (dlVerified) count++;
 
-    if (count == 0) return 0; // Not verified
-    if (count < 3) return 1; // Partially verified
-    return 2; // Fully verified (all 3 documents)
+    if (count == 0) return 0;
+    if (count < 3) return 1;
+    return 2;
   }
 
   /// Returns a list of verified documents
@@ -815,16 +808,12 @@ extension ProfileVerification on ProfileInfo {
     return docs;
   }
 
-  /// Returns true if profile qualifies as "expert"
-  /// Expert = Paid subscription with expert plan
-  /// This is manually approved by admin and requires payment
+  /// Returns true if profile qualifies as expert
   bool get isExpert {
-    // Expert is now subscription-based (not auto-earned)
     return subscriptionPlan == 'expert' && hasActiveSubscription;
   }
 
   /// Returns true if profile has enough experience to potentially qualify for expert
-  /// (50+ trips with 4.5+ rating) - for admin reference only
   bool get hasExpertLevelExperience {
     final providerQualifies = providerTotalTrips >= 50 && providerRating >= 4.5;
     final customerQualifies = customerTotalTrips >= 50 && customerRating >= 4.5;
@@ -835,17 +824,15 @@ extension ProfileVerification on ProfileInfo {
   bool meetsDemandPlan(DemandPlan plan) {
     switch (plan) {
       case DemandPlan.basic:
-        return true; // Everyone qualifies for basic
-
+        return true;
       case DemandPlan.verified:
-        return isVerified; // Need at least one verified document
-
+        return isVerified;
       case DemandPlan.expert:
-        return isExpert; // Need expert status (50+ trips, 4.5+ rating)
+        return isExpert;
     }
   }
 
-  /// Returns true if user has an active paid subscription (Premium or Expert)
+  /// Returns true if user has an active paid subscription
   bool get hasActiveSubscription {
     if (subscriptionPlan == 'basic') return false;
     if (subscriptionExpiresAt == null) return false;

@@ -7,8 +7,8 @@ require('dotenv').config();
 
 admin.initializeApp();
 
-// Initialize Firestore-based Stripe escrow functions
-const stripeEscrow = require('./stripe-escrow');
+// Initialize Razorpay escrow functions
+const razorpayEscrow = require('./razorpay-escrow');
 
 // ═══════════════════════════════════════════════════════════
 // 🔑 PAYMENT MODE SWITCH
@@ -281,17 +281,10 @@ exports.razorpayWebhook = functions.https.onRequest(async (req, res) => {
   }
 });
 
-exports.createBooking = stripeEscrow.createBooking;
-exports.verifyOtp = stripeEscrow.verifyOtp;
-exports.autoRefundExpired = stripeEscrow.autoRefundExpired;
-exports.refundPayment = stripeEscrow.refundPayment;
-exports.releaseFunds = stripeEscrow.releaseFunds;
-exports.createCheckoutSession = stripeEscrow.createCheckoutSession;
-exports.createSubscriptionCheckoutSession = stripeEscrow.createSubscriptionCheckoutSession;
-exports.createConnectedAccount = stripeEscrow.createConnectedAccount;
-exports.stripeWebhook = stripeEscrow.stripeWebhook;
-exports.initiateStripePayout = stripeEscrow.initiateStripePayout;
-exports.initiateRazorpayPayout = stripeEscrow.initiateRazorpayPayout;
+exports.createBooking = razorpayEscrow.createBooking;
+exports.verifyOtp = razorpayEscrow.verifyOtp;
+exports.autoRefundExpired = razorpayEscrow.autoRefundExpired;
+exports.manualRefund = razorpayEscrow.manualRefund;
 
 /**
  * AI Chat Endpoint

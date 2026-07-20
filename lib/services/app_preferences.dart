@@ -15,11 +15,14 @@ class AppPreferences {
   static const _subscriptionPlanKey = 'subscriptionPlan';
   static const _subscriptionExpiryKey = 'subscriptionExpiry';
   static const _preferredLanguageKey = 'preferredLanguage';
+  static const _razorpayAccountIdKey = 'razorpayAccountId';
 
   // Multi-currency support enabled
-  final ValueNotifier<String> currencyCode = ValueNotifier<String>('USD');
+  final ValueNotifier<String> currencyCode = ValueNotifier<String>(
+    'INR',
+  ); // Default to INR
   final ValueNotifier<String> preferredCountry = ValueNotifier<String>(
-    'United States',
+    'India', // Default to India
   );
   final ValueNotifier<String> preferredLanguage = ValueNotifier<String>(
     'English',
@@ -30,16 +33,18 @@ class AppPreferences {
   final ValueNotifier<DateTime?> subscriptionExpiry = ValueNotifier<DateTime?>(
     null,
   );
+  final ValueNotifier<String?> razorpayAccountId = ValueNotifier<String?>(null);
+  final ValueNotifier<bool> stripeEnabled = ValueNotifier<bool>(false);
 
   Future<void> init() async {
     final prefs = await SharedPreferences.getInstance();
-    // Multi-currency support enabled - user can select their preferred currency
-    currencyCode.value = prefs.getString(_currencyCodeKey) ?? 'USD';
-    preferredCountry.value =
-        prefs.getString(_preferredCountryKey) ?? 'United States';
+    // Default to INR and India for new users
+    currencyCode.value = prefs.getString(_currencyCodeKey) ?? 'INR';
+    preferredCountry.value = prefs.getString(_preferredCountryKey) ?? 'India';
     preferredLanguage.value =
         prefs.getString(_preferredLanguageKey) ?? 'English';
     avatarBase64.value = prefs.getString(_avatarBase64Key);
+    razorpayAccountId.value = prefs.getString(_razorpayAccountIdKey);
 
     final planRaw = prefs.getString(_subscriptionPlanKey);
     subscriptionPlan.value = SubscriptionPlan.values.firstWhere(
@@ -136,6 +141,16 @@ class AppPreferences {
       await prefs.remove(_avatarBase64Key);
     } else {
       await prefs.setString(_avatarBase64Key, value);
+    }
+  }
+
+  Future<void> setRazorpayAccountId(String? accountId) async {
+    razorpayAccountId.value = accountId;
+    final prefs = await SharedPreferences.getInstance();
+    if (accountId == null || accountId.isEmpty) {
+      await prefs.remove(_razorpayAccountIdKey);
+    } else {
+      await prefs.setString(_razorpayAccountIdKey, accountId);
     }
   }
 

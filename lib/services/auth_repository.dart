@@ -27,8 +27,11 @@ class AuthRepository {
 
   static final AuthRepository instance = AuthRepository._();
 
-  final ValueNotifier<AppAuthUser?> _currentUser = ValueNotifier<AppAuthUser?>(null);
-  final firebase_auth.FirebaseAuth _firebaseAuth = firebase_auth.FirebaseAuth.instance;
+  final ValueNotifier<AppAuthUser?> _currentUser = ValueNotifier<AppAuthUser?>(
+    null,
+  );
+  final firebase_auth.FirebaseAuth _firebaseAuth =
+      firebase_auth.FirebaseAuth.instance;
 
   static const _storageKeyUser = 'auth_user';
 
@@ -47,10 +50,10 @@ class AuthRepository {
     if (trimmed.isEmpty) return;
     final u = _currentUser.value;
     if (u == null) return;
-    
+
     // Update Firebase user display name
     await _firebaseAuth.currentUser?.updateDisplayName(trimmed);
-    
+
     final updated = AppAuthUser(
       id: u.id,
       email: u.email,
@@ -105,12 +108,12 @@ class AuthRepository {
         final isAvailable = ProfileNameRegistry.instance.isNameAvailable(
           profileName.trim(),
         );
-        
+
         if (!isAvailable) {
           throw 'Profile name already taken. Please choose a different name.';
         }
       }
-      
+
       final credential = await _firebaseAuth.createUserWithEmailAndPassword(
         email: email.trim(),
         password: password,
@@ -118,7 +121,9 @@ class AuthRepository {
 
       if (profileName != null && profileName.trim().isNotEmpty) {
         await credential.user?.updateDisplayName(profileName.trim());
-        
+        await credential.user
+            ?.reload(); // Reload user to get updated displayName
+
         // Register the profile name
         await ProfileNameRegistry.instance.registerName(
           credential.user!.uid,
@@ -135,7 +140,7 @@ class AuthRepository {
       );
 
       _currentUser.value = user;
-      
+
       // Sync user to Supabase with timeout
       try {
         await syncUserToSupabase().timeout(
@@ -150,16 +155,17 @@ class AuthRepository {
 
       // Record device session (fire-and-forget, non-blocking)
       unawaited(DeviceInfoService.instance.recordLoginSession(user.id));
-      
+
       return user;
     } catch (e) {
       final msg = _extractFirebaseError(e);
       throw msg ?? 'Sign up failed: $e';
     }
   }
+
   Future<void> syncUserToSupabase() async {
     final firebaseUser = _firebaseAuth.currentUser;
-    
+
     if (firebaseUser == null) {
       debugPrint('⚠️ No Firebase user to sync');
       return;
@@ -172,7 +178,11 @@ class AuthRepository {
       // Force token refresh so the accessToken callback has a valid user
       await firebaseUser.getIdToken(true);
       debugPrint('🔑 Token refreshed');
-      
+
+      // Reload user to get latest displayName
+      await firebaseUser.reload();
+      final refreshedUser = _firebaseAuth.currentUser;
+
       // Small delay to ensure Supabase client picks up the new token
       await Future.delayed(const Duration(milliseconds: 500));
 
@@ -193,15 +203,15 @@ class AuthRepository {
       // Insert new user into all 3 tables
       await supabase.from('profiles_public').insert({
         'id': uid,
-        'full_name': firebaseUser.displayName ?? 'User',
-        'profile_photo_url': firebaseUser.photoURL,
+        'full_name': refreshedUser?.displayName ?? 'User',
+        'profile_photo_url': refreshedUser?.photoURL,
         'business_type': 'solo',
       });
 
       await supabase.from('profiles_contact').insert({
         'profile_id': uid,
-        'email': firebaseUser.email,
-        'phone_number': firebaseUser.phoneNumber,
+        'email': refreshedUser?.email,
+        'phone_number': refreshedUser?.phoneNumber,
       });
 
       await supabase.from('profiles_private').insert({
@@ -236,7 +246,7 @@ class AuthRepository {
       );
 
       _currentUser.value = user;
-      
+
       // Sync user to Supabase with timeout
       try {
         await syncUserToSupabase().timeout(
@@ -251,7 +261,7 @@ class AuthRepository {
 
       // Record device session (fire-and-forget, non-blocking)
       unawaited(DeviceInfoService.instance.recordLoginSession(user.id));
-      
+
       return user;
     } catch (e) {
       final msg = _extractFirebaseError(e);
@@ -330,13 +340,15 @@ class AuthRepository {
     // Try string parsing first (works on both mobile and web)
     final str = e.toString();
     if (str.contains('weak-password')) return 'Password is too weak';
-    if (str.contains('email-already-in-use')) return 'Email is already registered';
+    if (str.contains('email-already-in-use'))
+      return 'Email is already registered';
     if (str.contains('invalid-email')) return 'Invalid email address';
     if (str.contains('user-not-found')) return 'No user found with this email';
     if (str.contains('wrong-password')) return 'Wrong password';
     if (str.contains('user-disabled')) return 'This account has been disabled';
-    if (str.contains('too-many-requests')) return 'Too many attempts. Try again later';
-    
+    if (str.contains('too-many-requests'))
+      return 'Too many attempts. Try again later';
+
     // Fallback to typed exception (mobile only)
     try {
       if (e is firebase_auth.FirebaseAuthException) {
@@ -345,7 +357,7 @@ class AuthRepository {
     } catch (_) {
       // Type check failed on web - ignore
     }
-    
+
     return null;
   }
 
@@ -375,31 +387,35 @@ class AuthRepository {
   Future<void> testJWTClaims() async {
     try {
       debugPrint('🔍 Testing JWT claims...');
-      
+
       // Get Firebase token first
       final firebaseUser = _firebaseAuth.currentUser;
       if (firebaseUser == null) {
         debugPrint('❌ No Firebase user logged in');
         return;
       }
-      
+
       final firebaseToken = await firebaseUser.getIdToken(true);
       debugPrint('🔑 Firebase UID: ${firebaseUser.uid}');
-      debugPrint('🔑 Firebase Token (first 50 chars): ${firebaseToken?.substring(0, 50)}...');
-      
+      debugPrint(
+        '🔑 Firebase Token (first 50 chars): ${firebaseToken?.substring(0, 50)}...',
+      );
+
       // Call Supabase function to get JWT claims
       final supabase = Supabase.instance.client;
       final response = await supabase.rpc('get_jwt_claims');
-      
+
       debugPrint('📦 JWT Claims received by Supabase:');
       debugPrint(response.toString());
-      
+
       // Check if 'sub' exists
       if (response != null && response is Map) {
         if (response.containsKey('sub')) {
           debugPrint('✅ Found "sub" claim: ${response['sub']}');
         } else if (response.containsKey('user_id')) {
-          debugPrint('⚠️ Found "user_id" instead of "sub": ${response['user_id']}');
+          debugPrint(
+            '⚠️ Found "user_id" instead of "sub": ${response['user_id']}',
+          );
         } else {
           debugPrint('❌ No user identifier found in JWT!');
           debugPrint('Available keys: ${response.keys.toList()}');
@@ -412,6 +428,3 @@ class AuthRepository {
     }
   }
 }
-
-
-

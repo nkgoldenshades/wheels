@@ -3,7 +3,7 @@ import 'package:http/http.dart' as http;
 import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
 import 'dart:convert';
 import '../services/profile_repository.dart';
-import '../services/stripe_service.dart';
+// import '../services/stripe_service.dart'; // TODO: Stripe hidden for now
 
 class WithdrawScreen extends StatefulWidget {
   const WithdrawScreen({super.key});
@@ -51,7 +51,11 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
                     padding: const EdgeInsets.all(20),
                     child: Column(
                       children: [
-                        const Icon(Icons.account_balance_wallet, size: 48, color: Colors.green),
+                        const Icon(
+                          Icons.account_balance_wallet,
+                          size: 48,
+                          color: Colors.green,
+                        ),
                         const SizedBox(height: 12),
                         const Text(
                           'Earnings',
@@ -93,7 +97,9 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
                               profile.paymentProvider == 'razorpay'
                                   ? 'Razorpay (India)'
                                   : 'Stripe (International)',
-                              style: const TextStyle(fontWeight: FontWeight.bold),
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                              ),
                             ),
                             Text(
                               profile.paymentProvider == 'razorpay'
@@ -137,7 +143,11 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
           child: const Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+              SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
               SizedBox(width: 8),
               Text('Processing payout...'),
             ],
@@ -160,11 +170,8 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
   }
 
   Future<void> _initiateWithdraw(ProfileInfo profile) async {
-    if (profile.paymentProvider == 'razorpay') {
-      await _withdrawViaRazorpay(profile);
-    } else {
-      await _withdrawViaStripe(profile);
-    }
+    // Only support Razorpay for now - Stripe hidden
+    await _withdrawViaRazorpay(profile);
   }
 
   Future<void> _withdrawViaRazorpay(ProfileInfo profile) async {
@@ -176,11 +183,7 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
   }
 
   Future<void> _withdrawViaStripe(ProfileInfo profile) async {
-    if (profile.stripeAccountId == null) {
-      _showStripeSetupDialog();
-      return;
-    }
-    await _processStripePayout(profile);
+    // TODO: Stripe withdrawal hidden for now
   }
 
   void _showBankDetailsDialog() {
@@ -188,9 +191,14 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Add Bank Details'),
-        content: const Text('To withdraw your earnings, please add your bank account details.'),
+        content: const Text(
+          'To withdraw your earnings, please add your bank account details.',
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
           FilledButton(
             onPressed: () {
               Navigator.pop(context);
@@ -204,31 +212,16 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
   }
 
   void _showStripeSetupDialog() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Setup Stripe Account'),
-        content: const Text('To withdraw your earnings, please complete Stripe account setup.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-          FilledButton(
-            onPressed: () {
-              Navigator.pop(context);
-              _showMessage('Stripe setup coming soon!');
-            },
-            child: const Text('Setup Stripe'),
-          ),
-        ],
-      ),
-    );
+    // TODO: Stripe setup dialog hidden for now
   }
 
   Future<void> _processRazorpayPayout(ProfileInfo profile) async {
     setState(() => _status = 'processing');
     try {
       final headers = await _authorizedJsonHeaders();
+      // TODO: Update with correct backend URL
       final response = await http.post(
-        Uri.parse('${StripeService.backendUrl}/initiateRazorpayPayout'),
+        Uri.parse('https://api.quickohunt.com/initiateRazorpayPayout'),
         headers: headers,
         body: json.encode({
           'user_id': profile.id,
@@ -237,7 +230,9 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
       );
 
       if (response.statusCode == 200) {
-        _showMessage('Payout initiated! You\'ll receive your earnings within 2-4 hours.');
+        _showMessage(
+          'Payout initiated! You\'ll receive your earnings within 2-4 hours.',
+        );
       } else {
         final data = json.decode(response.body);
         _showMessage('Payout failed: ${data['error'] ?? 'Unknown error'}');
@@ -250,35 +245,12 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
   }
 
   Future<void> _processStripePayout(ProfileInfo profile) async {
-    setState(() => _status = 'processing');
-    try {
-      final headers = await _authorizedJsonHeaders();
-      final response = await http.post(
-        Uri.parse('${StripeService.backendUrl}/initiateStripePayout'),
-        headers: headers,
-        body: json.encode({
-          'user_id': profile.id,
-          'stripe_account_id': profile.stripeAccountId,
-        }),
-      );
-
-      if (response.statusCode == 200) {
-        _showMessage('Payout initiated! You\'ll receive your earnings within 2-7 business days.');
-      } else {
-        final data = json.decode(response.body);
-        _showMessage('Payout failed: ${data['error'] ?? 'Unknown error'}');
-      }
-    } catch (e) {
-      _showMessage('Payout failed: $e');
-    } finally {
-      setState(() => _status = 'idle');
-    }
+    // TODO: Stripe payout processing hidden for now
   }
 
   void _showMessage(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 }
-
-
-

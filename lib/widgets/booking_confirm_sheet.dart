@@ -241,6 +241,120 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
 
   @override
   Widget build(BuildContext context) {
+    // ═══════════════════════════════════════════════════════════════════
+    // 🔒 PAYMENT ACCOUNT VALIDATION
+    // ═══════════════════════════════════════════════════════════════════
+    // Check if provider has connected their payment account
+    // If not, show warning and block booking
+
+    final providerProfile = ProfileRepository.instance.profile.value;
+    final hasPaymentAccount =
+        (providerProfile.stripeAccountId != null &&
+            providerProfile.stripeAccountId!.isNotEmpty) ||
+        (providerProfile.razorpayAccountId != null &&
+            providerProfile.razorpayAccountId!.isNotEmpty);
+
+    // Only show warning if this is provider's own post check
+    // (widget.providerId would be different from current user for customer bookings)
+    final isViewingOwnPost = providerProfile.id == widget.providerId;
+
+    if (!isViewingOwnPost && !hasPaymentAccount) {
+      // Provider hasn't connected payment account yet
+      // Show dialog and close the sheet
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+
+        showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: Row(
+              children: [
+                Icon(Icons.warning_amber, color: Colors.orange.shade700),
+                const SizedBox(width: 8),
+                const Text('Payment Setup Required'),
+              ],
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'This provider is still setting up their payment account.',
+                  style: TextStyle(fontSize: 14),
+                ),
+                const SizedBox(height: 12),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.blue.shade200),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.info,
+                            size: 16,
+                            color: Colors.blue.shade700,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            'What does this mean?',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: Colors.blue.shade900,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      const Text(
+                        '• Provider needs to connect Razorpay or Stripe\n'
+                        '• This takes a few minutes\n'
+                        '• Try again soon or choose another post',
+                        style: TextStyle(fontSize: 13),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 12),
+                const Text(
+                  'We\'ve notified the provider to complete their setup.',
+                  style: TextStyle(fontSize: 13, fontStyle: FontStyle.italic),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(context); // Close dialog
+                  Navigator.pop(context); // Close booking sheet
+                },
+                child: const Text('OK'),
+              ),
+            ],
+          ),
+        );
+
+        // TODO: Send notification to provider
+        // Consider adding: NotificationService.send(
+        //   userId: widget.providerId,
+        //   title: 'Booking Attempt!',
+        //   message: 'Someone tried to book your post. Connect your payment account to accept bookings.',
+        // );
+      });
+
+      // Show loading while dialog appears
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // Continue with normal booking flow
+    // ═══════════════════════════════════════════════════════════════════
+
     final slot = widget.slot;
     final location = slot.slotType == SlotType.fromTo
         ? '${slot.fromLocation} → ${slot.toLocation}'
