@@ -340,14 +340,16 @@ class AuthRepository {
     // Try string parsing first (works on both mobile and web)
     final str = e.toString();
     if (str.contains('weak-password')) return 'Password is too weak';
-    if (str.contains('email-already-in-use'))
+    if (str.contains('email-already-in-use')) {
       return 'Email is already registered';
+    }
     if (str.contains('invalid-email')) return 'Invalid email address';
     if (str.contains('user-not-found')) return 'No user found with this email';
     if (str.contains('wrong-password')) return 'Wrong password';
     if (str.contains('user-disabled')) return 'This account has been disabled';
-    if (str.contains('too-many-requests'))
+    if (str.contains('too-many-requests')) {
       return 'Too many attempts. Try again later';
+    }
 
     // Fallback to typed exception (mobile only)
     try {

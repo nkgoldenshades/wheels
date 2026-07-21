@@ -197,12 +197,23 @@ class CustomerSlotRepository {
   Future<List<SlotEntry>> getAllSlotsForVehicle(String vehicleId) async {
     try {
       final supabase = Supabase.instance.client;
+      debugPrint(
+        '🔍 getAllSlotsForVehicle: Starting fetch for vehicleId=$vehicleId',
+      );
+
       final response = await supabase
           .from('posts')
           .select('*')
           .eq('vehicle_id', vehicleId)
           .eq('post_type', 'request')
-          .order('created_at', ascending: false);
+          .order('created_at', ascending: false)
+          .timeout(
+            const Duration(seconds: 10),
+          ); // Add timeout to prevent hanging
+
+      debugPrint(
+        '🔍 getAllSlotsForVehicle: Query returned ${response.length} slots',
+      );
 
       final slots = (response as List)
           .map((json) => Slot.fromJson(json as Map<String, dynamic>))
@@ -210,12 +221,20 @@ class CustomerSlotRepository {
 
       // Get the vehicle
       final vehicle = CustomerVehicleRepository.instance.getById(vehicleId);
-      if (vehicle == null) return [];
+      if (vehicle == null) {
+        debugPrint('⚠️ getAllSlotsForVehicle: Vehicle not found in repository');
+        return [];
+      }
 
       // Build slot entries
-      return slots
+      final entries = slots
           .map((slot) => SlotEntry(slot: slot, vehicle: vehicle))
           .toList();
+
+      debugPrint(
+        '✅ getAllSlotsForVehicle: Returning ${entries.length} slot entries',
+      );
+      return entries;
     } catch (e) {
       debugPrint('❌ Failed to load all slots for vehicle $vehicleId: $e');
       return [];

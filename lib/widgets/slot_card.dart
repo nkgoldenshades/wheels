@@ -556,27 +556,57 @@ class SlotCard extends StatelessWidget {
       final fromCoords = _coordsFromRaw(slot.fromLocation);
       final toCoords = _coordsFromRaw(slot.toLocation);
 
-      return Row(
+      return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(Icons.route, color: Colors.blue[700], size: 20),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+          // POST TYPE BADGE - From → To
+          Container(
+            margin: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: Colors.blue.shade100,
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(color: Colors.blue.shade300, width: 0.5),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                _locationLine(from, fromGeo, coords: fromCoords),
-                const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 2),
-                  child: Icon(
-                    Icons.arrow_downward,
-                    size: 14,
-                    color: Colors.grey,
+                Icon(Icons.route, size: 12, color: Colors.blue.shade700),
+                const SizedBox(width: 4),
+                Text(
+                  'Fixed Route',
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: Colors.blue.shade700,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
-                _locationLine(to, toGeo, coords: toCoords),
               ],
             ),
+          ),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(Icons.route, color: Colors.blue[700], size: 20),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _locationLine(from, fromGeo, coords: fromCoords),
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 2),
+                      child: Icon(
+                        Icons.arrow_downward,
+                        size: 14,
+                        color: Colors.grey,
+                      ),
+                    ),
+                    _locationLine(to, toGeo, coords: toCoords),
+                  ],
+                ),
+              ),
+            ],
           ),
         ],
       );
@@ -586,23 +616,64 @@ class SlotCard extends StatelessWidget {
     final baseGeo = _geoKeywords(slot.baseLocation);
     final baseCoords = _coordsFromRaw(slot.baseLocation);
 
-    return Row(
+    return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Icon(Icons.location_on, color: Colors.blue[700], size: 20),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+        // POST TYPE BADGE - Base Location + Range
+        Container(
+          margin: const EdgeInsets.only(bottom: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          decoration: BoxDecoration(
+            color: Colors.green.shade100,
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(color: Colors.green.shade300, width: 0.5),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              _locationLine('Based in $base', baseGeo, coords: baseCoords),
-              if (slot.radius != null)
-                Text(
-                  '${slot.radius!.toInt()} km range',
-                  style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+              Icon(Icons.location_on, size: 12, color: Colors.green.shade700),
+              const SizedBox(width: 4),
+              Text(
+                'Base Location',
+                style: TextStyle(
+                  fontSize: 10,
+                  color: Colors.green.shade700,
+                  fontWeight: FontWeight.w600,
                 ),
+              ),
+              if (slot.radius != null) ...[
+                const SizedBox(width: 4),
+                Text(
+                  '• ${slot.radius!.toInt()} km',
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: Colors.green.shade700,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
             ],
           ),
+        ),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(Icons.location_on, color: Colors.blue[700], size: 20),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _locationLine('Based in $base', baseGeo, coords: baseCoords),
+                  if (slot.radius != null)
+                    Text(
+                      '${slot.radius!.toInt()} km service radius',
+                      style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+                    ),
+                ],
+              ),
+            ),
+          ],
         ),
       ],
     );

@@ -16,7 +16,8 @@ class StripeService {
   // 🔑 PAYMENT MODE CONFIGURATION
   // ═══════════════════════════════════════════════════════════
   // Set to true for TEST mode, false for PRODUCTION mode
-  static const bool useTestMode = true; // ← CHANGE THIS TO false FOR PRODUCTION
+  static const bool useTestMode =
+      true; // TEST MODE (Stripe disabled - using Razorpay)
 
   // TEST MODE KEYS (for development/testing)
   static const String _testPublishableKey =

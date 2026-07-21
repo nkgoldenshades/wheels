@@ -14,14 +14,14 @@ class RazorpayService {
   // 🔑 PAYMENT MODE CONFIGURATION
   // ═══════════════════════════════════════════════════════════
   // Set to true for TEST mode, false for PRODUCTION mode
-  static const bool useTestMode = true; // ← TEST MODE
+  static const bool useTestMode = false; // LIVE MODE ✅
 
   // TEST MODE KEYS (for development/testing)
   static const String _testKeyId = 'rzp_test_T80cMBJ4aXNbpM';
 
   // PRODUCTION MODE KEYS (from dashboard.razorpay.com in LIVE mode)
   static const String _liveKeyId =
-      'YOUR_LIVE_KEY_HERE'; // ← ADD YOUR LIVE KEY WHEN READY
+      'rzp_live_T7wyn6UQYeO8DA'; // ✅ LIVE KEY ADDED
 
   // Active key based on mode
   static String get keyId => useTestMode ? _testKeyId : _liveKeyId;

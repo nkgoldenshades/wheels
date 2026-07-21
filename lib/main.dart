@@ -6,6 +6,7 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_web_plugins/url_strategy.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -20,7 +21,7 @@ import 'models/service_type.dart';
 import 'models/slot.dart';
 import 'models/slot_entry.dart';
 import 'models/slot_type.dart';
-import 'models/vehicle.dart';
+import 'models/vehicle.dart' show Vehicle, VehicleGpsMode;
 import 'models/pickup_mode.dart';
 import 'models/post_mode.dart';
 import 'models/booking.dart' show Booking, BookingStatus, BookingStatusX;
@@ -38,23 +39,28 @@ import 'services/auth_repository.dart';
 import 'services/seat_layout_repository.dart';
 import 'services/customer_vehicle_repository.dart';
 import 'services/customer_slot_repository.dart';
-import 'services/user_post_repository.dart';
-import 'services/user_post_acceptance_repository.dart';
-import 'models/user_post_acceptance.dart';
-import 'services/review_repository.dart';
+import 'services/user_post_repository.dart'
+    show UserPost, UserPostStatus, UserPostRepository;
+import 'services/user_post_acceptance_repository.dart'
+    show UserPostAcceptanceRepository;
+import 'models/user_post_acceptance.dart'
+    show UserPostAcceptance, AcceptanceStatus;
+import 'models/review.dart' show ReviewType;
+import 'services/review_repository.dart' show ReviewRepository;
 import 'widgets/slot_card.dart';
-import 'widgets/booking_confirm_sheet.dart';
+import 'widgets/booking_confirm_sheet.dart'
+    show BookingConfirmSheet, BookingConfirmResult;
 import 'widgets/trip_media_widget.dart';
 import 'widgets/review_dialog.dart';
-import 'services/profile_repository.dart';
-import 'services/profile_name_registry.dart';
-import 'services/app_preferences.dart';
+import 'services/profile_repository.dart' show ProfileRepository, ProfileInfo;
+import 'services/profile_name_registry.dart' show ProfileNameRegistry;
+import 'services/app_preferences.dart' show AppPreferences, SubscriptionPlan;
 
-import 'services/passenger_repository.dart';
-import 'services/stripe_service.dart';
-import 'services/payment_service.dart';
-import 'screens/booking_map_screen.dart';
-import 'services/location_autocomplete_service.dart';
+import 'services/passenger_repository.dart' show PassengerRepository;
+import 'services/payment_service.dart' show PaymentService;
+import 'screens/booking_map_screen.dart' show BookingMapScreen;
+import 'services/location_autocomplete_service.dart'
+    show LocationAutocompleteService;
 import 'screens/auth/splash_screen.dart';
 import 'screens/auth/login_screen.dart';
 import 'screens/auth/register_screen.dart';
@@ -64,8 +70,8 @@ import 'widgets/voice_ai_overlay.dart';
 import 'services/voice_ai_service.dart';
 import 'services/pricing_service.dart';
 import 'app_tab_controller.dart';
-import 'utils/test_backend_connection.dart';
-import 'utils/timezone_utils.dart';
+import 'utils/test_backend_connection.dart' show BackendConnectionTest;
+import 'utils/timezone_utils.dart' show TimezoneUtils;
 
 // Global Supabase client getter (lazy evaluation - only accessed when needed)
 // Don't use 'final' here because it evaluates immediately before Supabase.initialize()
@@ -95,6 +101,9 @@ Map<String, double>? _extractLatLng(String? raw) {
 }
 
 void main() async {
+  // Remove # from URLs (use path-based routing instead of hash-based)
+  usePathUrlStrategy();
+
   // Add global error handlers to prevent crashes
   FlutterError.onError = (FlutterErrorDetails details) {
     FlutterError.presentError(details);
@@ -323,7 +332,8 @@ Future<void> _initializeServicesInBackground() async {
     }
 
     // Initialize Stripe for payments with timeout
-    await initWithTimeout(StripeService.instance.init(), 'StripeService');
+    // TODO: Stripe initialization hidden - will be restored later
+    // await initWithTimeout(StripeService.instance.init(), 'StripeService');
 
     // Initialize Voice AI service with timeout (this was the last call - likely culprit!)
     await initWithTimeout(VoiceAIService().initialize(), 'VoiceAIService');
@@ -786,15 +796,26 @@ Future<void> _pickAndSaveAvatar(BuildContext context) async {
     final base64Image = base64Encode(bytes);
 
     // Save to profile
-    await ProfileRepository.instance.setLocalAvatarBase64(base64Image);
+    try {
+      await ProfileRepository.instance.setLocalAvatarBase64(base64Image);
 
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('✅ Profile photo updated'),
-          backgroundColor: Colors.green,
-        ),
-      );
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('✅ Profile photo updated'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to save profile photo: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
   } catch (e) {
     if (context.mounted) {
@@ -1037,34 +1058,36 @@ Future<void> _uploadDocument(
 }
 
 // Helper function to get currency display based on connected payment provider
+String _getCurrencySymbol(String currency) {
+  final currencySymbols = {
+    'INR': '₹',
+    'USD': '\$',
+    'GBP': '£',
+    'EUR': '€',
+    'AED': 'د.إ',
+    'SGD': 'S\$',
+    'AUD': 'A\$',
+    'CAD': 'C\$',
+    'JPY': '¥',
+    'CNY': '¥',
+    'HKD': 'HK\$',
+    'BRL': 'R\$',
+    'MXN': 'MX\$',
+  };
+  return currencySymbols[currency.toUpperCase()] ?? currency;
+}
+
 String _getCurrencyDisplay(ProfileInfo profile) {
-  final provider = profile.paymentProvider;
-  final currency = profile.bankCurrency;
+  // INR only for now (Razorpay support)
+  return '🇮🇳 INR - Indian Rupee';
 
-  if (provider == 'razorpay') {
-    return '🇮🇳 INR - Indian Rupee';
-  } else if (provider == 'stripe') {
-    if (currency != null && currency.isNotEmpty) {
-      // Map currency codes to flag + name
-      final currencyMap = {
-        'INR': '🇮🇳 INR - Indian Rupee',
-        'USD': '🇺🇸 USD - US Dollar',
-        'GBP': '🇬🇧 GBP - British Pound',
-        'EUR': '🇪🇺 EUR - Euro',
-        'AED': '🇦🇪 AED - UAE Dirham',
-        'SGD': '🇸🇬 SGD - Singapore Dollar',
-        'AUD': '🇦🇺 AUD - Australian Dollar',
-        'CAD': '🇨🇦 CAD - Canadian Dollar',
-        'JPY': '🇯🇵 JPY - Japanese Yen',
-        'CNY': '🇨🇳 CNY - Chinese Yuan',
-        'HKD': '🇭🇰 HKD - Hong Kong Dollar',
-      };
-      return currencyMap[currency] ?? currency;
-    }
-    return 'Connect Stripe account to see currency';
-  }
-
-  return 'Not connected';
+  // TODO: Multi-currency support ready for Rapyd/Stripe integration
+  // final provider = profile.paymentProvider;
+  // if (provider == 'razorpay') {
+  //   return '🇮🇳 INR - Indian Rupee';
+  // } else if (provider == 'stripe') {
+  //   // Stripe multi-currency logic here
+  // }
 }
 
 class MyApp extends StatelessWidget {
@@ -1430,13 +1453,6 @@ class PlansScreen extends StatelessWidget {
         return;
       }
 
-      // Show loading
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (context) => const Center(child: CircularProgressIndicator()),
-      );
-
       // Get user details
       final profile = ProfileRepository.instance.profile.value;
       final userName = profile.profileName.isEmpty
@@ -1452,7 +1468,6 @@ class PlansScreen extends StatelessWidget {
 
       // Check if user is trying to pay with Razorpay but currency is not INR
       if (paymentProvider == 'razorpay' && userCurrency != 'INR') {
-        Navigator.pop(context); // Close loading dialog
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: const Text(
@@ -1478,6 +1493,108 @@ class PlansScreen extends StatelessWidget {
       final currency = paymentProvider == 'razorpay'
           ? 'INR' // Force INR for Razorpay
           : userCurrency; // Use preference for Stripe
+
+      // Show payment confirmation dialog with recommended payment method
+      if (!context.mounted) return;
+      final confirmed =
+          await showDialog<bool>(
+            context: context,
+            barrierDismissible: false,
+            builder: (context) => AlertDialog(
+              title: const Text('Confirm Purchase'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Recommended payment method info
+                    PaymentMethodInfo(
+                      currency: currency,
+                      amount: price,
+                      showDetailed: false,
+                    ),
+                    const SizedBox(height: 16),
+                    // Purchase details
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade100,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                'Plan:',
+                                style: TextStyle(
+                                  color: Colors.grey.shade700,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                              Text(
+                                plan.name.toUpperCase(),
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 14,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                'Amount:',
+                                style: TextStyle(
+                                  color: Colors.grey.shade700,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                              Text(
+                                '${_getCurrencySymbol(currency)}${price.toStringAsFixed(2)}/${'month'}',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 14,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context, false),
+                  child: const Text('Cancel'),
+                ),
+                ElevatedButton(
+                  onPressed: () => Navigator.pop(context, true),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.green,
+                  ),
+                  child: const Text('Proceed to Payment'),
+                ),
+              ],
+            ),
+          ) ??
+          false;
+
+      if (!confirmed) return;
+
+      // Show loading
+      if (!context.mounted) return;
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => const Center(child: CircularProgressIndicator()),
+      );
 
       // Process payment via PaymentService
       final result = await PaymentService.instance.processSubscriptionPayment(
@@ -3844,6 +3961,68 @@ class SettingsPage extends StatelessWidget {
                   ],
                   const SizedBox(height: 24),
 
+                  // 🎯 INR/Razorpay Banner for New Users
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.blue.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: Colors.blue.withValues(alpha: 0.3),
+                      ),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Row(
+                          children: [
+                            Icon(Icons.info, color: Colors.blue, size: 20),
+                            SizedBox(width: 8),
+                            Text(
+                              'Indian Payments Now Live!',
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                color: Colors.blue,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        const Text(
+                          '🇮🇳 Earn in INR with Razorpay\n\nDirect bank payouts for all your trip earnings. Quick setup in 2 minutes!',
+                          style: TextStyle(fontSize: 13, color: Colors.grey),
+                        ),
+                        const SizedBox(height: 12),
+                        SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton.icon(
+                            onPressed: () async {
+                              // Trigger Razorpay setup
+                              try {
+                                await ProfileRepository.instance
+                                    .updatePaymentProvider('razorpay');
+                              } catch (e) {
+                                if (context.mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(content: Text('Error: $e')),
+                                  );
+                                }
+                              }
+                            },
+                            icon: const Icon(Icons.account_balance),
+                            label: const Text('Setup Razorpay Now'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.blue,
+                              foregroundColor: Colors.white,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  const SizedBox(height: 24),
+
                   // Payment Provider Section
                   Text(
                     '💳 Payment Setup (For Receiving Payments)',
@@ -3872,8 +4051,100 @@ class SettingsPage extends StatelessWidget {
                             children: [
                               Expanded(
                                 child: GestureDetector(
-                                  onTap: () => ProfileRepository.instance
-                                      .updatePaymentProvider('razorpay'),
+                                  onTap: () async {
+                                    try {
+                                      // For new Razorpay users, show setup instructions
+                                      if (!isRazorpay) {
+                                        showDialog(
+                                          context: context,
+                                          builder: (ctx) => AlertDialog(
+                                            title: const Text(
+                                              '🎯 Set Up Razorpay',
+                                            ),
+                                            content: Column(
+                                              mainAxisSize: MainAxisSize.min,
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.start,
+                                              children: [
+                                                const Text(
+                                                  'To receive payments via Razorpay:',
+                                                  style: TextStyle(
+                                                    fontWeight: FontWeight.bold,
+                                                  ),
+                                                ),
+                                                const SizedBox(height: 12),
+                                                const Text(
+                                                  '1. Go to Razorpay dashboard\n'
+                                                  '2. Create your Razorpay Account\n'
+                                                  '3. Add your bank account\n'
+                                                  '4. Get your Account ID\n'
+                                                  '5. Paste it below',
+                                                ),
+                                                const SizedBox(height: 16),
+                                                TextField(
+                                                  controller:
+                                                      TextEditingController(),
+                                                  decoration: InputDecoration(
+                                                    hintText:
+                                                        'Your Razorpay Account ID',
+                                                    border: OutlineInputBorder(
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                            8,
+                                                          ),
+                                                    ),
+                                                    prefixIcon: const Icon(
+                                                      Icons.vpn_key,
+                                                    ),
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                            actions: [
+                                              TextButton(
+                                                onPressed: () {
+                                                  Navigator.pop(ctx);
+                                                },
+                                                child: const Text('Cancel'),
+                                              ),
+                                              ElevatedButton.icon(
+                                                onPressed: () async {
+                                                  final url = Uri.parse(
+                                                    'https://dashboard.razorpay.com',
+                                                  );
+                                                  if (await canLaunchUrl(url)) {
+                                                    await launchUrl(
+                                                      url,
+                                                      mode: LaunchMode
+                                                          .externalApplication,
+                                                    );
+                                                  }
+                                                },
+                                                icon: const Icon(
+                                                  Icons.open_in_new,
+                                                ),
+                                                label: const Text(
+                                                  'Go to Razorpay',
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        );
+                                      } else {
+                                        // Already selected, just switch it off
+                                        await ProfileRepository.instance
+                                            .updatePaymentProvider('');
+                                      }
+                                    } catch (e) {
+                                      if (context.mounted) {
+                                        ScaffoldMessenger.of(
+                                          context,
+                                        ).showSnackBar(
+                                          SnackBar(content: Text('Error: $e')),
+                                        );
+                                      }
+                                    }
+                                  },
                                   child: Container(
                                     padding: const EdgeInsets.all(12),
                                     decoration: BoxDecoration(
@@ -3921,56 +4192,69 @@ class SettingsPage extends StatelessWidget {
                                   ),
                                 ),
                               ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: GestureDetector(
-                                  onTap: () => ProfileRepository.instance
-                                      .updatePaymentProvider('stripe'),
-                                  child: Container(
-                                    padding: const EdgeInsets.all(12),
-                                    decoration: BoxDecoration(
-                                      color: isStripe
-                                          ? Colors.purple.withValues(alpha: 0.1)
-                                          : Colors.grey[100],
-                                      borderRadius: BorderRadius.circular(8),
-                                      border: Border.all(
-                                        color: isStripe
-                                            ? Colors.purple
-                                            : Colors.grey.shade300,
-                                        width: isStripe ? 2 : 1,
-                                      ),
-                                    ),
-                                    child: Column(
-                                      children: [
-                                        Icon(
-                                          Icons.credit_card,
-                                          color: isStripe
-                                              ? Colors.purple
-                                              : Colors.grey,
-                                          size: 28,
-                                        ),
-                                        const SizedBox(height: 4),
-                                        Text(
-                                          'Stripe',
-                                          style: TextStyle(
-                                            fontWeight: FontWeight.bold,
-                                            color: isStripe
-                                                ? Colors.purple
-                                                : Colors.grey[700],
-                                          ),
-                                        ),
-                                        Text(
-                                          'International',
-                                          style: TextStyle(
-                                            fontSize: 10,
-                                            color: Colors.grey[600],
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              ),
+                              // TODO: Stripe payment provider - hidden for now, will be enabled later
+                              // const SizedBox(width: 12),
+                              // Expanded(
+                              //   child: GestureDetector(
+                              //     onTap: () async {
+                              //       try {
+                              //         await ProfileRepository.instance
+                              //             .updatePaymentProvider('stripe');
+                              //       } catch (e) {
+                              //         if (context.mounted) {
+                              //           ScaffoldMessenger.of(
+                              //             context,
+                              //           ).showSnackBar(
+                              //             SnackBar(content: Text('Error: $e')),
+                              //           );
+                              //         }
+                              //       }
+                              //     },
+                              //     child: Container(
+                              //       padding: const EdgeInsets.all(12),
+                              //       decoration: BoxDecoration(
+                              //         color: isStripe
+                              //             ? Colors.purple.withValues(alpha: 0.1)
+                              //             : Colors.grey[100],
+                              //         borderRadius: BorderRadius.circular(8),
+                              //         border: Border.all(
+                              //           color: isStripe
+                              //               ? Colors.purple
+                              //               : Colors.grey.shade300,
+                              //           width: isStripe ? 2 : 1,
+                              //         ),
+                              //       ),
+                              //       child: Column(
+                              //         children: [
+                              //           Icon(
+                              //             Icons.credit_card,
+                              //             color: isStripe
+                              //                 ? Colors.purple
+                              //                 : Colors.grey,
+                              //             size: 28,
+                              //           ),
+                              //           const SizedBox(height: 4),
+                              //           Text(
+                              //             'Stripe',
+                              //             style: TextStyle(
+                              //               fontWeight: FontWeight.bold,
+                              //               color: isStripe
+                              //                   ? Colors.purple
+                              //                   : Colors.grey[700],
+                              //             ),
+                              //           ),
+                              //           Text(
+                              //             'International',
+                              //             style: TextStyle(
+                              //               fontSize: 10,
+                              //               color: Colors.grey[600],
+                              //             ),
+                              //           ),
+                              //         ],
+                              //       ),
+                              //     ),
+                              //   ),
+                              // ),
                             ],
                           ),
                           const SizedBox(height: 16),
@@ -4029,9 +4313,7 @@ class SettingsPage extends StatelessWidget {
                           Text(
                             isRazorpay
                                 ? 'Currency is automatically set to INR for Razorpay'
-                                : isStripe
-                                ? 'Currency is automatically fetched from your Stripe account'
-                                : 'Connect a payment provider to see currency',
+                                : 'Razorpay is the only payment provider available',
                             style: TextStyle(
                               fontSize: 11,
                               color: Colors.grey[600],
@@ -4060,527 +4342,141 @@ class SettingsPage extends StatelessWidget {
                               ),
                             ),
                           if (isRazorpay) ...[
-                            const Text(
-                              'Razorpay Bank Details',
-                              style: TextStyle(fontWeight: FontWeight.w600),
-                            ),
-                            const SizedBox(height: 8),
-                            // Account Holder
-                            TextFormField(
-                              initialValue: profile.bankAccountHolder,
-                              decoration: const InputDecoration(
-                                labelText: 'Account Holder Name',
-                                border: OutlineInputBorder(),
-                                prefixIcon: Icon(Icons.person_outline),
-                              ),
-                              onChanged: (v) async {
-                                await ProfileRepository.instance.saveProfile(
-                                  profile.copyWith(bankAccountHolder: v.trim()),
-                                );
-                              },
-                            ),
                             const SizedBox(height: 12),
-                            // Account Number
-                            TextFormField(
-                              initialValue: profile.bankAccountNumber,
-                              keyboardType: TextInputType.number,
-                              decoration: const InputDecoration(
-                                labelText: 'Account Number',
-                                border: OutlineInputBorder(),
-                                prefixIcon: Icon(Icons.account_balance),
+                            // ✅ COMPLIANCE-SAFE: No bank details collected
+                            Container(
+                              padding: const EdgeInsets.all(16),
+                              decoration: BoxDecoration(
+                                color: Colors.blue.shade50,
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: Colors.blue.shade200),
                               ),
-                              onChanged: (v) async {
-                                await ProfileRepository.instance.saveProfile(
-                                  profile.copyWith(bankAccountNumber: v.trim()),
-                                );
-                              },
-                            ),
-                            const SizedBox(height: 12),
-                            // Bank Name
-                            TextFormField(
-                              initialValue: profile.bankName,
-                              decoration: const InputDecoration(
-                                labelText: 'Bank Name',
-                                border: OutlineInputBorder(),
-                                prefixIcon: Icon(Icons.business),
-                              ),
-                              onChanged: (v) async {
-                                await ProfileRepository.instance.saveProfile(
-                                  profile.copyWith(bankName: v.trim()),
-                                );
-                              },
-                            ),
-                            const SizedBox(height: 12),
-                            // IFSC
-                            TextFormField(
-                              initialValue: profile.bankIFSC,
-                              textCapitalization: TextCapitalization.characters,
-                              decoration: const InputDecoration(
-                                labelText: 'IFSC Code',
-                                border: OutlineInputBorder(),
-                                prefixIcon: Icon(Icons.code),
-                                hintText: 'e.g., SBIN0001234',
-                              ),
-                              onChanged: (v) async {
-                                await ProfileRepository.instance.saveProfile(
-                                  profile.copyWith(
-                                    bankIFSC: v.trim().toUpperCase(),
-                                  ),
-                                );
-                              },
-                            ),
-                            const SizedBox(height: 12),
-                            // Account Type
-                            DropdownButtonFormField<String>(
-                              initialValue:
-                                  profile.bankAccountType ?? 'savings',
-                              decoration: const InputDecoration(
-                                labelText: 'Account Type',
-                                border: OutlineInputBorder(),
-                                prefixIcon: Icon(Icons.account_balance_wallet),
-                              ),
-                              items: const [
-                                DropdownMenuItem(
-                                  value: 'savings',
-                                  child: Text('Savings'),
-                                ),
-                                DropdownMenuItem(
-                                  value: 'current',
-                                  child: Text('Current'),
-                                ),
-                              ],
-                              onChanged: (v) async {
-                                if (v == null) return;
-                                await ProfileRepository.instance.saveProfile(
-                                  profile.copyWith(bankAccountType: v),
-                                );
-                              },
-                            ),
-
-                            // 🧪 TEST MODE HELPER for Razorpay
-                            const SizedBox(height: 12),
-                            OutlinedButton.icon(
-                              onPressed: () async {
-                                // Quick test mode setup for Razorpay
-                                final testProfile = profile.copyWith(
-                                  bankAccountHolder: 'Test User',
-                                  bankAccountNumber: '1234567890',
-                                  bankName: 'Test Bank',
-                                  bankIFSC: 'TEST0001234',
-                                  bankAccountType: 'savings',
-                                  razorpayAccountId: 'rzp_test_contact_id',
-                                  bankCurrency: 'INR',
-                                );
-                                await ProfileRepository.instance.saveProfile(
-                                  testProfile,
-                                );
-                                if (context.mounted) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(
-                                      content: Text(
-                                        '✅ Test Razorpay details filled! Currency: INR',
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Icon(
+                                        Icons.security,
+                                        color: Colors.blue.shade700,
+                                        size: 20,
                                       ),
-                                      backgroundColor: Colors.green,
-                                    ),
-                                  );
-                                }
-                              },
-                              icon: const Icon(Icons.science, size: 16),
-                              label: const Text(
-                                '🧪 Fill Test Bank Details (Development)',
-                                style: TextStyle(fontSize: 12),
-                              ),
-                              style: OutlinedButton.styleFrom(
-                                foregroundColor: Colors.orange,
-                                side: const BorderSide(color: Colors.orange),
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            // Status
-                            if (profile.bankAccountNumber != null &&
-                                profile.bankAccountNumber!.isNotEmpty)
-                              Container(
-                                padding: const EdgeInsets.all(10),
-                                decoration: BoxDecoration(
-                                  color: Colors.green.withValues(alpha: 0.1),
-                                  borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(
-                                    color: Colors.green.withValues(alpha: 0.3),
-                                  ),
-                                ),
-                                child: const Row(
-                                  children: [
-                                    Icon(
-                                      Icons.check_circle,
-                                      color: Colors.green,
-                                      size: 18,
-                                    ),
-                                    SizedBox(width: 8),
-                                    Text(
-                                      'Bank details saved ✅',
-                                      style: TextStyle(
-                                        color: Colors.green,
-                                        fontSize: 13,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                          ],
-
-                          // Stripe Details
-                          if (isStripe) ...[
-                            const Text(
-                              'Stripe Connect',
-                              style: TextStyle(fontWeight: FontWeight.w600),
-                            ),
-                            const SizedBox(height: 8),
-                            if (profile.stripeAccountId != null &&
-                                profile.stripeAccountId!.isNotEmpty) ...[
-                              // Already linked
-                              Container(
-                                padding: const EdgeInsets.all(12),
-                                decoration: BoxDecoration(
-                                  color: Colors.green.withValues(alpha: 0.1),
-                                  borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(
-                                    color: Colors.green.withValues(alpha: 0.3),
-                                  ),
-                                ),
-                                child: Row(
-                                  children: [
-                                    const Icon(
-                                      Icons.check_circle,
-                                      color: Colors.green,
-                                      size: 18,
-                                    ),
-                                    const SizedBox(width: 8),
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          const Text(
-                                            'Stripe account linked ✅',
-                                            style: TextStyle(
-                                              color: Colors.green,
-                                              fontSize: 13,
-                                              fontWeight: FontWeight.bold,
-                                            ),
-                                          ),
-                                          Text(
-                                            'ID: ${profile.stripeAccountId}',
-                                            style: const TextStyle(
-                                              fontSize: 11,
-                                              color: Colors.grey,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                    TextButton(
-                                      onPressed: () async {
-                                        await ProfileRepository.instance
-                                            .saveProfile(
-                                              profile.copyWith(
-                                                setStripeNull: true,
-                                              ),
-                                            );
-                                      },
-                                      child: const Text(
-                                        'Unlink',
+                                      const SizedBox(width: 8),
+                                      Text(
+                                        'Razorpay Account Connected',
                                         style: TextStyle(
-                                          color: Colors.red,
-                                          fontSize: 12,
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.blue.shade900,
                                         ),
                                       ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ] else ...[
-                              // Not linked - show setup button
-                              Container(
-                                padding: const EdgeInsets.all(12),
-                                decoration: BoxDecoration(
-                                  color: Colors.orange.withValues(alpha: 0.1),
-                                  borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(
-                                    color: Colors.orange.withValues(alpha: 0.3),
+                                    ],
                                   ),
-                                ),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    const Row(
-                                      children: [
-                                        Icon(
-                                          Icons.warning_amber,
-                                          color: Colors.orange,
-                                          size: 18,
-                                        ),
-                                        SizedBox(width: 8),
-                                        Text(
-                                          'Stripe not set up',
-                                          style: TextStyle(
-                                            color: Colors.orange,
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                        ),
-                                      ],
+                                  const SizedBox(height: 8),
+                                  const Text(
+                                    'Your bank details are securely managed by Razorpay. '
+                                    'We do not store any bank account information for compliance and security.',
+                                    style: TextStyle(fontSize: 13),
+                                  ),
+                                  const SizedBox(height: 12),
+                                  const Text(
+                                    '✅ PCI-DSS Compliant\n'
+                                    '✅ RBI Regulated\n'
+                                    '✅ Bank-grade Security',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: Colors.black87,
+                                    ),
+                                  ),
+                                  if (profile.razorpayAccountId != null &&
+                                      profile
+                                          .razorpayAccountId!
+                                          .isNotEmpty) ...[
+                                    const SizedBox(height: 12),
+                                    Text(
+                                      'Account ID: ${profile.razorpayAccountId}',
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        color: Colors.grey.shade700,
+                                        fontFamily: 'monospace',
+                                      ),
+                                    ),
+                                  ] else ...[
+                                    // NEW USERS: Prompt to enter account ID
+                                    const SizedBox(height: 12),
+                                    const Text(
+                                      '👉 Next Steps:',
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 12,
+                                      ),
                                     ),
                                     const SizedBox(height: 8),
                                     const Text(
-                                      'Set up Stripe to receive international payouts directly to your bank account.',
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        color: Colors.grey,
-                                      ),
+                                      '1. Click "Set Up Razorpay" below\n'
+                                      '2. Create your account\n'
+                                      '3. Get your Account ID\n'
+                                      '4. Paste it here',
+                                      style: TextStyle(fontSize: 12),
                                     ),
-                                    const SizedBox(height: 12),
-                                    SizedBox(
-                                      width: double.infinity,
-                                      child: ElevatedButton.icon(
-                                        onPressed: () async {
-                                          final currentProfile =
-                                              ProfileRepository
-                                                  .instance
-                                                  .profile
-                                                  .value;
-                                          if (currentProfile.email == null) {
-                                            ScaffoldMessenger.of(
-                                              context,
-                                            ).showSnackBar(
-                                              const SnackBar(
-                                                content: Text(
-                                                  'Please add your email first',
-                                                ),
-                                              ),
-                                            );
-                                            return;
-                                          }
-                                          // Show loading
-                                          ScaffoldMessenger.of(
-                                            context,
-                                          ).showSnackBar(
-                                            const SnackBar(
-                                              content: Text(
-                                                'Setting up Stripe account...',
-                                              ),
-                                            ),
-                                          );
-                                          final stripeCountry =
-                                              currentProfile.country ??
-                                              AppPreferences
-                                                  .instance
-                                                  .preferredCountry
-                                                  .value;
-                                          final result = await StripeService
-                                              .instance
-                                              .createConnectedAccount(
-                                                email: currentProfile.email!,
-                                                country: stripeCountry,
-                                                userId: currentProfile.id,
-                                              );
-                                          if (result == null ||
-                                              !context.mounted) {
-                                            return;
-                                          }
-                                          final setupError =
-                                              result['error'] as String?;
-                                          if (setupError != null &&
-                                              setupError.isNotEmpty) {
-                                            ScaffoldMessenger.of(
-                                              context,
-                                            ).showSnackBar(
-                                              SnackBar(
-                                                content: Text(setupError),
-                                              ),
-                                            );
-                                            return;
-                                          }
-                                          final onboardingUrl =
-                                              result['url'] as String?;
-                                          final accountId =
-                                              result['account_id'] as String?;
-                                          final currency =
-                                              result['currency']
-                                                  as String?; // ← Get currency from Stripe!
-
-                                          if (accountId != null) {
-                                            await ProfileRepository.instance
-                                                .updateStripeAccount(
-                                                  accountId,
-                                                  currency:
-                                                      currency, // ← Pass currency!
-                                                );
-                                          }
-                                          if (onboardingUrl != null) {
-                                            await launchUrl(
-                                              Uri.parse(onboardingUrl),
-                                              mode: LaunchMode
-                                                  .externalApplication,
-                                            );
-                                          }
-                                        },
-                                        icon: const Icon(
-                                          Icons.open_in_new,
-                                          size: 16,
-                                        ),
-                                        label: const Text(
-                                          'Setup Stripe Account',
-                                        ),
-                                        style: ElevatedButton.styleFrom(
-                                          backgroundColor: Colors.purple,
-                                          foregroundColor: Colors.white,
-                                        ),
-                                      ),
-                                    ),
-                                    const SizedBox(height: 8),
-                                    // Manual entry option - shows current stripe_account_id
-                                    Container(
-                                      padding: const EdgeInsets.all(12),
-                                      decoration: BoxDecoration(
-                                        color:
-                                            profile.stripeAccountId != null &&
-                                                profile
-                                                    .stripeAccountId!
-                                                    .isNotEmpty
-                                            ? Colors.green.withValues(
-                                                alpha: 0.1,
-                                              )
-                                            : Colors.grey.withValues(
-                                                alpha: 0.05,
-                                              ),
-                                        borderRadius: BorderRadius.circular(8),
-                                        border: Border.all(
-                                          color:
-                                              profile.stripeAccountId != null &&
-                                                  profile
-                                                      .stripeAccountId!
-                                                      .isNotEmpty
-                                              ? Colors.green
-                                              : Colors.grey.shade300,
-                                        ),
-                                      ),
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          Row(
-                                            children: [
-                                              Icon(
-                                                profile.stripeAccountId !=
-                                                            null &&
-                                                        profile
-                                                            .stripeAccountId!
-                                                            .isNotEmpty
-                                                    ? Icons.check_circle
-                                                    : Icons.info_outline,
-                                                size: 16,
-                                                color:
-                                                    profile.stripeAccountId !=
-                                                            null &&
-                                                        profile
-                                                            .stripeAccountId!
-                                                            .isNotEmpty
-                                                    ? Colors.green
-                                                    : Colors.grey,
-                                              ),
-                                              const SizedBox(width: 8),
-                                              Text(
-                                                profile.stripeAccountId !=
-                                                            null &&
-                                                        profile
-                                                            .stripeAccountId!
-                                                            .isNotEmpty
-                                                    ? 'Stripe Account Connected'
-                                                    : 'No Stripe Account',
-                                                style: TextStyle(
-                                                  fontWeight: FontWeight.w600,
-                                                  fontSize: 12,
-                                                  color:
-                                                      profile.stripeAccountId !=
-                                                              null &&
-                                                          profile
-                                                              .stripeAccountId!
-                                                              .isNotEmpty
-                                                      ? Colors.green.shade800
-                                                      : Colors.grey.shade700,
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                          if (profile.stripeAccountId != null &&
-                                              profile
-                                                  .stripeAccountId!
-                                                  .isNotEmpty) ...[
-                                            const SizedBox(height: 8),
-                                            Text(
-                                              profile.stripeAccountId!,
-                                              style: TextStyle(
-                                                fontSize: 11,
-                                                fontFamily: 'monospace',
-                                                color: Colors.grey.shade700,
-                                              ),
-                                            ),
-                                            if (profile.bankCurrency !=
-                                                null) ...[
-                                              const SizedBox(height: 4),
-                                              Text(
-                                                'Currency: ${profile.bankCurrency}',
-                                                style: TextStyle(
-                                                  fontSize: 11,
-                                                  color: Colors.grey.shade600,
-                                                ),
-                                              ),
-                                            ],
-                                          ],
-                                        ],
-                                      ),
-                                    ),
-
-                                    // 🧪 TEST MODE HELPER
-                                    const SizedBox(height: 12),
+                                  ],
+                                  const SizedBox(height: 12),
+                                  if (profile.razorpayAccountId != null &&
+                                      profile.razorpayAccountId!.isNotEmpty)
                                     OutlinedButton.icon(
                                       onPressed: () async {
-                                        // Quick test mode setup
-                                        await ProfileRepository.instance
-                                            .updateStripeAccount(
-                                              'acct_test_quickohunt_dev',
-                                              currency: 'USD',
-                                            );
-                                        if (context.mounted) {
-                                          ScaffoldMessenger.of(
-                                            context,
-                                          ).showSnackBar(
-                                            const SnackBar(
-                                              content: Text(
-                                                '✅ Test Stripe account set! Currency: USD',
-                                              ),
-                                              backgroundColor: Colors.green,
-                                            ),
+                                        // Open Razorpay dashboard for bank details management
+                                        final url = Uri.parse(
+                                          'https://dashboard.razorpay.com/app/route',
+                                        );
+                                        if (await canLaunchUrl(url)) {
+                                          await launchUrl(
+                                            url,
+                                            mode:
+                                                LaunchMode.externalApplication,
                                           );
                                         }
                                       },
-                                      icon: const Icon(Icons.science, size: 16),
+                                      icon: const Icon(Icons.open_in_new),
                                       label: const Text(
-                                        '🧪 Use Test Account (Development)',
+                                        'Manage Bank Details on Razorpay',
                                         style: TextStyle(fontSize: 12),
                                       ),
-                                      style: OutlinedButton.styleFrom(
-                                        foregroundColor: Colors.orange,
-                                        side: const BorderSide(
-                                          color: Colors.orange,
-                                        ),
+                                    )
+                                  else
+                                    ElevatedButton.icon(
+                                      onPressed: () async {
+                                        // Open Razorpay dashboard for new users
+                                        final url = Uri.parse(
+                                          'https://dashboard.razorpay.com',
+                                        );
+                                        if (await canLaunchUrl(url)) {
+                                          await launchUrl(
+                                            url,
+                                            mode:
+                                                LaunchMode.externalApplication,
+                                          );
+                                        }
+                                      },
+                                      icon: const Icon(
+                                        Icons.add_circle_outline,
+                                      ),
+                                      label: const Text(
+                                        'Set Up Razorpay Account',
                                       ),
                                     ),
-                                  ],
-                                ),
+                                ],
                               ),
-                            ],
+                            ),
                           ],
 
+                          // TODO: Stripe Connect - hidden for now, will be enabled later
+                          // if (isStripe) ...[
+                          //   const Text(
+                          //     'Stripe Connect',
+                          //     style: TextStyle(fontWeight: FontWeight.w600),
+                          //   ),
+                          //   // ... Stripe setup UI removed - will restore later
+                          // ],
                           const SizedBox(height: 8),
                           Container(
                             padding: const EdgeInsets.all(12),
@@ -5177,7 +5073,7 @@ class _PostsPageState extends State<PostsPage> {
                               decoration: InputDecoration(
                                 hintText: _showUserPosts
                                     ? 'Search customer requests'
-                                    : 'Search by location',
+                                    : 'Search keyword',
                                 prefixIcon: const Icon(Icons.search),
                                 suffixIcon: _searchController.text.isEmpty
                                     ? null
@@ -5348,6 +5244,20 @@ class _PostsPageState extends State<PostsPage> {
                   ],
                 ),
               ),
+              const SizedBox(height: 8),
+              // Service-specific hint text
+              if (_selectedServiceType != null)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Text(
+                    _getServiceHint(_selectedServiceType!),
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.grey[600],
+                      fontStyle: FontStyle.italic,
+                    ),
+                  ),
+                ),
               const SizedBox(height: 8),
               Expanded(
                 child: _showUserPosts
@@ -5679,6 +5589,19 @@ class _PostsPageState extends State<PostsPage> {
         return 'Working';
       case ServiceType.lease:
         return 'Lease';
+    }
+  }
+
+  String _getServiceHint(ServiceType type) {
+    switch (type) {
+      case ServiceType.passenger:
+        return '🚗 Find verified drivers • Real-time GPS tracking • Transparent pricing';
+      case ServiceType.parcel:
+        return '📦 Ship quickly • Track deliveries live • Multiple parcel sizes';
+      case ServiceType.working:
+        return '💼 Find verified workers • Flexible hours • Hire instantly';
+      case ServiceType.lease:
+        return '🏍️ Rent vehicles • Flexible lease terms • Insurance available';
     }
   }
 
@@ -6479,6 +6402,39 @@ class _PostsPageState extends State<PostsPage> {
                       ),
                       const SizedBox(height: 12),
                       if (slotType == SlotType.fromTo) ...[
+                        // Clarification for Fixed Route posts
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.blue.shade50,
+                            border: Border.all(
+                              color: Colors.blue.shade200,
+                              width: 1,
+                            ),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(
+                                Icons.info_outline,
+                                color: Colors.blue.shade700,
+                                size: 18,
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  'Filter fixed route posts by exact From & To locations',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.blue.shade900,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 12),
                         _locationAutocompleteField(
                           controller: fromLocationController,
                           label: 'From location',
@@ -6497,6 +6453,39 @@ class _PostsPageState extends State<PostsPage> {
                         const SizedBox(height: 12),
                       ],
                       if (slotType == SlotType.fromRange) ...[
+                        // Clarification for Base Location posts
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.green.shade50,
+                            border: Border.all(
+                              color: Colors.green.shade200,
+                              width: 1,
+                            ),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(
+                                Icons.info_outline,
+                                color: Colors.green.shade700,
+                                size: 18,
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  'Shows posts within the radius of your base location',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.green.shade900,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 12),
                         _locationAutocompleteField(
                           controller: baseLocationController,
                           label: 'Base location',
@@ -9814,6 +9803,8 @@ class _RequestsBodyState extends State<_RequestsBody> {
                                 ),
                               );
                               try {
+                                // TODO: Stripe payment verification - disabled for now
+                                /*
                                 if (b.paymentHeldInEscrow &&
                                     b.stripePaymentIntentId != null) {
                                   final success = await StripeService.instance
@@ -9852,6 +9843,8 @@ class _RequestsBodyState extends State<_RequestsBody> {
                                     );
                                   }
                                 } else {
+                                */
+                                {
                                   // Use repository verifyOtp (has local OTP fallback)
                                   final success = await BookingRepository
                                       .instance
@@ -9949,6 +9942,8 @@ class _RequestsBodyState extends State<_RequestsBody> {
                           );
 
                           try {
+                            // TODO: Stripe payment verification - disabled for now
+                            /*
                             // If payment is held in escrow, verify with Stripe backend
                             if (b.paymentHeldInEscrow &&
                                 b.stripePaymentIntentId != null) {
@@ -9999,6 +9994,8 @@ class _RequestsBodyState extends State<_RequestsBody> {
                                 );
                               }
                             } else {
+                            */
+                            {
                               // Use repository verifyOtp (has local OTP fallback)
                               final success = await BookingRepository.instance
                                   .verifyOtp(bookingId: b.id, otp: otpText);
@@ -12097,7 +12094,6 @@ class _PaymentSuccessScreenState extends State<PaymentSuccessScreen> {
   Booking? _booking;
   SlotEntry? _slotEntry;
   bool _isProcessing = false; // Prevent double processing
-  String? _errorMessage;
 
   @override
   void initState() {
@@ -12267,7 +12263,7 @@ class _PaymentSuccessScreenState extends State<PaymentSuccessScreen> {
     } catch (e, stackTrace) {
       debugPrint('❌ Error in payment success screen: $e');
       debugPrint('Stack trace: $stackTrace');
-      _errorMessage = e.toString();
+      // Error captured in debug logs
     } finally {
       if (mounted) {
         setState(() {

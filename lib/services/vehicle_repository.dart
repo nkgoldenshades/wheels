@@ -30,9 +30,12 @@ class VehicleRepository {
   List<Vehicle> get allVehicles => List.unmodifiable(_vehicles.value);
 
   List<Vehicle> get userVehicles {
-    final currentUser = AuthRepository.instance.currentUser;
-    if (currentUser == null) return [];
-    return _vehicles.value.where((v) => v.userId == currentUser.id).toList();
+    // Vehicles are already filtered by profile_id in _loadVehicles()
+    // This returns all loaded vehicles for the current user
+    debugPrint(
+      '🔍 userVehicles: Returning ${_vehicles.value.length} vehicles (pre-filtered by profile_id)',
+    );
+    return _vehicles.value;
   }
 
   Future<void> init() async {
@@ -51,8 +54,18 @@ class VehicleRepository {
       '🔍 VehicleRepository: Starting to load vehicles from vehicles table...',
     );
     try {
+      final currentUser = AuthRepository.instance.currentUser;
+      if (currentUser == null) {
+        debugPrint(
+          '⚠️ VehicleRepository._loadVehicles: No current user, returning empty',
+        );
+        _vehicles.value = [];
+        return;
+      }
+
       // Load provider vehicles from Supabase (vehicles users are offering).
       // Customer vehicles are loaded by CustomerVehicleRepository.
+      // Filter by current user's profile_id to only get their vehicles
       final response = await _supabase
           .from('vehicles')
           .select('''
@@ -63,6 +76,7 @@ class VehicleRepository {
             )
           ''')
           .eq('vehicle_owner', 'provider')
+          .eq('profile_id', currentUser.id)
           .order('created_at', ascending: false);
 
       debugPrint(

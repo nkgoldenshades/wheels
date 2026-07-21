@@ -3,7 +3,6 @@ import 'package:http/http.dart' as http;
 import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
 import 'dart:convert';
 import '../services/profile_repository.dart';
-// import '../services/stripe_service.dart'; // TODO: Stripe hidden for now
 
 class WithdrawScreen extends StatefulWidget {
   const WithdrawScreen({super.key});
@@ -182,10 +181,6 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
     await _processRazorpayPayout(profile);
   }
 
-  Future<void> _withdrawViaStripe(ProfileInfo profile) async {
-    // TODO: Stripe withdrawal hidden for now
-  }
-
   void _showBankDetailsDialog() {
     showDialog(
       context: context,
@@ -211,15 +206,10 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
     );
   }
 
-  void _showStripeSetupDialog() {
-    // TODO: Stripe setup dialog hidden for now
-  }
-
   Future<void> _processRazorpayPayout(ProfileInfo profile) async {
     setState(() => _status = 'processing');
     try {
       final headers = await _authorizedJsonHeaders();
-      // TODO: Update with correct backend URL
       final response = await http.post(
         Uri.parse('https://api.quickohunt.com/initiateRazorpayPayout'),
         headers: headers,
@@ -242,10 +232,6 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
     } finally {
       setState(() => _status = 'idle');
     }
-  }
-
-  Future<void> _processStripePayout(ProfileInfo profile) async {
-    // TODO: Stripe payout processing hidden for now
   }
 
   void _showMessage(String message) {
