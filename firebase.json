@@ -1,74 +1,36 @@
 {
-  "hosting": [
-    {
-      "site": "vaultwheels",
-      "public": "build/web",
-      "ignore": [
-        "firebase.json",
-        "**/.*",
-        "**/node_modules/**"
-      ],
-      "rewrites": [
-        {
-          "source": "**",
-          "destination": "/index.html"
-        }
-      ]
-    },
-    {
-      "site": "quickohunt-app",
-      "public": "build/web",
-      "ignore": [
-        "firebase.json",
-        "**/.*",
-        "**/node_modules/**"
-      ],
-      "rewrites": [
-        {
-          "source": "**",
-          "destination": "/index.html"
-        }
-      ]
-    }
-  ],
-  "functions": {
-    "source": "functions",
-    "runtime": "nodejs20",
-    "secretEnvVars": [
-      "RAZORPAY_KEY_ID_TEST",
-      "RAZORPAY_KEY_SECRET_TEST",
-      "RAZORPAY_KEY_ID_LIVE",
-      "RAZORPAY_KEY_SECRET_LIVE",
-      "RAZORPAY_WEBHOOK_SECRET_TEST",
-      "RAZORPAY_WEBHOOK_SECRET_LIVE",
-      "STRIPE_SECRET_KEY_TEST",
-      "STRIPE_SECRET_KEY_LIVE",
-      "USE_LIVE_KEYS",
-      "SUPABASE_URL",
-      "SUPABASE_SERVICE_ROLE_KEY"
-    ]
-  },
-  "flutter": {
-    "platforms": {
-      "android": {
-        "default": {
-          "projectId": "quickohunt-app",
-          "appId": "1:759157073844:android:c2323516427f2f4e7e74e1",
-          "fileOutput": "android/app/google-services.json"
-        }
-      },
-      "dart": {
-        "lib/firebase_options.dart": {
-          "projectId": "quickohunt-app",
-          "configurations": {
-            "android": "1:759157073844:android:c2323516427f2f4e7e74e1",
-            "ios": "1:759157073844:ios:59010764bb4de2d97e74e1",
-            "macos": "1:759157073844:ios:e1bc4256dc9818b47e74e1",
-            "web": "1:759157073844:web:c15da3c7299a80cd7e74e1",
-            "windows": "1:759157073844:web:c11a04dfe90087e67e74e1"
-          }
-        }
+  "hosting": {
+    "public": "build/web",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "rewrites": [
+      {
+        "source": "**",
+        "destination": "/index.html"
       }
-    }
+    ],
+    "headers": [
+      {
+        "source": "**/*.@(js|css)",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "public, max-age=31536000"
+          }
+        ]
+      },
+      {
+        "source": "**/*.@(png|jpg|jpeg|gif|svg|webp|ico)",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "public, max-age=31536000"
+          }
+        ]
+      }
+    ]
   }
 }
