@@ -69,6 +69,8 @@ dependencies:
   flutter_stripe: ^12.4.0
   firebase_ai: ^3.10.0
   device_info_plus: ^10.1.0
+  flutter_web_plugins:
+    sdk: flutter
 
 dev_dependencies:
   flutter_test:

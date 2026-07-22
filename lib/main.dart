@@ -4868,84 +4868,103 @@ class _PostsPageState extends State<PostsPage> {
             title: const Text('Posts'),
             backgroundColor: Theme.of(context).colorScheme.inversePrimary,
             actions: [
-              // Refresh button to reload posts from Supabase
-              IconButton(
-                icon: const Icon(Icons.refresh),
-                tooltip: 'Refresh Posts',
-                onPressed: () async {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Refreshing posts...'),
-                      duration: Duration(seconds: 1),
-                    ),
-                  );
+              SizedBox(
+                width: 200,
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // Refresh button to reload posts from Supabase
+                      IconButton(
+                        icon: const Icon(Icons.refresh),
+                        tooltip: 'Refresh Posts',
+                        onPressed: () async {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Refreshing posts...'),
+                              duration: Duration(seconds: 1),
+                            ),
+                          );
 
-                  // Reload all data from Supabase
-                  final messenger = ScaffoldMessenger.of(context);
-                  await Future.wait([
-                    VehicleRepository.instance.loadAllVehicles(),
-                    CustomerVehicleRepository.instance
-                        .reload(), // Use reload() instead of init()
-                    SlotRepository.instance.loadAllSlots(),
-                    CustomerSlotRepository.instance.init(),
-                    BookingRepository.instance.refreshFromSupabase(),
-                  ]);
+                          // Reload all data from Supabase
+                          final messenger = ScaffoldMessenger.of(context);
+                          await Future.wait([
+                            VehicleRepository.instance.loadAllVehicles(),
+                            CustomerVehicleRepository.instance
+                                .reload(), // Use reload() instead of init()
+                            SlotRepository.instance.loadAllSlots(),
+                            CustomerSlotRepository.instance.init(),
+                            BookingRepository.instance.refreshFromSupabase(),
+                          ]);
 
-                  if (mounted) {
-                    messenger.showSnackBar(
-                      const SnackBar(
-                        content: Text('Posts refreshed!'),
-                        duration: Duration(seconds: 1),
-                        backgroundColor: Colors.green,
+                          if (mounted) {
+                            messenger.showSnackBar(
+                              const SnackBar(
+                                content: Text('Posts refreshed!'),
+                                duration: Duration(seconds: 1),
+                                backgroundColor: Colors.green,
+                              ),
+                            );
+                          }
+                        },
                       ),
-                    );
-                  }
-                },
-              ),
-              // Sort button
-              IconButton(
-                icon: const Icon(Icons.sort),
-                tooltip: 'Sort',
-                onPressed: () => _showSortBottomSheet(context),
-              ),
-              // Debug button to show repository status
-              IconButton(
-                icon: const Icon(Icons.info_outline),
-                onPressed: () {
-                  final providerSlots = SlotRepository.instance.allSlots.length;
-                  final userSlots =
-                      CustomerSlotRepository.instance.allSlots.length;
-                  final providerVehicles =
-                      VehicleRepository.instance.allVehicles.length;
-                  final userVehicles =
-                      CustomerVehicleRepository.instance.allVehicles.length;
-
-                  showDialog(
-                    context: context,
-                    builder: (context) => AlertDialog(
-                      title: const Text('Repository Status'),
-                      content: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('Provider Vehicles: $providerVehicles'),
-                          Text('Provider Posts: $providerSlots'),
-                          const SizedBox(height: 8),
-                          Text('Customer Vehicles: $userVehicles'),
-                          Text('Customer Posts: $userSlots'),
-                          const SizedBox(height: 8),
-                          Text('Total Posts: ${providerSlots + userSlots}'),
-                        ],
+                      const SizedBox(width: 4),
+                      // Sort button
+                      IconButton(
+                        icon: const Icon(Icons.sort),
+                        tooltip: 'Sort',
+                        onPressed: () => _showSortBottomSheet(context),
                       ),
-                      actions: [
-                        TextButton(
-                          onPressed: () => Navigator.pop(context),
-                          child: const Text('OK'),
-                        ),
-                      ],
-                    ),
-                  );
-                },
+                      const SizedBox(width: 4),
+                      // Debug button to show repository status
+                      IconButton(
+                        icon: const Icon(Icons.info_outline),
+                        tooltip: 'Repository Status',
+                        onPressed: () {
+                          final providerSlots =
+                              SlotRepository.instance.allSlots.length;
+                          final userSlots =
+                              CustomerSlotRepository.instance.allSlots.length;
+                          final providerVehicles =
+                              VehicleRepository.instance.allVehicles.length;
+                          final userVehicles = CustomerVehicleRepository
+                              .instance
+                              .allVehicles
+                              .length;
+
+                          showDialog(
+                            context: context,
+                            builder: (context) => AlertDialog(
+                              title: const Text('Repository Status'),
+                              content: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text('Provider Vehicles: $providerVehicles'),
+                                  Text('Provider Posts: $providerSlots'),
+                                  const SizedBox(height: 8),
+                                  Text('Customer Vehicles: $userVehicles'),
+                                  Text('Customer Posts: $userSlots'),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    'Total Posts: ${providerSlots + userSlots}',
+                                  ),
+                                ],
+                              ),
+                              actions: [
+                                TextButton(
+                                  onPressed: () => Navigator.pop(context),
+                                  child: const Text('OK'),
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+                    ],
+                  ),
+                ),
               ),
             ],
           ),
@@ -5275,8 +5294,12 @@ class _PostsPageState extends State<PostsPage> {
     showModalBottomSheet(
       context: context,
       showDragHandle: true,
+      isScrollControlled: true,
       builder: (context) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(context).size.height * 0.6,
+        ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -5286,20 +5309,30 @@ class _PostsPageState extends State<PostsPage> {
               style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 16),
-            ...SortOption.values.map(
-              (option) => ListTile(
-                leading: Icon(
-                  _sortOption == option
-                      ? Icons.check_circle
-                      : Icons.circle_outlined,
-                  color: _sortOption == option ? Colors.blue : Colors.grey,
+            Flexible(
+              child: SingleChildScrollView(
+                child: Column(
+                  children: SortOption.values
+                      .map(
+                        (option) => ListTile(
+                          leading: Icon(
+                            _sortOption == option
+                                ? Icons.check_circle
+                                : Icons.circle_outlined,
+                            color: _sortOption == option
+                                ? Colors.blue
+                                : Colors.grey,
+                          ),
+                          title: Text(option.displayName),
+                          selected: _sortOption == option,
+                          onTap: () {
+                            setState(() => _sortOption = option);
+                            Navigator.pop(context);
+                          },
+                        ),
+                      )
+                      .toList(),
                 ),
-                title: Text(option.displayName),
-                selected: _sortOption == option,
-                onTap: () {
-                  setState(() => _sortOption = option);
-                  Navigator.pop(context);
-                },
               ),
             ),
             const SizedBox(height: 8),
@@ -6322,13 +6355,18 @@ class _PostsPageState extends State<PostsPage> {
                       TextField(
                         controller: maxDistanceController,
                         decoration: const InputDecoration(
-                          labelText: 'Max distance (km)',
+                          labelText: 'Max travel time (minutes)',
                           border: OutlineInputBorder(),
-                          prefixIcon: Icon(Icons.social_distance),
+                          prefixIcon: Icon(Icons.schedule),
                         ),
                         keyboardType: const TextInputType.numberWithOptions(
-                          decimal: true,
+                          decimal: false,
                         ),
+                      ),
+                      const SizedBox(height: 4),
+                      const Text(
+                        'Shows services you can reach within this time',
+                        style: TextStyle(fontSize: 12, color: Colors.grey),
                       ),
                       const SizedBox(height: 12),
                       const Text(
@@ -6494,6 +6532,34 @@ class _PostsPageState extends State<PostsPage> {
                           onChanged: () => setSheetState(() {}),
                         ),
                         const SizedBox(height: 12),
+                        TextField(
+                          decoration: const InputDecoration(
+                            labelText: 'Max Distance',
+                            hintText: 'Enter distance in km',
+                            border: OutlineInputBorder(),
+                            prefixIcon: Icon(Icons.straighten),
+                            suffixText: 'km',
+                          ),
+                          keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true,
+                          ),
+                          controller: maxDistanceController,
+                          onChanged: (value) {
+                            if (value.isEmpty) {
+                              setSheetState(() {
+                                _maxDistanceKm = null;
+                              });
+                              return;
+                            }
+                            final parsed = double.tryParse(value);
+                            if (parsed != null && parsed > 0) {
+                              setSheetState(() {
+                                _maxDistanceKm = parsed;
+                              });
+                            }
+                          },
+                        ),
+                        const SizedBox(height: 12),
                       ],
                       const Text(
                         'Pickup mode',
@@ -6563,34 +6629,38 @@ class _PostsPageState extends State<PostsPage> {
                         ),
                       ],
                       const SizedBox(height: 12),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: TextField(
-                              controller: minPriceController,
-                              decoration: InputDecoration(
-                                labelText: 'Min Price',
-                                border: OutlineInputBorder(),
-                                prefixText:
-                                    AppPreferences.instance.currencySymbol,
+                      ValueListenableBuilder<String>(
+                        valueListenable: AppPreferences.instance.currencyCode,
+                        builder: (context, currencyCode, _) {
+                          final symbol = AppPreferences.instance.currencySymbol;
+                          return Row(
+                            children: [
+                              Expanded(
+                                child: TextField(
+                                  controller: minPriceController,
+                                  decoration: InputDecoration(
+                                    labelText: 'Min Price',
+                                    border: OutlineInputBorder(),
+                                    prefixText: symbol,
+                                  ),
+                                  keyboardType: TextInputType.number,
+                                ),
                               ),
-                              keyboardType: TextInputType.number,
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: TextField(
-                              controller: maxPriceController,
-                              decoration: InputDecoration(
-                                labelText: 'Max Price',
-                                border: OutlineInputBorder(),
-                                prefixText:
-                                    AppPreferences.instance.currencySymbol,
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: TextField(
+                                  controller: maxPriceController,
+                                  decoration: InputDecoration(
+                                    labelText: 'Max Price',
+                                    border: OutlineInputBorder(),
+                                    prefixText: symbol,
+                                  ),
+                                  keyboardType: TextInputType.number,
+                                ),
                               ),
-                              keyboardType: TextInputType.number,
-                            ),
-                          ),
-                        ],
+                            ],
+                          );
+                        },
                       ),
                       const SizedBox(height: 16),
                       // Currency Filter

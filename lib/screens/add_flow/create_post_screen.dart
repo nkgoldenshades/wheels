@@ -24,6 +24,7 @@ import '../../services/seat_layout_repository.dart';
 import '../../widgets/location_autocomplete_field.dart';
 import '../../services/location_autocomplete_service.dart';
 import '../../utils/timezone_utils.dart';
+import '../../widgets/post_media_upload_widget.dart';
 
 class CreatePostScreen extends StatefulWidget {
   final ServiceType serviceType;
@@ -96,6 +97,9 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
 
   // Notes
   final _notesController = TextEditingController();
+
+  // Post Media
+  List<String> _postMediaUrls = []; // Store media URLs for saving
 
   // Demand plan and rating requirements
   DemandPlan _demandPlan = DemandPlan.basic;
@@ -986,7 +990,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         notes: _notesController.text.trim().isEmpty
             ? null
             : _notesController.text.trim(),
-        images: const [], // Posts use vehicle images instead
+        images: _postMediaUrls, // Store post media URLs
         createdAt: DateTime.now(),
         pickupOption: _pickupMode,
         maxWeight: widget.serviceType == ServiceType.parcel
@@ -1203,6 +1207,10 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
 
             // Notes
             _buildNotesSection(),
+            const SizedBox(height: 20),
+
+            // Post Media
+            _buildPostMediaSection(),
             const SizedBox(height: 20),
 
             // Demand Plan and Rating Requirements
@@ -2726,6 +2734,19 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         ),
         const SizedBox(height: 20),
       ],
+    );
+  }
+
+  Widget _buildPostMediaSection() {
+    final tempPostId = 'draft_${DateTime.now().millisecondsSinceEpoch}';
+    return PostMediaUploadWidget(
+      initialMedia: const [],
+      postId: tempPostId,
+      onMediaChanged: (media) {
+        setState(() {
+          _postMediaUrls = media.map((item) => item.url).toList();
+        });
+      },
     );
   }
 
