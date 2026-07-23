@@ -1,5 +1,18 @@
 {
   "projects": {
     "default": "vaultwheels"
-  }
+  },
+  "targets": {
+    "quickohunt-app": {
+      "hosting": {
+        "quickohunt-app": [
+          "quickohunt-app"
+        ],
+        "vaultwheels": [
+          "vaultwheels"
+        ]
+      }
+    }
+  },
+  "etags": {}
 }
