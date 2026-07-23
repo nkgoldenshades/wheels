@@ -616,13 +616,19 @@ class _EditUserPostPageState extends State<EditUserPostPage> {
             ],
           ),
           const SizedBox(height: 12),
-          TextField(
-            controller: _budgetController,
-            keyboardType: TextInputType.number,
-            decoration: const InputDecoration(
-              labelText: 'Budget ()',
-              border: OutlineInputBorder(),
-            ),
+          ValueListenableBuilder<String>(
+            valueListenable: AppPreferences.instance.currencyCode,
+            builder: (context, currency, _) {
+              final symbol = AppPreferences.instance.currencySymbol;
+              return TextField(
+                controller: _budgetController,
+                keyboardType: TextInputType.number,
+                decoration: InputDecoration(
+                  labelText: 'Budget ($symbol)',
+                  border: const OutlineInputBorder(),
+                ),
+              );
+            },
           ),
           const SizedBox(height: 12),
           Row(
@@ -2658,13 +2664,19 @@ class _CreateUserPostPageState extends State<CreateUserPostPage> {
             ],
           ),
           const SizedBox(height: 12),
-          TextField(
-            controller: _budgetController,
-            keyboardType: TextInputType.number,
-            decoration: const InputDecoration(
-              labelText: 'Budget ()',
-              border: OutlineInputBorder(),
-            ),
+          ValueListenableBuilder<String>(
+            valueListenable: AppPreferences.instance.currencyCode,
+            builder: (context, currency, _) {
+              final symbol = AppPreferences.instance.currencySymbol;
+              return TextField(
+                controller: _budgetController,
+                keyboardType: TextInputType.number,
+                decoration: InputDecoration(
+                  labelText: 'Budget ($symbol)',
+                  border: const OutlineInputBorder(),
+                ),
+              );
+            },
           ),
           const SizedBox(height: 12),
           Row(
