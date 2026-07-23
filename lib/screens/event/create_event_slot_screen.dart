@@ -68,6 +68,13 @@ class _CreateEventSlotScreenState extends State<CreateEventSlotScreen> {
   /// Get currency symbol from provider's connected payment account
   String _getProviderCurrencySymbol() {
     final profile = ProfileRepository.instance.profile.value;
+
+    // CRITICAL: Check payment provider FIRST
+    // Razorpay MUST always be INR, regardless of bankCurrency
+    if (profile.paymentProvider == 'razorpay') {
+      return '₹'; // Razorpay only supports INR
+    }
+
     final currency = profile.bankCurrency;
 
     if (currency != null && currency.isNotEmpty) {

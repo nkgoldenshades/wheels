@@ -319,7 +319,16 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   String _determineCurrencyType() {
     final currentUser = ProfileRepository.instance.profile.value;
 
-    // Use the currency of the connected bank account
+    // CRITICAL: Check payment provider FIRST
+    // Razorpay MUST always be INR, regardless of bankCurrency
+    final paymentProvider = currentUser.paymentProvider;
+
+    if (paymentProvider == 'razorpay') {
+      // Razorpay only supports INR - force it
+      return 'INR';
+    }
+
+    // For Stripe, use the currency of the connected bank account
     final bankCurrency = currentUser.bankCurrency;
 
     if (bankCurrency != null && bankCurrency.isNotEmpty) {
@@ -327,13 +336,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       return bankCurrency.toUpperCase();
     }
 
-    // Fallback: check payment provider
-    final paymentProvider = currentUser.paymentProvider;
-
-    if (paymentProvider == 'razorpay') {
-      // Razorpay only supports INR
-      return 'INR';
-    } else if (paymentProvider == 'stripe') {
+    // Fallback for Stripe without bankCurrency
+    if (paymentProvider == 'stripe') {
       // Stripe default to USD
       return 'USD';
     }
