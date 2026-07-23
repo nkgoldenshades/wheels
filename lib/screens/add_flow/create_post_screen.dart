@@ -187,7 +187,12 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   }
 
   Future<void> _selectTime({required bool isStart}) async {
-    final current = isStart ? _startTime! : _endTime!;
+    // Fix: Handle null values safely (don't force-unwrap)
+    final current = isStart
+        ? (_startTime ?? DateTime.now().add(const Duration(hours: 1)))
+        : (_endTime ??
+              _startTime ??
+              DateTime.now().add(const Duration(hours: 9)));
     final now = DateTime.now();
 
     // Get timezone for the relevant location

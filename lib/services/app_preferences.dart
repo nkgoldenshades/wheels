@@ -40,6 +40,12 @@ class AppPreferences {
     final prefs = await SharedPreferences.getInstance();
     // Default to INR and India for new users
     currencyCode.value = prefs.getString(_currencyCodeKey) ?? 'INR';
+
+    // Ensure currency code is never null or invalid
+    if (currencyCode.value.isEmpty) {
+      currencyCode.value = 'INR';
+    }
+
     preferredCountry.value = prefs.getString(_preferredCountryKey) ?? 'India';
     preferredLanguage.value =
         prefs.getString(_preferredLanguageKey) ?? 'English';
@@ -171,7 +177,24 @@ class AppPreferences {
   }
 
   String get currencySymbol {
-    return NumberFormat.simpleCurrency(name: currencyCode.value).currencySymbol;
+    // Get the correct currency symbol based on selected currency code
+    // Don't rely on NumberFormat.simpleCurrency which respects device locale
+    final symbols = {
+      'INR': '₹',
+      'USD': '\$',
+      'GBP': '£',
+      'EUR': '€',
+      'AED': 'د.إ',
+      'SGD': 'S\$',
+      'AUD': 'A\$',
+      'CAD': 'C\$',
+      'JPY': '¥',
+      'CNY': '¥',
+      'HKD': 'HK\$',
+      'BRL': 'R\$',
+      'MXN': 'MX\$',
+    };
+    return symbols[currencyCode.value] ?? currencyCode.value;
   }
 
   String formatMoney(num amount) {

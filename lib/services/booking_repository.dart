@@ -47,32 +47,20 @@ class BookingRepository {
     await _persist();
   }
 
-  /// Calls the server-side expire function. Silent — never throws.
+  /// Calls the server-side expire function to mark overdue bookings as expired.
+  /// Silent — never throws.
   Future<void> _expireOverdueBookings() async {
     try {
       final supabase = Supabase.instance.client;
 
-      // Expire overdue bookings
+      // Expire overdue bookings that passed their deadline
       final r1 = await supabase.rpc('expire_overdue_bookings');
       if (r1 != null) {
         final count = (r1 as Map<String, dynamic>)['expired_count'] ?? 0;
         if (count > 0) debugPrint('⏰ Auto-expired $count overdue booking(s)');
       }
-
-      // Deactivate posts whose end_time has passed
-      try {
-        final r2 = await supabase.rpc('auto_deactivate_expired_posts');
-        if (r2 != null) {
-          final count = (r2 as Map<String, dynamic>)['deactivated_posts'] ?? 0;
-          if (count > 0) {
-            debugPrint('📴 Auto-deactivated $count expired post(s)');
-          }
-        }
-      } catch (_) {
-        // RPC not deployed — silently skip
-      }
     } catch (e) {
-      debugPrint('⚠️ auto-maintenance: $e');
+      debugPrint('⚠️ auto-maintenance booking expiry: $e');
     }
   }
 
