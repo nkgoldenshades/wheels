@@ -188,33 +188,20 @@ class _VehicleListScreenState extends State<VehicleListScreen> {
                 elevation: 2,
                 child: InkWell(
                   onTap: () {
-                    // For provider mode, go directly to create post (skips VehicleActionsScreen which freezes)
-                    if (!widget.isUserMode) {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => CreatePostScreen(
-                            serviceType: ServiceType.passenger,
-                            initialVehicle: v,
-                          ),
+                    // Navigate to VehicleActionsScreen to see vehicle details and manage slots
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        settings: const RouteSettings(name: 'vehicle_detail'),
+                        builder: (context) => VehicleActionsScreen(
+                          vehicleId: v.id,
+                          isUserMode: widget.isUserMode,
+                          vehicleRepository: widget.isUserMode
+                              ? null
+                              : _vehicleRepo,
                         ),
-                      );
-                    } else {
-                      // For user mode, use VehicleActionsScreen
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          settings: const RouteSettings(name: 'vehicle_detail'),
-                          builder: (context) => VehicleActionsScreen(
-                            vehicleId: v.id,
-                            isUserMode: widget.isUserMode,
-                            vehicleRepository: widget.isUserMode
-                                ? null
-                                : _vehicleRepo,
-                          ),
-                        ),
-                      );
-                    }
+                      ),
+                    );
                   },
                   onLongPress: () async {
                     final confirmed = await showDialog<bool>(
