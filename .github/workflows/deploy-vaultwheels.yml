@@ -1,0 +1,45 @@
+name: Deploy VaultWheels to Firebase Hosting
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Checkout code from GitHub
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # 2. Setup Flutter
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 'latest'
+          channel: 'stable'
+
+      # 3. Get Flutter dependencies
+      - name: Get dependencies
+        run: flutter pub get
+
+      # 4. Build Flutter Web
+      - name: Build Flutter Web
+        run: flutter build web --release --no-tree-shake-icons
+
+      # 5. Deploy to Firebase Hosting (vaultwheels site)
+      - name: Deploy to Firebase Hosting
+        uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          repoToken: '${{ secrets.GITHUB_TOKEN }}'
+          firebaseServiceAccount: '${{ secrets.FIREBASE_SERVICE_ACCOUNT_QUICKOHUNT_APP }}'
+          channelId: live
+          projectId: quickohunt-app
+          target: vaultwheels
+        env:
+          FIREBASE_CLI_EXPERIMENTS: webframeworks
