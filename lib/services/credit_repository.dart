@@ -65,11 +65,9 @@ class CreditRepository {
           .order('created_at', ascending: false)
           .limit(100);
 
-      if (txnResponse is List) {
-        transactions.value = (txnResponse as List)
-            .map((e) => CreditTransaction.fromJson(e as Map<String, dynamic>))
-            .toList();
-      }
+      transactions.value = (txnResponse as List)
+          .map((e) => CreditTransaction.fromJson(e as Map<String, dynamic>))
+          .toList();
 
       await _persist();
     } catch (e) {
