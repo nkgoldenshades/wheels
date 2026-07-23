@@ -1090,42 +1090,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
 
   /// Get currency symbol from provider's connected payment account
   String _getProviderCurrencySymbol() {
-    final profile = ProfileRepository.instance.profile.value;
-    final currency = profile.bankCurrency;
-
-    if (currency != null && currency.isNotEmpty) {
-      // Use the profile's bank currency
-      final currencySymbols = {
-        'INR': '₹',
-        'USD': '\$',
-        'GBP': '£',
-        'EUR': '€',
-        'AED': 'د.إ',
-        'SGD': 'S\$',
-        'AUD': 'A\$',
-        'CAD': 'C\$',
-        'JPY': '¥',
-        'CNY': '¥',
-        'HKD': 'HK\$',
-        'KRW': '₩',
-        'THB': '฿',
-        'MYR': 'RM',
-        'IDR': 'Rp',
-        'PHP': '₱',
-        'SAR': '﷼',
-        'QAR': 'ر.ق',
-        'KWD': 'د.ك',
-        'PKR': '₨',
-        'BDT': '৳',
-        'LKR': 'Rs',
-        'NPR': 'रू',
-        'ZAR': 'R',
-        'NGN': '₦',
-      };
-      return currencySymbols[currency] ?? currency;
-    }
-
-    // Fallback to app preference if no payment provider connected yet
+    // Always use the user's selected currency from settings
+    // Not the provider's bank currency
     return AppPreferences.instance.currencySymbol;
   }
 
