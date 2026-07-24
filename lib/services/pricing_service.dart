@@ -48,12 +48,14 @@ class PricingService {
       _cache[curr] = pricing;
       _lastFetch = DateTime.now();
 
-      debugPrint('[PricingService] ✅ Fetched pricing for $curr: ${pricing['symbol']}${pricing['premium']}');
+      debugPrint(
+        '[PricingService] ✅ Fetched pricing for $curr: ${pricing['symbol']}${pricing['premium']}',
+      );
       return pricing;
     } catch (e) {
       debugPrint('[PricingService] ⚠️ Database fetch failed for $curr: $e');
       debugPrint('[PricingService] Falling back to default USD Tier 1 pricing');
-      
+
       // Fallback to default USD Tier 1 pricing
       return _getDefaultPricing();
     }
@@ -61,13 +63,18 @@ class PricingService {
 
   /// Preload pricing for multiple currencies (useful for app startup)
   Future<void> preloadPricing(List<String> currencies) async {
-    debugPrint('[PricingService] Preloading pricing for ${currencies.length} currencies');
-    
+    debugPrint(
+      '[PricingService] Preloading pricing for ${currencies.length} currencies',
+    );
+
     try {
       final response = await Supabase.instance.client
           .from('subscription_pricing')
           .select()
-          .inFilter('currency_code', currencies.map((c) => c.toUpperCase()).toList())
+          .inFilter(
+            'currency_code',
+            currencies.map((c) => c.toUpperCase()).toList(),
+          )
           .eq('is_active', true)
           .timeout(const Duration(seconds: 10));
 
@@ -104,16 +111,18 @@ class PricingService {
           .timeout(const Duration(seconds: 10));
 
       return (response as List<dynamic>)
-          .map((row) => {
-                'currency_code': row['currency_code'] as String,
-                'currency_symbol': row['currency_symbol'] as String,
-                'country_name': row['country_name'] as String?,
-                'continent': row['continent'] as String?,
-                'tier': row['tier'] as int,
-                'premium_monthly': (row['premium_monthly'] as num).toDouble(),
-                'expert_monthly': (row['expert_monthly'] as num).toDouble(),
-                'expert_deposit': (row['expert_deposit'] as num).toDouble(),
-              })
+          .map(
+            (row) => {
+              'currency_code': row['currency_code'] as String,
+              'currency_symbol': row['currency_symbol'] as String,
+              'country_name': row['country_name'] as String?,
+              'continent': row['continent'] as String?,
+              'tier': row['tier'] as int,
+              'premium_monthly': (row['premium_monthly'] as num).toDouble(),
+              'expert_monthly': (row['expert_monthly'] as num).toDouble(),
+              'expert_deposit': (row['expert_deposit'] as num).toDouble(),
+            },
+          )
           .toList();
     } catch (e) {
       debugPrint('[PricingService] ⚠️ Failed to fetch all pricing: $e');
@@ -122,7 +131,9 @@ class PricingService {
   }
 
   /// Get pricing by continent (useful for regional analysis)
-  Future<List<Map<String, dynamic>>> getPricingByContinent(String continent) async {
+  Future<List<Map<String, dynamic>>> getPricingByContinent(
+    String continent,
+  ) async {
     try {
       final response = await Supabase.instance.client
           .from('subscription_pricing')
@@ -134,18 +145,22 @@ class PricingService {
           .timeout(const Duration(seconds: 5));
 
       return (response as List<dynamic>)
-          .map((row) => {
-                'currency_code': row['currency_code'] as String,
-                'currency_symbol': row['currency_symbol'] as String,
-                'country_name': row['country_name'] as String?,
-                'tier': row['tier'] as int,
-                'premium_monthly': (row['premium_monthly'] as num).toDouble(),
-                'expert_monthly': (row['expert_monthly'] as num).toDouble(),
-                'expert_deposit': (row['expert_deposit'] as num).toDouble(),
-              })
+          .map(
+            (row) => {
+              'currency_code': row['currency_code'] as String,
+              'currency_symbol': row['currency_symbol'] as String,
+              'country_name': row['country_name'] as String?,
+              'tier': row['tier'] as int,
+              'premium_monthly': (row['premium_monthly'] as num).toDouble(),
+              'expert_monthly': (row['expert_monthly'] as num).toDouble(),
+              'expert_deposit': (row['expert_deposit'] as num).toDouble(),
+            },
+          )
           .toList();
     } catch (e) {
-      debugPrint('[PricingService] ⚠️ Failed to fetch pricing for $continent: $e');
+      debugPrint(
+        '[PricingService] ⚠️ Failed to fetch pricing for $continent: $e',
+      );
       return [];
     }
   }
@@ -163,18 +178,22 @@ class PricingService {
           .timeout(const Duration(seconds: 5));
 
       return (response as List<dynamic>)
-          .map((row) => {
-                'currency_code': row['currency_code'] as String,
-                'currency_symbol': row['currency_symbol'] as String,
-                'country_name': row['country_name'] as String?,
-                'continent': row['continent'] as String?,
-                'premium_monthly': (row['premium_monthly'] as num).toDouble(),
-                'expert_monthly': (row['expert_monthly'] as num).toDouble(),
-                'expert_deposit': (row['expert_deposit'] as num).toDouble(),
-              })
+          .map(
+            (row) => {
+              'currency_code': row['currency_code'] as String,
+              'currency_symbol': row['currency_symbol'] as String,
+              'country_name': row['country_name'] as String?,
+              'continent': row['continent'] as String?,
+              'premium_monthly': (row['premium_monthly'] as num).toDouble(),
+              'expert_monthly': (row['expert_monthly'] as num).toDouble(),
+              'expert_deposit': (row['expert_deposit'] as num).toDouble(),
+            },
+          )
           .toList();
     } catch (e) {
-      debugPrint('[PricingService] ⚠️ Failed to fetch pricing for tier $tier: $e');
+      debugPrint(
+        '[PricingService] ⚠️ Failed to fetch pricing for tier $tier: $e',
+      );
       return [];
     }
   }
@@ -196,12 +215,12 @@ class PricingService {
   /// Get default pricing (fallback when database fails)
   Map<String, dynamic> _getDefaultPricing() {
     return {
-      'symbol': '\$',
+      'symbol': '₹',
       'premium': 12.99,
       'expert': 59.99,
       'deposit': 599.0,
       'tier': 1,
-      'country': 'Default',
+      'country': 'Default (India)',
       'continent': null,
     };
   }

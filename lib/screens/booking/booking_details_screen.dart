@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'dart:async';
 import '../../services/stripe_service.dart';
 import '../../services/booking_repository.dart';
+import '../../services/app_preferences.dart';
 import '../../models/booking.dart';
 
 class BookingDetailsScreen extends StatefulWidget {
@@ -74,9 +75,9 @@ class _BookingDetailsScreenState extends State<BookingDetailsScreen> {
 
   Future<void> _verifyOtp() async {
     if (_otpController.text.length != 6) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter 6-digit OTP')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Please enter 6-digit OTP')));
       return;
     }
 
@@ -106,7 +107,7 @@ class _BookingDetailsScreenState extends State<BookingDetailsScreen> {
         setState(() {
           _status = 'completed';
         });
-        
+
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('✅ Payment released to provider!'),
@@ -123,9 +124,9 @@ class _BookingDetailsScreenState extends State<BookingDetailsScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error: $e')));
       }
     } finally {
       if (mounted) {
@@ -139,9 +140,7 @@ class _BookingDetailsScreenState extends State<BookingDetailsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Booking Details'),
-      ),
+      appBar: AppBar(title: const Text('Booking Details')),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -154,11 +153,7 @@ class _BookingDetailsScreenState extends State<BookingDetailsScreen> {
                 padding: const EdgeInsets.all(16),
                 child: Column(
                   children: [
-                    Icon(
-                      _getStatusIcon(),
-                      size: 48,
-                      color: Colors.white,
-                    ),
+                    Icon(_getStatusIcon(), size: 48, color: Colors.white),
                     const SizedBox(height: 8),
                     Text(
                       _getStatusText(),
@@ -183,10 +178,7 @@ class _BookingDetailsScreenState extends State<BookingDetailsScreen> {
                     children: [
                       const Text(
                         'Time Remaining',
-                        style: TextStyle(
-                          fontSize: 16,
-                          color: Colors.grey,
-                        ),
+                        style: TextStyle(fontSize: 16, color: Colors.grey),
                       ),
                       const SizedBox(height: 8),
                       Text(
@@ -201,10 +193,12 @@ class _BookingDetailsScreenState extends State<BookingDetailsScreen> {
                       ),
                       const SizedBox(height: 8),
                       LinearProgressIndicator(
-                        value: _remainingTime.inSeconds /
+                        value:
+                            _remainingTime.inSeconds /
                             widget.countdownEndTime
-                                .difference(DateTime.now()
-                                    .subtract(_remainingTime))
+                                .difference(
+                                  DateTime.now().subtract(_remainingTime),
+                                )
                                 .inSeconds,
                       ),
                     ],
@@ -219,12 +213,17 @@ class _BookingDetailsScreenState extends State<BookingDetailsScreen> {
               child: ListTile(
                 leading: const Icon(Icons.attach_money, color: Colors.green),
                 title: const Text('Amount'),
-                trailing: Text(
-                  '\$${(widget.amount / 100).toStringAsFixed(2)}',
-                  style: const TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                  ),
+                trailing: ValueListenableBuilder<String>(
+                  valueListenable: AppPreferences.instance.currencyCode,
+                  builder: (context, currency, _) {
+                    return Text(
+                      '${AppPreferences.instance.currencySymbol}${(widget.amount / 100).toStringAsFixed(2)}',
+                      style: const TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    );
+                  },
                 ),
               ),
             ),
@@ -247,10 +246,7 @@ class _BookingDetailsScreenState extends State<BookingDetailsScreen> {
             if (widget.isProvider && _status == 'pending') ...[
               const Text(
                 'Enter OTP to Complete Booking',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                ),
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 8),
               const Text(
@@ -340,11 +336,17 @@ class _BookingDetailsScreenState extends State<BookingDetailsScreen> {
                 decoration: BoxDecoration(
                   color: Colors.green.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.green.withValues(alpha: 0.3)),
+                  border: Border.all(
+                    color: Colors.green.withValues(alpha: 0.3),
+                  ),
                 ),
                 child: Column(
                   children: [
-                    Icon(Icons.check_circle, color: Colors.green[700], size: 48),
+                    Icon(
+                      Icons.check_circle,
+                      color: Colors.green[700],
+                      size: 48,
+                    ),
                     const SizedBox(height: 8),
                     Text(
                       widget.isProvider
@@ -366,11 +368,17 @@ class _BookingDetailsScreenState extends State<BookingDetailsScreen> {
                 decoration: BoxDecoration(
                   color: Colors.orange.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.orange.withValues(alpha: 0.3)),
+                  border: Border.all(
+                    color: Colors.orange.withValues(alpha: 0.3),
+                  ),
                 ),
                 child: Column(
                   children: [
-                    Icon(Icons.access_time, color: Colors.orange[700], size: 48),
+                    Icon(
+                      Icons.access_time,
+                      color: Colors.orange[700],
+                      size: 48,
+                    ),
                     const SizedBox(height: 8),
                     Text(
                       widget.isProvider
@@ -431,6 +439,3 @@ class _BookingDetailsScreenState extends State<BookingDetailsScreen> {
     }
   }
 }
-
-
-

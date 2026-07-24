@@ -13,8 +13,8 @@ import 'package:image_picker/image_picker.dart';
 
 class AIChatPage extends StatefulWidget {
   final int? conversationId; // Support loading existing conversation
-  final bool isDisputeMode;  // Flag to indicate dispute mediation mode
-  
+  final bool isDisputeMode; // Flag to indicate dispute mediation mode
+
   const AIChatPage({
     super.key,
     this.conversationId,
@@ -37,20 +37,20 @@ class _AIChatPageState extends State<AIChatPage> {
   bool _aiInitialized = false;
   int? _currentConversationId; // Track current conversation
   bool _showSidebar = true; // ← ADD: Toggle sidebar
-  
+
   // Guest user conversation limit
   static const int _guestConversationLimit = 10;
   int _guestConversationCount = 0;
   bool _isGuest = false;
-  
+
   // Image and voice functionality
   final ImagePicker _imagePicker = ImagePicker();
   // final SpeechToText _speechToText = SpeechToText();
   bool _isListening = false;
-  
+
   // AI Toggle state
   bool _aiEnabled = true; // Toggle to enable/disable AI
-  
+
   // Conversation filter state
   String _conversationFilter = 'all'; // 'all', 'general', 'disputes'
 
@@ -59,55 +59,59 @@ class _AIChatPageState extends State<AIChatPage> {
     super.initState();
     _loadAIToggleState();
     _checkGuestStatus();
-    
+
     // Load specific conversation if provided
     if (widget.conversationId != null) {
       _currentConversationId = widget.conversationId;
       _loadConversation(widget.conversationId!);
     }
-    
+
     _loadConversationHistory(); // Load conversation list
     _initializeFirebaseAI();
   }
-  
+
   Future<void> _loadAIToggleState() async {
     final prefs = await SharedPreferences.getInstance();
     setState(() {
       _aiEnabled = prefs.getBool('ai_enabled') ?? true;
     });
   }
-  
+
   Future<void> _toggleAI(bool value) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('ai_enabled', value);
     setState(() {
       _aiEnabled = value;
     });
-    
+
     if (value && !_aiInitialized) {
       // Re-initialize AI if it was disabled
       _initializeFirebaseAI();
     }
-    
+
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(_aiEnabled ? '✅ AI Assistant Enabled' : '⚠️ AI Assistant Disabled'),
+        content: Text(
+          _aiEnabled ? '✅ AI Assistant Enabled' : '⚠️ AI Assistant Disabled',
+        ),
         backgroundColor: _aiEnabled ? Colors.green : Colors.orange,
         duration: const Duration(seconds: 2),
       ),
     );
   }
-  
+
   Future<void> _checkGuestStatus() async {
     final currentUser = AuthRepository.instance.currentUser;
     _isGuest = currentUser == null;
-    
+
     if (_isGuest) {
       // Load guest conversation count from SharedPreferences
       final prefs = await SharedPreferences.getInstance();
       _guestConversationCount = prefs.getInt('guest_conversation_count') ?? 0;
-      debugPrint('👤 Guest user - conversation count: $_guestConversationCount/$_guestConversationLimit');
+      debugPrint(
+        '👤 Guest user - conversation count: $_guestConversationCount/$_guestConversationLimit',
+      );
     }
   }
 
@@ -164,12 +168,14 @@ class _AIChatPageState extends State<AIChatPage> {
 
       final messagesJson = response['messages'] as List;
       final messages = messagesJson
-          .map((msg) => ChatMessage(
-                text: msg['content'] as String,
-                isUser: msg['role'] == 'user',
-                timestamp: DateTime.parse(msg['timestamp'] as String),
-                isError: msg['is_error'] as bool? ?? false,
-              ))
+          .map(
+            (msg) => ChatMessage(
+              text: msg['content'] as String,
+              isUser: msg['role'] == 'user',
+              timestamp: DateTime.parse(msg['timestamp'] as String),
+              isError: msg['is_error'] as bool? ?? false,
+            ),
+          )
           .toList();
 
       if (!mounted) return;
@@ -178,7 +184,9 @@ class _AIChatPageState extends State<AIChatPage> {
         _messages.clear();
         _messages.addAll(messages);
       });
-      debugPrint('📥 Loaded conversation $conversationId with ${messages.length} messages');
+      debugPrint(
+        '📥 Loaded conversation $conversationId with ${messages.length} messages',
+      );
     } catch (e) {
       debugPrint('❌ Failed to load conversation: $e');
       if (!mounted) return;
@@ -194,7 +202,7 @@ class _AIChatPageState extends State<AIChatPage> {
   Future<void> _initializeFirebaseAI() async {
     try {
       debugPrint('🚀 Initializing Firebase Gemini API...');
-      
+
       // Get system prompt based on mode (dispute or general)
       String systemPrompt = '''
 You are a helpful AI assistant for QuickOHunt, a ride-sharing and vehicle rental app.
@@ -221,21 +229,21 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
               .select('metadata, dispute_party')
               .eq('id', _currentConversationId!)
               .single();
-          
+
           final metadata = conv['metadata'] as Map<String, dynamic>;
           final party = conv['dispute_party'] as String;
-          
+
           systemPrompt = DisputeService.getDisputeSystemPrompt(metadata, party);
           debugPrint('🤖 Using dispute mediation prompt for $party');
         } catch (e) {
           debugPrint('⚠️ Failed to load dispute context: $e');
         }
       }
-      
+
       // Use Firebase Gemini API (free tier available, no API key needed)
       // This uses Google AI's Gemini API through Firebase
       _model = FirebaseAI.googleAI().generativeModel(
-        model: 'gemini-2.5-flash',  // Latest, faster, lighter model
+        model: 'gemini-2.5-flash', // Latest, faster, lighter model
         systemInstruction: Content.system(systemPrompt),
       );
 
@@ -250,7 +258,7 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
               throw Exception('Connection timeout');
             },
           );
-      
+
       final testText = testResponse.text ?? '';
       debugPrint('✅ Firebase Gemini API test response: $testText');
 
@@ -263,12 +271,14 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
           final welcomeMessage = _isGuest
               ? "Hi there! Welcome to QuickOHunt. I'm your AI assistant here to help you with rides, vehicle rentals, bookings, and any questions about the app.\n\n⚠️ Guest Mode: You have $_guestConversationLimit free conversations. Login for unlimited access!\n\nWhat can I help you with today?"
               : "Hi there! Welcome to QuickOHunt. I'm your AI assistant here to help you with rides, vehicle rentals, bookings, and any questions about the app. What can I help you with today?";
-          
-          _messages.add(ChatMessage(
-            text: welcomeMessage,
-            isUser: false,
-            timestamp: DateTime.now(),
-          ));
+
+          _messages.add(
+            ChatMessage(
+              text: welcomeMessage,
+              isUser: false,
+              timestamp: DateTime.now(),
+            ),
+          );
         }
       });
     } catch (e, stack) {
@@ -277,15 +287,17 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
       if (!mounted) return;
       setState(() {
         _aiInitialized = false;
-        _messages.add(ChatMessage(
-          text:
-              "⚠️ AI Assistant is temporarily unavailable.\n\n"
-              "Our AI service is currently offline. Please try again later or contact support if the issue persists.\n\n"
-              "You can still use all other features of the app — just tap back to continue.",
-          isUser: false,
-          timestamp: DateTime.now(),
-          isError: true,
-        ));
+        _messages.add(
+          ChatMessage(
+            text:
+                "⚠️ AI Assistant is temporarily unavailable.\n\n"
+                "Our AI service is currently offline. Please try again later or contact support if the issue persists.\n\n"
+                "You can still use all other features of the app — just tap back to continue.",
+            isUser: false,
+            timestamp: DateTime.now(),
+            isError: true,
+          ),
+        );
       });
     }
   }
@@ -311,16 +323,20 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
 
       if (!mounted) return;
       setState(() {
-        _messages.add(ChatMessage(
-          text: '📎 Image attached: ${picked.name} (${sizeKb}KB)',
-          isUser: true,
-          timestamp: DateTime.now(),
-        ));
+        _messages.add(
+          ChatMessage(
+            text: '📎 Image attached: ${picked.name} (${sizeKb}KB)',
+            isUser: true,
+            timestamp: DateTime.now(),
+          ),
+        );
       });
       _scrollToBottom();
 
       // Send image context to AI
-      await _sendToFirebaseAI('I have attached an image: ${picked.name}. Please acknowledge it.');
+      await _sendToFirebaseAI(
+        'I have attached an image: ${picked.name}. Please acknowledge it.',
+      );
     } catch (e) {
       debugPrint('❌ Image picker failed: $e');
       if (!mounted) return;
@@ -347,13 +363,15 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
     setState(() {
       _isListening = true;
     });
-    
+
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(_isListening 
-          ? 'Voice input active - speak continuously until you tap mic again' 
-          : 'Voice input not available on this platform'),
+        content: Text(
+          _isListening
+              ? 'Voice input active - speak continuously until you tap mic again'
+              : 'Voice input not available on this platform',
+        ),
         backgroundColor: _isListening ? Colors.green : Colors.orange,
         duration: const Duration(seconds: 3),
       ),
@@ -365,7 +383,7 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
     setState(() {
       _isListening = false;
     });
-    
+
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
@@ -396,13 +414,15 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
     if (!mounted) return;
     setState(() {
       _messages.clear();
-      _messages.add(ChatMessage(
-        text: "Chat history cleared. How can I help you?",
-        isUser: false,
-        timestamp: DateTime.now(),
-      ));
+      _messages.add(
+        ChatMessage(
+          text: "Chat history cleared. How can I help you?",
+          isUser: false,
+          timestamp: DateTime.now(),
+        ),
+      );
     });
-    
+
     // Mark current conversation as inactive and create new one on next message
     if (_currentConversationId != null) {
       Supabase.instance.client
@@ -414,7 +434,7 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
             debugPrint('🗑️ Marked conversation as inactive');
           });
     }
-    
+
     Navigator.pop(context); // Close settings
   }
 
@@ -447,7 +467,7 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
       _showLoginPrompt();
       return;
     }
-    
+
     // Check AI credits for logged-in users
     if (!_isGuest) {
       final profile = ProfileRepository.instance.profile.value;
@@ -459,11 +479,9 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
 
     if (!mounted) return;
     setState(() {
-      _messages.add(ChatMessage(
-        text: text,
-        isUser: true,
-        timestamp: DateTime.now(),
-      ));
+      _messages.add(
+        ChatMessage(text: text, isUser: true, timestamp: DateTime.now()),
+      );
       _isLoading = true;
     });
 
@@ -475,7 +493,9 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
       _guestConversationCount++;
       final prefs = await SharedPreferences.getInstance();
       await prefs.setInt('guest_conversation_count', _guestConversationCount);
-      debugPrint('👤 Guest conversation count: $_guestConversationCount/$_guestConversationLimit');
+      debugPrint(
+        '👤 Guest conversation count: $_guestConversationCount/$_guestConversationLimit',
+      );
     } else {
       // Deduct 1 credit for logged-in users
       final success = await ProfileRepository.instance.deductAICredits(1);
@@ -504,7 +524,7 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
       }
     }
   }
-  
+
   void _showLoginPrompt() {
     showDialog(
       context: context,
@@ -557,7 +577,7 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
       ),
     );
   }
-  
+
   void _showBuyCreditsDialog(BuildContext context) {
     showDialog(
       context: context,
@@ -599,7 +619,7 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
       ),
     );
   }
-  
+
   void _showCreditUsageDetails(BuildContext context, ProfileInfo profile) {
     showDialog(
       context: context,
@@ -628,7 +648,11 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.account_balance_wallet, color: Colors.white, size: 32),
+                  const Icon(
+                    Icons.account_balance_wallet,
+                    color: Colors.white,
+                    size: 32,
+                  ),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Column(
@@ -653,7 +677,7 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
               ),
             ),
             const SizedBox(height: 16),
-            
+
             // Usage breakdown
             const Text(
               'Usage Information:',
@@ -661,7 +685,11 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
             ),
             const SizedBox(height: 8),
             _buildUsageRow(Icons.chat, 'Cost per message', '1 credit'),
-            _buildUsageRow(Icons.history, 'Messages sent today', '${_messages.where((m) => m.isUser).length}'),
+            _buildUsageRow(
+              Icons.history,
+              'Messages sent today',
+              '${_messages.where((m) => m.isUser).length}',
+            ),
             _buildUsageRow(
               Icons.warning_amber,
               'Status',
@@ -669,7 +697,7 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
               color: profile.aiCredits < 10 ? Colors.red : Colors.green,
             ),
             const SizedBox(height: 16),
-            
+
             // Quick actions
             Row(
               children: [
@@ -680,7 +708,10 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
                       _showBuyCreditsDialog(context);
                     },
                     icon: const Icon(Icons.add_shopping_cart, size: 16),
-                    label: const Text('Buy More', style: TextStyle(fontSize: 12)),
+                    label: const Text(
+                      'Buy More',
+                      style: TextStyle(fontSize: 12),
+                    ),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.blue,
                       foregroundColor: Colors.white,
@@ -701,8 +732,13 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
       ),
     );
   }
-  
-  Widget _buildUsageRow(IconData icon, String label, String value, {Color? color}) {
+
+  Widget _buildUsageRow(
+    IconData icon,
+    String label,
+    String value, {
+    Color? color,
+  }) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
@@ -727,8 +763,13 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
       ),
     );
   }
-  
-  Widget _buildCreditPackage(BuildContext context, int credits, int price, {bool popular = false}) {
+
+  Widget _buildCreditPackage(
+    BuildContext context,
+    int credits,
+    int price, {
+    bool popular = false,
+  }) {
     return InkWell(
       onTap: () async {
         Navigator.pop(context); // Close dialog
@@ -763,13 +804,18 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
                         style: TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.bold,
-                          color: popular ? Colors.blue.shade900 : Colors.black87,
+                          color: popular
+                              ? Colors.blue.shade900
+                              : Colors.black87,
                         ),
                       ),
                       if (popular) ...[
                         const SizedBox(width: 8),
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
                           decoration: BoxDecoration(
                             color: Colors.orange,
                             borderRadius: BorderRadius.circular(4),
@@ -786,12 +832,17 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
                       ],
                     ],
                   ),
-                  Text(
-                    '\$$price',
-                    style: TextStyle(
-                      fontSize: 14,
-                      color: Colors.grey.shade700,
-                    ),
+                  ValueListenableBuilder<String>(
+                    valueListenable: AppPreferences.instance.currencyCode,
+                    builder: (context, currency, _) {
+                      return Text(
+                        '${AppPreferences.instance.currencySymbol}$price',
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: Colors.grey.shade700,
+                        ),
+                      );
+                    },
                   ),
                 ],
               ),
@@ -824,8 +875,10 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
       debugPrint('📥 Firebase Gemini API response: $aiText');
 
       if (aiText == null || aiText.isEmpty) {
-        _addAIMessage("I received an empty response. Please try again.",
-            isError: true);
+        _addAIMessage(
+          "I received an empty response. Please try again.",
+          isError: true,
+        );
       } else {
         _addAIMessage(aiText);
       }
@@ -841,16 +894,18 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
   void _addAIMessage(String text, {bool isError = false}) {
     if (mounted) {
       setState(() {
-        _messages.add(ChatMessage(
-          text: text,
-          isUser: false,
-          timestamp: DateTime.now(),
-          isError: isError,
-        ));
+        _messages.add(
+          ChatMessage(
+            text: text,
+            isUser: false,
+            timestamp: DateTime.now(),
+            isError: isError,
+          ),
+        );
         _isLoading = false;
       });
       _scrollToBottom();
-      
+
       // Save conversation to Supabase (async, don't wait)
       _saveConversationToSupabase();
     }
@@ -875,26 +930,33 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
       if (userId == null) return;
 
       // Convert messages to JSONB format
-      final messagesJson = _messages.map((msg) => {
-        'role': msg.isUser ? 'user' : 'assistant',
-        'content': msg.text,
-        'timestamp': msg.timestamp.toIso8601String(),
-        if (msg.isError) 'is_error': true,
-      }).toList();
+      final messagesJson = _messages
+          .map(
+            (msg) => {
+              'role': msg.isUser ? 'user' : 'assistant',
+              'content': msg.text,
+              'timestamp': msg.timestamp.toIso8601String(),
+              if (msg.isError) 'is_error': true,
+            },
+          )
+          .toList();
 
       if (_currentConversationId == null) {
         // Generate AI title after first exchange (user + assistant message)
         String title = 'New Chat';
-        
+
         if (_messages.length >= 2) {
           // Let AI generate a smart title based on conversation
           try {
-            final titlePrompt = 'Generate a short, concise title (max 40 characters) for this conversation. '
+            final titlePrompt =
+                'Generate a short, concise title (max 40 characters) for this conversation. '
                 'Just respond with the title only, no quotes or extra text:\n\n'
                 'User: ${_messages.first.text}\n'
                 'Assistant: ${_messages[1].text}';
-            
-            final titleResponse = await _model?.generateContent([Content.text(titlePrompt)]);
+
+            final titleResponse = await _model?.generateContent([
+              Content.text(titlePrompt),
+            ]);
             if (titleResponse != null && titleResponse.text != null) {
               title = titleResponse.text!.trim();
               // Remove quotes if AI added them
@@ -908,7 +970,11 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
             // Fallback: Use first user message
             final firstUserMessage = _messages.firstWhere(
               (msg) => msg.isUser,
-              orElse: () => ChatMessage(text: 'New Chat', isUser: true, timestamp: DateTime.now()),
+              orElse: () => ChatMessage(
+                text: 'New Chat',
+                isUser: true,
+                timestamp: DateTime.now(),
+              ),
             );
             title = firstUserMessage.text.trim();
             if (title.length > 40) {
@@ -916,7 +982,7 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
             }
           }
         }
-        
+
         // Create new conversation
         final response = await Supabase.instance.client
             .from('ai_conversations')
@@ -931,10 +997,12 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
             })
             .select('id')
             .single();
-        
+
         _currentConversationId = response['id'] as int;
-        debugPrint('💾 Created new conversation: $_currentConversationId with AI title: $title');
-        
+        debugPrint(
+          '💾 Created new conversation: $_currentConversationId with AI title: $title',
+        );
+
         // Refresh sidebar after creating new conversation
         _loadConversationHistory();
       } else {
@@ -946,9 +1014,11 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
               'updated_at': DateTime.now().toIso8601String(),
             })
             .eq('id', _currentConversationId!);
-        
-        debugPrint('💾 Updated conversation $_currentConversationId with ${messagesJson.length} messages');
-        
+
+        debugPrint(
+          '💾 Updated conversation $_currentConversationId with ${messagesJson.length} messages',
+        );
+
         // Refresh sidebar to update timestamps
         _loadConversationHistory();
       }
@@ -959,12 +1029,17 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
   }
 
   // Show delete confirmation dialog
-  Future<void> _showDeleteConfirmation(BuildContext context, ConversationItem conv) async {
+  Future<void> _showDeleteConfirmation(
+    BuildContext context,
+    ConversationItem conv,
+  ) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Delete Conversation?'),
-        content: Text('Are you sure you want to delete "${conv.title}"?\n\nThis action cannot be undone.'),
+        content: Text(
+          'Are you sure you want to delete "${conv.title}"?\n\nThis action cannot be undone.',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -972,9 +1047,7 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context, true),
-            style: FilledButton.styleFrom(
-              backgroundColor: Colors.red,
-            ),
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
             child: const Text('Delete'),
           ),
         ],
@@ -1026,7 +1099,11 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
     }
   }
 
-  Future<void> _purchaseAICredits(BuildContext context, int credits, int price) async {
+  Future<void> _purchaseAICredits(
+    BuildContext context,
+    int credits,
+    int price,
+  ) async {
     final currentUser = AuthRepository.instance.currentUser;
     if (currentUser == null) {
       if (!context.mounted) return;
@@ -1075,12 +1152,16 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
     try {
       // Get user details
       final profile = ProfileRepository.instance.profile.value;
-      final userName = profile.profileName.isEmpty ? 'User' : profile.profileName;
+      final userName = profile.profileName.isEmpty
+          ? 'User'
+          : profile.profileName;
       final userEmail = currentUser.email;
       final userPhone = profile.phone ?? '0000000000';
       final currency = AppPreferences.instance.currencyCode.value;
 
-      debugPrint('💳 Starting AI credit purchase: $credits credits for \$$price');
+      debugPrint(
+        '💳 Starting AI credit purchase: $credits credits for \$$price',
+      );
 
       // Process payment via PaymentService (uses same subscription flow)
       final result = await PaymentService.instance.processSubscriptionPayment(
@@ -1140,13 +1221,13 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
     } catch (e, stackTrace) {
       debugPrint('💳 Exception in _purchaseAICredits: $e');
       debugPrint('💳 Stack trace: $stackTrace');
-      
+
       // Close loading dialog on error
       if (navigator.canPop()) {
         navigator.pop();
         debugPrint('💳 Closed loading dialog (error path)');
       }
-      
+
       messenger.showSnackBar(
         SnackBar(
           content: Text('Payment error: $e'),
@@ -1161,18 +1242,20 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
     // Filter conversations based on selected tab
     final filteredConversations = _conversations.where((conv) {
       if (_conversationFilter == 'all') return true;
-      if (_conversationFilter == 'general') return conv.contextType == 'general';
-      if (_conversationFilter == 'disputes') return conv.contextType.startsWith('dispute'); // Both 'dispute' and 'dispute_completed'
+      if (_conversationFilter == 'general')
+        return conv.contextType == 'general';
+      if (_conversationFilter == 'disputes')
+        return conv.contextType.startsWith(
+          'dispute',
+        ); // Both 'dispute' and 'dispute_completed'
       return true;
     }).toList();
-    
+
     return Container(
       width: 250,
       decoration: BoxDecoration(
         color: Theme.of(context).scaffoldBackgroundColor,
-        border: Border(
-          right: BorderSide(color: Colors.grey[300]!),
-        ),
+        border: Border(right: BorderSide(color: Colors.grey[300]!)),
       ),
       child: Column(
         children: [
@@ -1180,26 +1263,31 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.inversePrimary.withValues(alpha: 0.3),
-              border: Border(
-                bottom: BorderSide(color: Colors.grey[300]!),
-              ),
+              color: Theme.of(
+                context,
+              ).colorScheme.inversePrimary.withValues(alpha: 0.3),
+              border: Border(bottom: BorderSide(color: Colors.grey[300]!)),
             ),
             child: Row(
               children: [
-                Icon(Icons.chat_bubble_outline, color: Theme.of(context).primaryColor, size: 20),
+                Icon(
+                  Icons.chat_bubble_outline,
+                  color: Theme.of(context).primaryColor,
+                  size: 20,
+                ),
                 const SizedBox(width: 8),
                 const Expanded(
                   child: Text(
                     'Conversations',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                    ),
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
                   ),
                 ),
                 IconButton(
-                  icon: Icon(Icons.add, color: Theme.of(context).primaryColor, size: 20),
+                  icon: Icon(
+                    Icons.add,
+                    color: Theme.of(context).primaryColor,
+                    size: 20,
+                  ),
                   onPressed: _createNewConversation,
                   tooltip: 'New Conversation',
                   padding: EdgeInsets.zero,
@@ -1208,14 +1296,12 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
               ],
             ),
           ),
-          
+
           // Filter Tabs
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
             decoration: BoxDecoration(
-              border: Border(
-                bottom: BorderSide(color: Colors.grey[300]!),
-              ),
+              border: Border(bottom: BorderSide(color: Colors.grey[300]!)),
             ),
             child: Row(
               children: [
@@ -1228,7 +1314,7 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
               ],
             ),
           ),
-          
+
           // Conversations List
           Expanded(
             child: filteredConversations.isEmpty
@@ -1236,14 +1322,11 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
                     child: Padding(
                       padding: const EdgeInsets.all(16),
                       child: Text(
-                        _conversationFilter == 'disputes' 
+                        _conversationFilter == 'disputes'
                             ? 'No disputes yet.\nRaise a dispute from bookings!'
                             : 'No conversations yet.\nStart chatting to create one!',
                         textAlign: TextAlign.center,
-                        style: TextStyle(
-                          color: Colors.grey[600],
-                          fontSize: 13,
-                        ),
+                        style: TextStyle(color: Colors.grey[600], fontSize: 13),
                       ),
                     ),
                   )
@@ -1252,42 +1335,66 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
                     itemBuilder: (context, index) {
                       final conv = filteredConversations[index];
                       final isSelected = conv.id == _currentConversationId;
-                      
+
                       return InkWell(
                         onTap: () => _loadConversation(conv.id),
-                        onLongPress: () => _showDeleteConfirmation(context, conv),
+                        onLongPress: () =>
+                            _showDeleteConfirmation(context, conv),
                         child: Container(
-                          margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          margin: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 2,
+                          ),
                           padding: const EdgeInsets.all(12),
                           decoration: BoxDecoration(
-                            color: isSelected 
-                                ? Theme.of(context).primaryColor.withValues(alpha: 0.1)
+                            color: isSelected
+                                ? Theme.of(
+                                    context,
+                                  ).primaryColor.withValues(alpha: 0.1)
                                 : (conv.contextType.startsWith('dispute')
-                                    ? (conv.contextType == 'dispute_completed'
-                                        ? Colors.green.withValues(alpha: 0.05)
-                                        : Colors.orange.withValues(alpha: 0.05))
-                                    : Colors.transparent),
+                                      ? (conv.contextType == 'dispute_completed'
+                                            ? Colors.green.withValues(
+                                                alpha: 0.05,
+                                              )
+                                            : Colors.orange.withValues(
+                                                alpha: 0.05,
+                                              ))
+                                      : Colors.transparent),
                             borderRadius: BorderRadius.circular(8),
                             border: isSelected
-                                ? Border.all(color: Theme.of(context).primaryColor, width: 1)
+                                ? Border.all(
+                                    color: Theme.of(context).primaryColor,
+                                    width: 1,
+                                  )
                                 : (conv.contextType.startsWith('dispute')
-                                    ? Border.all(
-                                        color: conv.contextType == 'dispute_completed'
-                                            ? Colors.green.withValues(alpha: 0.4)
-                                            : Colors.orange.withValues(alpha: 0.3), 
-                                        width: 1)
-                                    : null),
+                                      ? Border.all(
+                                          color:
+                                              conv.contextType ==
+                                                  'dispute_completed'
+                                              ? Colors.green.withValues(
+                                                  alpha: 0.4,
+                                                )
+                                              : Colors.orange.withValues(
+                                                  alpha: 0.3,
+                                                ),
+                                          width: 1,
+                                        )
+                                      : null),
                           ),
                           child: Row(
                             children: [
                               // Icon changes based on type
                               Icon(
-                                conv.contextType.startsWith('dispute') ? Icons.gavel : Icons.chat,
+                                conv.contextType.startsWith('dispute')
+                                    ? Icons.gavel
+                                    : Icons.chat,
                                 color: conv.contextType.startsWith('dispute')
                                     ? (conv.contextType == 'dispute_completed'
-                                        ? Colors.green[700] 
-                                        : Colors.orange[700])
-                                    : (isSelected ? Theme.of(context).primaryColor : Colors.grey[600]),
+                                          ? Colors.green[700]
+                                          : Colors.orange[700])
+                                    : (isSelected
+                                          ? Theme.of(context).primaryColor
+                                          : Colors.grey[600]),
                                 size: 16,
                               ),
                               const SizedBox(width: 8),
@@ -1302,23 +1409,43 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
                                             conv.title,
                                             style: TextStyle(
                                               fontSize: 13,
-                                              fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-                                              color: conv.contextType.startsWith('dispute') ? Colors.orange[900] : null,
+                                              fontWeight: isSelected
+                                                  ? FontWeight.w600
+                                                  : FontWeight.normal,
+                                              color:
+                                                  conv.contextType.startsWith(
+                                                    'dispute',
+                                                  )
+                                                  ? Colors.orange[900]
+                                                  : null,
                                             ),
                                             maxLines: 1,
                                             overflow: TextOverflow.ellipsis,
                                           ),
                                         ),
                                         // Dispute badge - shows status based on context_type
-                                        if (conv.contextType.startsWith('dispute'))
+                                        if (conv.contextType.startsWith(
+                                          'dispute',
+                                        ))
                                           Container(
-                                            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 4,
+                                              vertical: 2,
+                                            ),
                                             decoration: BoxDecoration(
-                                              color: conv.contextType == 'dispute_completed' ? Colors.green : Colors.orange,
-                                              borderRadius: BorderRadius.circular(4),
+                                              color:
+                                                  conv.contextType ==
+                                                      'dispute_completed'
+                                                  ? Colors.green
+                                                  : Colors.orange,
+                                              borderRadius:
+                                                  BorderRadius.circular(4),
                                             ),
                                             child: Text(
-                                              conv.contextType == 'dispute_completed' ? 'RESOLVED' : 'ACTIVE',
+                                              conv.contextType ==
+                                                      'dispute_completed'
+                                                  ? 'RESOLVED'
+                                                  : 'ACTIVE',
                                               style: const TextStyle(
                                                 color: Colors.white,
                                                 fontSize: 8,
@@ -1355,7 +1482,7 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
   String _formatTimestamp(DateTime timestamp) {
     final now = DateTime.now();
     final difference = now.difference(timestamp);
-    
+
     if (difference.inMinutes < 1) {
       return 'Just now';
     } else if (difference.inHours < 1) {
@@ -1382,7 +1509,7 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
           decoration: BoxDecoration(
-            color: isSelected 
+            color: isSelected
                 ? Theme.of(context).primaryColor.withValues(alpha: 0.1)
                 : Colors.transparent,
             borderRadius: BorderRadius.circular(6),
@@ -1397,8 +1524,8 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
               Icon(
                 icon,
                 size: 14,
-                color: isSelected 
-                    ? Theme.of(context).primaryColor 
+                color: isSelected
+                    ? Theme.of(context).primaryColor
                     : Colors.grey[600],
               ),
               const SizedBox(width: 4),
@@ -1407,9 +1534,11 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
                   label,
                   style: TextStyle(
                     fontSize: 11,
-                    fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-                    color: isSelected 
-                        ? Theme.of(context).primaryColor 
+                    fontWeight: isSelected
+                        ? FontWeight.w600
+                        : FontWeight.normal,
+                    color: isSelected
+                        ? Theme.of(context).primaryColor
                         : Colors.grey[700],
                   ),
                   overflow: TextOverflow.ellipsis,
@@ -1438,14 +1567,14 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
               decoration: BoxDecoration(
-                color: widget.isDisputeMode 
-                    ? Colors.orange 
+                color: widget.isDisputeMode
+                    ? Colors.orange
                     : (_aiInitialized ? Colors.green : Colors.orange),
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Text(
-                widget.isDisputeMode 
-                    ? 'Mediation' 
+                widget.isDisputeMode
+                    ? 'Mediation'
                     : (_aiInitialized ? 'Online' : 'Offline'),
                 style: const TextStyle(color: Colors.white, fontSize: 10),
               ),
@@ -1477,14 +1606,19 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
                       onTap: () => _showCreditUsageDetails(context, profile),
                       borderRadius: BorderRadius.circular(12),
                       child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 6,
+                        ),
                         decoration: BoxDecoration(
                           color: profile.aiCredits < 10
                               ? Colors.red.withValues(alpha: 0.1)
                               : Colors.blue.withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(12),
                           border: Border.all(
-                            color: profile.aiCredits < 10 ? Colors.red : Colors.blue,
+                            color: profile.aiCredits < 10
+                                ? Colors.red
+                                : Colors.blue,
                             width: 1,
                           ),
                         ),
@@ -1536,7 +1670,10 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
                   label: const Text('Buy', style: TextStyle(fontSize: 12)),
                   style: TextButton.styleFrom(
                     foregroundColor: Colors.blue.shade700,
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
                     minimumSize: Size.zero,
                     tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   ),
@@ -1549,7 +1686,10 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
               padding: const EdgeInsets.only(right: 8),
               child: Center(
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 6,
+                  ),
                   decoration: BoxDecoration(
                     color: _guestConversationCount >= _guestConversationLimit
                         ? Colors.red.withValues(alpha: 0.2)
@@ -1570,7 +1710,8 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
                             ? Icons.lock
                             : Icons.chat_bubble_outline,
                         size: 14,
-                        color: _guestConversationCount >= _guestConversationLimit
+                        color:
+                            _guestConversationCount >= _guestConversationLimit
                             ? Colors.red
                             : Colors.orange,
                       ),
@@ -1580,7 +1721,8 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
                         style: TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.bold,
-                          color: _guestConversationCount >= _guestConversationLimit
+                          color:
+                              _guestConversationCount >= _guestConversationLimit
                               ? Colors.red
                               : Colors.orange,
                         ),
@@ -1601,8 +1743,9 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
       body: Row(
         children: [
           // Left Sidebar - Conversations (only for logged-in users, not in dispute mode)
-          if (!_isGuest && _showSidebar && !widget.isDisputeMode) _buildSidebar(),
-          
+          if (!_isGuest && _showSidebar && !widget.isDisputeMode)
+            _buildSidebar(),
+
           // Main Chat Area
           Expanded(
             child: Column(
@@ -1628,14 +1771,20 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
                             // Show typing indicator as last item inside the list
                             if (_isLoading && index == _messages.length) {
                               return Padding(
-                                padding: const EdgeInsets.symmetric(vertical: 4),
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 4,
+                                ),
                                 child: Row(
                                   crossAxisAlignment: CrossAxisAlignment.end,
                                   children: const [
                                     CircleAvatar(
                                       radius: 16,
                                       backgroundColor: Colors.blue,
-                                      child: Icon(Icons.smart_toy, size: 16, color: Colors.white),
+                                      child: Icon(
+                                        Icons.smart_toy,
+                                        size: 16,
+                                        color: Colors.white,
+                                      ),
                                     ),
                                     SizedBox(width: 8),
                                     _TypingIndicator(),
@@ -1650,7 +1799,10 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
 
                 // Message input
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 8,
+                  ),
                   decoration: BoxDecoration(
                     color: Colors.grey[100],
                     border: Border(top: BorderSide(color: Colors.grey[300]!)),
@@ -1702,7 +1854,9 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
                                   : 'Type your message...',
                               border: const OutlineInputBorder(),
                               contentPadding: const EdgeInsets.symmetric(
-                                  horizontal: 16, vertical: 12),
+                                horizontal: 16,
+                                vertical: 12,
+                              ),
                               isDense: true,
                             ),
                             onSubmitted: (_) => _sendMessage(),
@@ -1729,7 +1883,7 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
                     ),
                   ),
                 ),
-                
+
                 // Powered by VerveStrideAI branding
                 Container(
                   padding: const EdgeInsets.symmetric(vertical: 6),
@@ -1741,7 +1895,11 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(Icons.auto_awesome, size: 12, color: Colors.grey[600]),
+                        Icon(
+                          Icons.auto_awesome,
+                          size: 12,
+                          color: Colors.grey[600],
+                        ),
                         const SizedBox(width: 4),
                         Text(
                           'Powered by ',
@@ -1803,16 +1961,17 @@ class ChatBubble extends StatelessWidget {
     final bubbleColor = message.isError
         ? Colors.red[100]
         : message.isUser
-            ? Colors.blue
-            : Colors.grey[200];
+        ? Colors.blue
+        : Colors.grey[200];
 
     final textColor = message.isUser ? Colors.white : Colors.black87;
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
-        mainAxisAlignment:
-            message.isUser ? MainAxisAlignment.end : MainAxisAlignment.start,
+        mainAxisAlignment: message.isUser
+            ? MainAxisAlignment.end
+            : MainAxisAlignment.start,
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
           if (!message.isUser) ...[
@@ -1829,8 +1988,7 @@ class ChatBubble extends StatelessWidget {
           ],
           Flexible(
             child: Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               decoration: BoxDecoration(
                 color: bubbleColor,
                 borderRadius: BorderRadius.only(
@@ -1840,10 +1998,7 @@ class ChatBubble extends StatelessWidget {
                   bottomRight: Radius.circular(message.isUser ? 4 : 20),
                 ),
               ),
-              child: Text(
-                message.text,
-                style: TextStyle(color: textColor),
-              ),
+              child: Text(message.text, style: TextStyle(color: textColor)),
             ),
           ),
           if (message.isUser) ...[
@@ -1883,8 +2038,12 @@ class _TypingIndicatorState extends State<_TypingIndicator>
       ),
     );
     _animations = _controllers
-        .map((c) => Tween<double>(begin: 0, end: -6)
-            .animate(CurvedAnimation(parent: c, curve: Curves.easeInOut)))
+        .map(
+          (c) => Tween<double>(
+            begin: 0,
+            end: -6,
+          ).animate(CurvedAnimation(parent: c, curve: Curves.easeInOut)),
+        )
         .toList();
 
     for (var i = 0; i < _controllers.length; i++) {
@@ -1984,7 +2143,7 @@ class AISettingsBottomSheet extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 20),
-          
+
           // Title
           Row(
             children: [
@@ -2024,16 +2183,20 @@ class AISettingsBottomSheet extends StatelessWidget {
                         aiInitialized ? 'AI Connected' : 'AI Offline',
                         style: TextStyle(
                           fontWeight: FontWeight.bold,
-                          color: aiInitialized ? Colors.green[700] : Colors.orange[700],
+                          color: aiInitialized
+                              ? Colors.green[700]
+                              : Colors.orange[700],
                         ),
                       ),
                       Text(
-                        aiInitialized 
-                          ? 'AI Assistant is connected'
-                          : 'AI Assistant is offline',
+                        aiInitialized
+                            ? 'AI Assistant is connected'
+                            : 'AI Assistant is offline',
                         style: TextStyle(
                           fontSize: 12,
-                          color: aiInitialized ? Colors.green[600] : Colors.orange[600],
+                          color: aiInitialized
+                              ? Colors.green[600]
+                              : Colors.orange[600],
                         ),
                       ),
                     ],
@@ -2059,7 +2222,9 @@ class AISettingsBottomSheet extends StatelessWidget {
               children: [
                 Icon(
                   Icons.power_settings_new,
-                  color: aiEnabled ? Colors.blue.shade700 : Colors.grey.shade600,
+                  color: aiEnabled
+                      ? Colors.blue.shade700
+                      : Colors.grey.shade600,
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -2070,14 +2235,18 @@ class AISettingsBottomSheet extends StatelessWidget {
                         'AI Assistant',
                         style: TextStyle(
                           fontWeight: FontWeight.bold,
-                          color: aiEnabled ? Colors.blue.shade900 : Colors.grey.shade800,
+                          color: aiEnabled
+                              ? Colors.blue.shade900
+                              : Colors.grey.shade800,
                         ),
                       ),
                       Text(
                         aiEnabled ? 'Currently enabled' : 'Currently disabled',
                         style: TextStyle(
                           fontSize: 12,
-                          color: aiEnabled ? Colors.blue.shade700 : Colors.grey.shade600,
+                          color: aiEnabled
+                              ? Colors.blue.shade700
+                              : Colors.grey.shade600,
                         ),
                       ),
                     ],
@@ -2096,7 +2265,7 @@ class AISettingsBottomSheet extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 16),
-          
+
           _buildSettingsTile(
             icon: Icons.refresh,
             title: 'Reconnect AI',
@@ -2125,13 +2294,15 @@ class AISettingsBottomSheet extends StatelessWidget {
             subtitle: 'View detailed logs in console',
             onTap: () {
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Check debug console for detailed AI logs')),
+                const SnackBar(
+                  content: Text('Check debug console for detailed AI logs'),
+                ),
               );
             },
           ),
 
           const SizedBox(height: 20),
-          
+
           // Close button
           SizedBox(
             width: double.infinity,
@@ -2146,9 +2317,9 @@ class AISettingsBottomSheet extends StatelessWidget {
               child: const Text('Close'),
             ),
           ),
-          
+
           const SizedBox(height: 16),
-          
+
           // Powered by VerveStrideAI branding
           Center(
             child: Row(
@@ -2158,10 +2329,7 @@ class AISettingsBottomSheet extends StatelessWidget {
                 const SizedBox(width: 6),
                 Text(
                   'Powered by ',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Colors.grey[600],
-                  ),
+                  style: TextStyle(fontSize: 12, color: Colors.grey[600]),
                 ),
                 Text(
                   'VerveStrideAI',
@@ -2174,7 +2342,7 @@ class AISettingsBottomSheet extends StatelessWidget {
               ],
             ),
           ),
-          
+
           // Safe area padding
           SizedBox(height: MediaQuery.of(context).padding.bottom),
         ],
@@ -2197,9 +2365,6 @@ class AISettingsBottomSheet extends StatelessWidget {
     );
   }
 }
-
-
-
 
 // ============================================================================
 // Conversation Item Model for Sidebar

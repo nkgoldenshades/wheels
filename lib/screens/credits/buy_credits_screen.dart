@@ -3,6 +3,7 @@ import 'package:flutter_stripe/flutter_stripe.dart' hide Card;
 import '../../models/credit_package.dart';
 import '../../services/credit_payment_service.dart';
 import '../../services/credit_repository.dart';
+import '../../services/app_preferences.dart';
 
 class BuyCreditsScreen extends StatefulWidget {
   const BuyCreditsScreen({super.key});
@@ -74,23 +75,28 @@ class _BuyCreditsScreenState extends State<BuyCreditsScreen> {
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(color: Colors.amber.shade200),
                 ),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Icon(Icons.info_outline, color: Colors.amber.shade700),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        '1 credit = \$0.06\n'
-                        'Average message: ~0.04 credits\n'
-                        'Cost shown in real-time',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.amber.shade900,
+                child: ValueListenableBuilder<String>(
+                  valueListenable: AppPreferences.instance.currencyCode,
+                  builder: (context, currency, _) {
+                    return Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(Icons.info_outline, color: Colors.amber.shade700),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            '1 credit = ${AppPreferences.instance.currencySymbol}0.06\n'
+                            'Average message: ~0.04 credits\n'
+                            'Cost shown in real-time',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.amber.shade900,
+                            ),
+                          ),
                         ),
-                      ),
-                    ),
-                  ],
+                      ],
+                    );
+                  },
                 ),
               ),
               const SizedBox(height: 24),
@@ -227,12 +233,17 @@ class _BuyCreditsScreenState extends State<BuyCreditsScreen> {
                             fontWeight: FontWeight.bold,
                           ),
                         ),
-                        Text(
-                          '\$${package.priceUSD.toStringAsFixed(2)}',
-                          style: TextStyle(
-                            fontSize: 14,
-                            color: Colors.grey.shade600,
-                          ),
+                        ValueListenableBuilder<String>(
+                          valueListenable: AppPreferences.instance.currencyCode,
+                          builder: (context, currency, _) {
+                            return Text(
+                              '${AppPreferences.instance.currencySymbol}${package.priceUSD.toStringAsFixed(2)}',
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: Colors.grey.shade600,
+                              ),
+                            );
+                          },
                         ),
                       ],
                     ),
