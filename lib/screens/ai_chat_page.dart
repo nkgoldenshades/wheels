@@ -1001,8 +1001,18 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
       final aiText = response.text?.trim();
 
       // ✅ Extract token counts from response
-      final inputTokens = response.usageMetadata?.promptTokenCount ?? 0;
-      final outputTokens = response.usageMetadata?.candidatesTokenCount ?? 0;
+      var inputTokens = response.usageMetadata?.promptTokenCount ?? 0;
+      var outputTokens = response.usageMetadata?.candidatesTokenCount ?? 0;
+
+      // ✅ If token counts not available, use conservative estimate
+      if (inputTokens == 0 && outputTokens == 0) {
+        debugPrint('⚠️ Token counts unavailable, using fallback estimate');
+        // Estimate based on message and response length
+        inputTokens = (userText.split(' ').length * 1.3)
+            .ceil(); // ~1.3 tokens per word
+        outputTokens = ((aiText?.split(' ').length ?? 100) * 1.3).ceil();
+      }
+
       debugPrint('📊 Tokens - Input: $inputTokens, Output: $outputTokens');
 
       debugPrint('📥 Firebase Gemini API response: $aiText');
@@ -1404,12 +1414,14 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
     // Filter conversations based on selected tab
     final filteredConversations = _conversations.where((conv) {
       if (_conversationFilter == 'all') return true;
-      if (_conversationFilter == 'general')
+      if (_conversationFilter == 'general') {
         return conv.contextType == 'general';
-      if (_conversationFilter == 'disputes')
+      }
+      if (_conversationFilter == 'disputes') {
         return conv.contextType.startsWith(
           'dispute',
         ); // Both 'dispute' and 'dispute_completed'
+      }
       return true;
     }).toList();
 
