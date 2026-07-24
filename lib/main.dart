@@ -1697,11 +1697,11 @@ class PlansScreen extends StatelessWidget {
               final pricing =
                   snapshot.data ??
                   {
-                    'symbol': '\$',
-                    'premium': 12.99,
-                    'expert': 59.99,
-                    'deposit': 599.0,
-                    'tier': 1,
+                    'symbol': '₹',
+                    'premium': 999,
+                    'expert': 4999,
+                    'deposit': 50000,
+                    'tier': 2,
                   };
 
               final symbol = pricing['symbol'] as String;
