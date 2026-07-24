@@ -74,7 +74,7 @@ class _LiveCameraScreenState extends State<LiveCameraScreen> {
       if (!mounted) return;
       final bytes = await picked.readAsBytes();
       if (!mounted) return;
-      Navigator.pop(context, bytes);
+      Navigator.pop(context, {'type': 'photo', 'bytes': bytes});
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -187,7 +187,9 @@ class _LiveCameraScreenState extends State<LiveCameraScreen> {
       debugPrint('✅ Photo captured successfully: ${image.path}');
 
       if (!mounted) return;
-      Navigator.pop(context, {'type': 'photo', 'path': image.path});
+      // Read bytes from the captured image file
+      final bytes = await XFile(image.path).readAsBytes();
+      Navigator.pop(context, {'type': 'photo', 'bytes': bytes});
     } catch (e) {
       debugPrint('❌ Photo capture error: $e');
       if (!mounted) return;

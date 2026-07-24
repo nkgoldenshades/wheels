@@ -37,6 +37,7 @@ class _AddVehicleScreenState extends State<AddVehicleScreen> {
         '-${hex(b[8])}${hex(b[9])}'
         '-${hex(b[10])}${hex(b[11])}${hex(b[12])}${hex(b[13])}${hex(b[14])}${hex(b[15])}';
   }
+
   String? _selectedVehicleType;
   final List<String> _vehicleTypes = [
     'Car',
@@ -431,7 +432,7 @@ class _AddVehicleScreenState extends State<AddVehicleScreen> {
         );
 
         if (result == null || !mounted) return;
-        bytes = await XFile(result['path']).readAsBytes();
+        bytes = result['bytes'] as Uint8List;
       } else {
         // Gallery picker
         final XFile? image = await _picker.pickImage(
@@ -530,7 +531,7 @@ class _AddVehicleScreenState extends State<AddVehicleScreen> {
         );
 
         if (result == null || !mounted) return;
-        bytes = await XFile(result['path']).readAsBytes();
+        bytes = result['bytes'] as Uint8List;
       } else {
         final XFile? image = await _picker.pickImage(
           source: ImageSource.gallery,
@@ -712,10 +713,11 @@ class _AddVehicleScreenState extends State<AddVehicleScreen> {
     }
 
     final name = _nameController.text.trim();
-    final type = (_selectedVehicleType == 'Other'
-            ? _customTypeController.text.trim()
-            : (_selectedVehicleType ?? ''))
-        .trim();
+    final type =
+        (_selectedVehicleType == 'Other'
+                ? _customTypeController.text.trim()
+                : (_selectedVehicleType ?? ''))
+            .trim();
     final yearText = _yearController.text.trim();
     final int? year = yearText.isEmpty ? null : int.tryParse(yearText);
 
@@ -724,18 +726,24 @@ class _AddVehicleScreenState extends State<AddVehicleScreen> {
 
     // Upload profile image to Supabase Storage instead of storing base64
     String? profileImageUrl = _profileImageBase64;
-    if (_profileImageBase64 != null && !_profileImageBase64!.startsWith('http')) {
+    if (_profileImageBase64 != null &&
+        !_profileImageBase64!.startsWith('http')) {
       try {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Uploading image...')),
-          );
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text('Uploading image...')));
         }
         final bytes = base64Decode(_profileImageBase64!);
-        final path = '$userId/$vehicleId/profile_${DateTime.now().millisecondsSinceEpoch}.jpg';
+        final path =
+            '$userId/$vehicleId/profile_${DateTime.now().millisecondsSinceEpoch}.jpg';
         await Supabase.instance.client.storage
             .from('vehicle_media')
-            .uploadBinary(path, bytes, fileOptions: const FileOptions(contentType: 'image/jpeg'));
+            .uploadBinary(
+              path,
+              bytes,
+              fileOptions: const FileOptions(contentType: 'image/jpeg'),
+            );
         profileImageUrl = Supabase.instance.client.storage
             .from('vehicle_media')
             .getPublicUrl(path);
@@ -756,10 +764,15 @@ class _AddVehicleScreenState extends State<AddVehicleScreen> {
       }
       try {
         final bytes = base64Decode(img);
-        final path = '$userId/$vehicleId/gallery_${i}_${DateTime.now().millisecondsSinceEpoch}.jpg';
+        final path =
+            '$userId/$vehicleId/gallery_${i}_${DateTime.now().millisecondsSinceEpoch}.jpg';
         await Supabase.instance.client.storage
             .from('vehicle_media')
-            .uploadBinary(path, bytes, fileOptions: const FileOptions(contentType: 'image/jpeg'));
+            .uploadBinary(
+              path,
+              bytes,
+              fileOptions: const FileOptions(contentType: 'image/jpeg'),
+            );
         final url = Supabase.instance.client.storage
             .from('vehicle_media')
             .getPublicUrl(path);
@@ -775,7 +788,8 @@ class _AddVehicleScreenState extends State<AddVehicleScreen> {
       userId: userId,
       userName: ProfileRepository.instance.profile.value.profileName.isNotEmpty
           ? ProfileRepository.instance.profile.value.profileName
-          : (AuthRepository.instance.currentUser?.profileName ?? 'Unknown User'),
+          : (AuthRepository.instance.currentUser?.profileName ??
+                'Unknown User'),
       name: name,
       type: type,
       year: year,
@@ -789,6 +803,3 @@ class _AddVehicleScreenState extends State<AddVehicleScreen> {
     if (mounted) Navigator.pop(context, vehicle);
   }
 }
-
-
-
