@@ -478,6 +478,10 @@ class ProfileRepository {
         debugPrint(
           '✅ Profile loaded with bankCurrency: Currency synced to ${profileInfo.bankCurrency}',
         );
+      } else {
+        // No payment provider or bank currency set - default to INR for India-based users
+        await AppPreferences.instance.setCurrencyCode('INR');
+        debugPrint('✅ No payment provider set: Currency defaulted to INR');
       }
 
       if (kDebugMode) print('✅ Profile loaded: ${profile.value.profileName}');
