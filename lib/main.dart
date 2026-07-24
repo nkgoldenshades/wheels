@@ -106,8 +106,9 @@ void main() async {
 
   // Add global error handlers to prevent crashes
   FlutterError.onError = (FlutterErrorDetails details) {
-    FlutterError.presentError(details);
+    // Only show error UI in debug mode
     if (kDebugMode) {
+      FlutterError.presentError(details);
       print('? Flutter Error: ${details.exception}');
       print('Stack: ${details.stack}');
     }
