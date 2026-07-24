@@ -4006,30 +4006,75 @@ class SettingsPage extends StatelessWidget {
                           style: TextStyle(fontSize: 13, color: Colors.grey),
                         ),
                         const SizedBox(height: 12),
-                        SizedBox(
-                          width: double.infinity,
-                          child: ElevatedButton.icon(
-                            onPressed: () async {
-                              // Trigger Razorpay setup
-                              try {
-                                await ProfileRepository.instance
-                                    .updatePaymentProvider('razorpay');
-                              } catch (e) {
-                                if (context.mounted) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(content: Text('Error: $e')),
-                                  );
+                        // Only show setup button if Razorpay is NOT already selected
+                        if (info.paymentProvider != 'razorpay')
+                          SizedBox(
+                            width: double.infinity,
+                            child: ElevatedButton.icon(
+                              onPressed: () async {
+                                // Trigger Razorpay setup
+                                try {
+                                  await ProfileRepository.instance
+                                      .updatePaymentProvider('razorpay');
+                                } catch (e) {
+                                  if (context.mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(content: Text('Error: $e')),
+                                    );
+                                  }
                                 }
-                              }
-                            },
-                            icon: const Icon(Icons.account_balance),
-                            label: const Text('Setup Razorpay Now'),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.blue,
-                              foregroundColor: Colors.white,
+                              },
+                              icon: const Icon(Icons.account_balance),
+                              label: const Text('Setup Razorpay Now'),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.blue,
+                                foregroundColor: Colors.white,
+                              ),
+                            ),
+                          )
+                        else
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Colors.green.withValues(alpha: 0.1),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: Colors.green, width: 2),
+                            ),
+                            child: const Row(
+                              children: [
+                                Icon(
+                                  Icons.check_circle,
+                                  color: Colors.green,
+                                  size: 24,
+                                ),
+                                SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        'Razorpay Setup Complete ✓',
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.green,
+                                          fontSize: 14,
+                                        ),
+                                      ),
+                                      Text(
+                                        'Ready to receive payments in INR',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: Colors.grey,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
-                        ),
                       ],
                     ),
                   ),
