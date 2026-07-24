@@ -142,11 +142,39 @@ class _LiveCameraScreenState extends State<LiveCameraScreen> {
   }
 
   Future<void> _capturePhoto() async {
-    if (_controller == null || !_controller!.value.isInitialized) {
+    // Comprehensive checks before attempting capture
+    if (_controller == null) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Camera not initialized. Please try again.'),
+            content: Text(
+              'Camera controller not initialized. Please go back and try again.',
+            ),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+      return;
+    }
+
+    if (!_controller!.value.isInitialized) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Camera is still initializing. Please wait...'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+      return;
+    }
+
+    if (_controller!.value.isTakingPicture) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Already taking a photo. Please wait...'),
+            backgroundColor: Colors.orange,
           ),
         );
       }
@@ -157,6 +185,7 @@ class _LiveCameraScreenState extends State<LiveCameraScreen> {
       debugPrint('📷 Starting photo capture...');
       final image = await _controller!.takePicture();
       debugPrint('✅ Photo captured successfully: ${image.path}');
+
       if (!mounted) return;
       Navigator.pop(context, {'type': 'photo', 'path': image.path});
     } catch (e) {
@@ -164,19 +193,26 @@ class _LiveCameraScreenState extends State<LiveCameraScreen> {
       if (!mounted) return;
 
       String errorMsg = 'Failed to capture photo';
-      if (e.toString().contains('permission')) {
-        errorMsg = 'Camera permission denied. Please check your permissions.';
-      } else if (e.toString().contains('storage')) {
-        errorMsg = 'Storage permission required to save photo.';
-      } else if (e.toString().contains('timeout')) {
+      if (e.toString().contains('permission') ||
+          e.toString().contains('Permission')) {
+        errorMsg =
+            'Camera permission denied. Please check your device settings.';
+      } else if (e.toString().contains('storage') ||
+          e.toString().contains('Storage')) {
+        errorMsg =
+            'Storage permission required. Please check your device settings.';
+      } else if (e.toString().contains('timeout') ||
+          e.toString().contains('Timeout')) {
         errorMsg = 'Camera capture timeout. Please try again.';
+      } else if (e.toString().contains('camera')) {
+        errorMsg = 'Camera error. Please restart the app and try again.';
       }
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(errorMsg),
           backgroundColor: Colors.red,
-          duration: const Duration(seconds: 3),
+          duration: const Duration(seconds: 4),
         ),
       );
     }
