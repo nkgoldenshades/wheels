@@ -1094,9 +1094,27 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
 
   /// Get currency symbol from provider's connected payment account
   String _getProviderCurrencySymbol() {
-    // Always use the user's selected currency from settings
-    // Not the provider's bank currency
-    return AppPreferences.instance.currencySymbol;
+    // Get currency based on payment provider (Razorpay=INR, Stripe=bankCurrency, etc)
+    final currency = _determineCurrencyType();
+
+    // Convert currency code to symbol
+    final currencySymbols = {
+      'INR': '₹',
+      'USD': '\$',
+      'GBP': '£',
+      'EUR': '€',
+      'AED': 'د.إ',
+      'SGD': 'S\$',
+      'AUD': 'A\$',
+      'CAD': 'C\$',
+      'JPY': '¥',
+      'CNY': '¥',
+      'HKD': 'HK\$',
+      'BRL': 'R\$',
+      'MXN': 'MX\$',
+    };
+
+    return currencySymbols[currency] ?? currency;
   }
 
   @override
