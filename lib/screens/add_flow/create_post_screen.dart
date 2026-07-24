@@ -1951,21 +1951,26 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
             style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 8),
-          TextField(
-            controller: _priceController,
-            keyboardType: TextInputType.number,
-            decoration: InputDecoration(
-              labelText: widget.serviceType == ServiceType.lease
-                  ? 'Total Lease Price'
-                  : 'Price per ${widget.serviceType == ServiceType.working
-                        ? 'job'
-                        : widget.serviceType == ServiceType.parcel
-                        ? 'parcel'
-                        : 'seat'}',
-              hintText: 'Enter amount',
-              prefixText: _getProviderCurrencySymbol(),
-              border: const OutlineInputBorder(),
-            ),
+          ValueListenableBuilder<ProfileInfo>(
+            valueListenable: ProfileRepository.instance.profile,
+            builder: (context, profile, _) {
+              return TextField(
+                controller: _priceController,
+                keyboardType: TextInputType.number,
+                decoration: InputDecoration(
+                  labelText: widget.serviceType == ServiceType.lease
+                      ? 'Total Lease Price'
+                      : 'Price per ${widget.serviceType == ServiceType.working
+                            ? 'job'
+                            : widget.serviceType == ServiceType.parcel
+                            ? 'parcel'
+                            : 'seat'}',
+                  hintText: 'Enter amount',
+                  prefixText: _getProviderCurrencySymbol(),
+                  border: const OutlineInputBorder(),
+                ),
+              );
+            },
           ),
           const SizedBox(height: 12),
           // Hide capacity for Lease service (entire vehicle is booked)
@@ -2169,16 +2174,21 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
           style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
         ),
         const SizedBox(height: 12),
-        TextFormField(
-          controller: _securityDepositController,
-          decoration: InputDecoration(
-            labelText: 'Security Deposit Amount (optional)',
-            border: const OutlineInputBorder(),
-            prefixText: '${_getProviderCurrencySymbol()} ',
-            helperText: 'Refundable deposit held until service completion',
-            hintText: 'Enter amount or leave empty for no deposit',
-          ),
-          keyboardType: TextInputType.number,
+        ValueListenableBuilder<ProfileInfo>(
+          valueListenable: ProfileRepository.instance.profile,
+          builder: (context, profile, _) {
+            return TextFormField(
+              controller: _securityDepositController,
+              decoration: InputDecoration(
+                labelText: 'Security Deposit Amount (optional)',
+                border: const OutlineInputBorder(),
+                prefixText: '${_getProviderCurrencySymbol()} ',
+                helperText: 'Refundable deposit held until service completion',
+                hintText: 'Enter amount or leave empty for no deposit',
+              ),
+              keyboardType: TextInputType.number,
+            );
+          },
         ),
         const SizedBox(height: 8),
         Text(
