@@ -481,18 +481,24 @@ class _CreateEventSlotScreenState extends State<CreateEventSlotScreen> {
                 },
               ),
               const SizedBox(height: 16),
-              TextFormField(
-                controller: _priceController,
-                decoration: InputDecoration(
-                  labelText: 'Price (${_getProviderCurrencySymbol()})',
-                  border: const OutlineInputBorder(),
-                  prefixIcon: const Icon(Icons.currency_rupee),
-                ),
-                keyboardType: TextInputType.number,
-                validator: (value) {
-                  if (value?.isEmpty ?? true) return 'Required';
-                  if (double.tryParse(value!) == null) return 'Invalid number';
-                  return null;
+              ValueListenableBuilder<ProfileInfo>(
+                valueListenable: ProfileRepository.instance.profile,
+                builder: (context, profile, _) {
+                  return TextFormField(
+                    controller: _priceController,
+                    decoration: InputDecoration(
+                      labelText: 'Price (${_getProviderCurrencySymbol()})',
+                      border: const OutlineInputBorder(),
+                      prefixIcon: const Icon(Icons.currency_rupee),
+                    ),
+                    keyboardType: TextInputType.number,
+                    validator: (value) {
+                      if (value?.isEmpty ?? true) return 'Required';
+                      if (double.tryParse(value!) == null)
+                        return 'Invalid number';
+                      return null;
+                    },
+                  );
                 },
               ),
             ] else ...[

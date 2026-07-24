@@ -541,15 +541,20 @@ class _CreateSlotScreenState extends State<CreateSlotScreen> {
               ),
               const SizedBox(width: 12),
               Expanded(
-                child: TextField(
-                  controller: _priceController,
-                  keyboardType: TextInputType.number,
-                  decoration: InputDecoration(
-                    labelText: 'Price *',
-                    hintText: '500',
-                    border: const OutlineInputBorder(),
-                    prefixText: '${_getProviderCurrencySymbol()} ',
-                  ),
+                child: ValueListenableBuilder<ProfileInfo>(
+                  valueListenable: ProfileRepository.instance.profile,
+                  builder: (context, profile, _) {
+                    return TextField(
+                      controller: _priceController,
+                      keyboardType: TextInputType.number,
+                      decoration: InputDecoration(
+                        labelText: 'Price *',
+                        hintText: '500',
+                        border: const OutlineInputBorder(),
+                        prefixText: '${_getProviderCurrencySymbol()} ',
+                      ),
+                    );
+                  },
                 ),
               ),
             ],
