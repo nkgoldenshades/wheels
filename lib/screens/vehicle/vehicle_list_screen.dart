@@ -192,7 +192,7 @@ class _VehicleListScreenState extends State<VehicleListScreen> {
                     Navigator.push(
                       context,
                       MaterialPageRoute(
-                        settings: const RouteSettings(name: 'vehicle_detail'),
+                        settings: const RouteSettings(name: '/vehicle_detail'),
                         builder: (context) => VehicleActionsScreen(
                           vehicleId: v.id,
                           isUserMode: widget.isUserMode,
