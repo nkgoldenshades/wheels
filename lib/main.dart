@@ -4165,8 +4165,14 @@ class SettingsPage extends StatelessWidget {
                                                   try {
                                                     await ProfileRepository
                                                         .instance
-                                                        .linkRazorpayAccount(
+                                                        .updateRazorpayAccount(
                                                           accountId,
+                                                        );
+                                                    // Also set payment provider to razorpay
+                                                    await ProfileRepository
+                                                        .instance
+                                                        .updatePaymentProvider(
+                                                          'razorpay',
                                                         );
                                                     if (ctx.mounted) {
                                                       Navigator.pop(ctx);
