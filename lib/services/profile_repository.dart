@@ -463,6 +463,23 @@ class ProfileRepository {
         _currentProfile = profileInfo;
       }
 
+      // CRITICAL: Sync AppPreferences currency with payment provider
+      // When profile loads, ensure AppPreferences matches the payment provider
+      if (profileInfo.paymentProvider == 'razorpay') {
+        // Razorpay only supports INR
+        await AppPreferences.instance.setCurrencyCode('INR');
+        debugPrint('✅ Profile loaded with Razorpay: Currency synced to INR');
+      } else if (profileInfo.bankCurrency != null &&
+          profileInfo.bankCurrency!.isNotEmpty) {
+        // For Stripe or other providers with bankCurrency, sync that
+        await AppPreferences.instance.setCurrencyCode(
+          profileInfo.bankCurrency!.toUpperCase(),
+        );
+        debugPrint(
+          '✅ Profile loaded with bankCurrency: Currency synced to ${profileInfo.bankCurrency}',
+        );
+      }
+
       if (kDebugMode) print('✅ Profile loaded: ${profile.value.profileName}');
       return profileInfo;
     } catch (e) {
@@ -662,6 +679,13 @@ class ProfileRepository {
   Future<void> updatePaymentProvider(String provider) async {
     final p = await _ensureProfileLoaded();
     await saveProfile(p.copyWith(paymentProvider: provider));
+
+    // CRITICAL: Sync AppPreferences currency with payment provider
+    // Razorpay only supports INR, so force it
+    if (provider == 'razorpay') {
+      await AppPreferences.instance.setCurrencyCode('INR');
+      debugPrint('✅ Razorpay selected: Currency set to INR');
+    }
   }
 
   Future<void> updateStripeAccount(String accountId, {String? currency}) async {
@@ -717,6 +741,10 @@ class ProfileRepository {
     await saveProfile(
       p.copyWith(razorpayAccountId: accountId, bankCurrency: 'INR'),
     );
+
+    // CRITICAL: Sync AppPreferences currency when Razorpay account is set
+    await AppPreferences.instance.setCurrencyCode('INR');
+    debugPrint('✅ Razorpay account linked: Currency forced to INR');
   }
 
   Future<void> updateCountry(String country) async {
