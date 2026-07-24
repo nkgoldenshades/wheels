@@ -54,9 +54,9 @@ class PricingService {
       return pricing;
     } catch (e) {
       debugPrint('[PricingService] ⚠️ Database fetch failed for $curr: $e');
-      debugPrint('[PricingService] Falling back to default USD Tier 1 pricing');
+      debugPrint('[PricingService] Falling back to default INR Tier 2 pricing');
 
-      // Fallback to default USD Tier 1 pricing
+      // Fallback to default INR Tier 2 pricing (India-first app)
       return _getDefaultPricing();
     }
   }
@@ -216,10 +216,10 @@ class PricingService {
   Map<String, dynamic> _getDefaultPricing() {
     return {
       'symbol': '₹',
-      'premium': 12.99,
-      'expert': 59.99,
-      'deposit': 599.0,
-      'tier': 1,
+      'premium': 999,
+      'expert': 4999,
+      'deposit': 50000,
+      'tier': 2,
       'country': 'Default (India)',
       'continent': null,
     };
