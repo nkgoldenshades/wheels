@@ -4068,6 +4068,8 @@ class SettingsPage extends StatelessWidget {
                                     try {
                                       // For new Razorpay users, show setup instructions
                                       if (!isRazorpay) {
+                                        final accountIdController =
+                                            TextEditingController();
                                         showDialog(
                                           context: context,
                                           builder: (ctx) => AlertDialog(
@@ -4096,7 +4098,7 @@ class SettingsPage extends StatelessWidget {
                                                 const SizedBox(height: 16),
                                                 TextField(
                                                   controller:
-                                                      TextEditingController(),
+                                                      accountIdController,
                                                   decoration: InputDecoration(
                                                     hintText:
                                                         'Your Razorpay Account ID',
@@ -4138,6 +4140,65 @@ class SettingsPage extends StatelessWidget {
                                                 ),
                                                 label: const Text(
                                                   'Go to Razorpay',
+                                                ),
+                                              ),
+                                              ElevatedButton.icon(
+                                                onPressed: () async {
+                                                  final accountId =
+                                                      accountIdController.text
+                                                          .trim();
+                                                  if (accountId.isEmpty) {
+                                                    if (ctx.mounted) {
+                                                      ScaffoldMessenger.of(
+                                                        ctx,
+                                                      ).showSnackBar(
+                                                        const SnackBar(
+                                                          content: Text(
+                                                            'Please enter your Razorpay Account ID',
+                                                          ),
+                                                        ),
+                                                      );
+                                                    }
+                                                    return;
+                                                  }
+
+                                                  try {
+                                                    await ProfileRepository
+                                                        .instance
+                                                        .linkRazorpayAccount(
+                                                          accountId,
+                                                        );
+                                                    if (ctx.mounted) {
+                                                      Navigator.pop(ctx);
+                                                      ScaffoldMessenger.of(
+                                                        context,
+                                                      ).showSnackBar(
+                                                        const SnackBar(
+                                                          content: Text(
+                                                            '✅ Razorpay account linked!',
+                                                          ),
+                                                          backgroundColor:
+                                                              Colors.green,
+                                                        ),
+                                                      );
+                                                    }
+                                                  } catch (e) {
+                                                    if (ctx.mounted) {
+                                                      ScaffoldMessenger.of(
+                                                        ctx,
+                                                      ).showSnackBar(
+                                                        SnackBar(
+                                                          content: Text(
+                                                            'Error: $e',
+                                                          ),
+                                                        ),
+                                                      );
+                                                    }
+                                                  }
+                                                },
+                                                icon: const Icon(Icons.save),
+                                                label: const Text(
+                                                  'Save Account',
                                                 ),
                                               ),
                                             ],
