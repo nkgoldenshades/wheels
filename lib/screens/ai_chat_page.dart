@@ -7,6 +7,7 @@ import '../services/profile_repository.dart';
 import '../services/payment_service.dart';
 import '../services/app_preferences.dart';
 import '../services/dispute_service.dart';
+import '../services/credit_repository.dart';
 import 'package:image_picker/image_picker.dart';
 // import 'package:speech_to_text/speech_to_text.dart'; // Commented out for Windows compatibility
 // import 'package:permission_handler/permission_handler.dart'; // Not needed
@@ -604,9 +605,10 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
             const SizedBox(height: 8),
             _buildCreditPackage(context, 1000, 7),
             const SizedBox(height: 16),
-            const Text(
-              '💡 1 credit = 1 AI message',
-              style: TextStyle(fontSize: 12, color: Colors.grey),
+            Text(
+              'Cost varies by message length & complexity\n'
+              '1 credit = ${AppPreferences.instance.currencySymbol}0.06',
+              style: const TextStyle(fontSize: 12, color: Colors.grey),
             ),
           ],
         ),
@@ -616,6 +618,113 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
             child: const Text('Cancel'),
           ),
         ],
+      ),
+    );
+  }
+
+  // ✅ NEW: Quick credit purchase from chat
+  void _showCreditPurchaseBottomSheet() {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 8),
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.grey[300],
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'Get AI Credits',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '1 credit = ${AppPreferences.instance.currencySymbol}0.06',
+              style: TextStyle(fontSize: 14, color: Colors.grey[600]),
+            ),
+            const SizedBox(height: 20),
+            // Credit packages
+            _buildCreditPackageButton(
+              context,
+              50,
+              '${AppPreferences.instance.currencySymbol}3',
+            ),
+            const SizedBox(height: 12),
+            _buildCreditPackageButton(
+              context,
+              200,
+              '${AppPreferences.instance.currencySymbol}10',
+              popular: true,
+            ),
+            const SizedBox(height: 12),
+            _buildCreditPackageButton(
+              context,
+              1000,
+              '${AppPreferences.instance.currencySymbol}50',
+            ),
+            const SizedBox(height: 20),
+            Text(
+              'Pricing is based on actual API token usage',
+              style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ✅ Helper for credit package button in bottom sheet
+  Widget _buildCreditPackageButton(
+    BuildContext context,
+    int credits,
+    String price, {
+    bool popular = false,
+  }) {
+    return Container(
+      decoration: BoxDecoration(
+        border: Border.all(
+          color: popular ? Colors.blue : Colors.grey[300]!,
+          width: popular ? 2 : 1,
+        ),
+        borderRadius: BorderRadius.circular(12),
+        color: popular ? Colors.blue[50] : null,
+      ),
+      child: ListTile(
+        title: Text('$credits Credits'),
+        subtitle: Text(price),
+        trailing: popular
+            ? Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.blue,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: const Text(
+                  'Popular',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              )
+            : null,
+        onTap: () {
+          Navigator.pop(context);
+          // Navigate to buy credits screen
+          Navigator.pushNamed(context, '/buy_credits');
+        },
       ),
     );
   }
@@ -864,14 +973,38 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
         "⚠️ AI Assistant is temporarily unavailable. Please try again later.",
         isError: true,
       );
-      // FIXED: _isLoading was not being reset, causing button to stay loading
       return;
     }
 
     try {
+      // ✅ Check credits before sending
+      final estimatedCredits = CreditRepository.estimateCreditCostForMessage(
+        userText,
+      );
+      final hasCredits = await CreditRepository.instance.hasEnoughCreditsForAI(
+        estimatedCredits: estimatedCredits,
+      );
+
+      if (!hasCredits) {
+        final currentBalance = CreditRepository.instance.creditBalance.value;
+        _addAIMessage(
+          "⚠️ Insufficient credits to send message.\n\n"
+          "You have $currentBalance credits, need ≈$estimatedCredits.\n\n"
+          "Tap 'Buy Credits' to purchase more.",
+          isError: true,
+        );
+        return;
+      }
+
       debugPrint('📤 Sending to Firebase Gemini API: $userText');
       final response = await _chat!.sendMessage(Content.text(userText));
       final aiText = response.text?.trim();
+
+      // ✅ Extract token counts from response
+      final inputTokens = response.usageMetadata?.promptTokenCount ?? 0;
+      final outputTokens = response.usageMetadata?.candidatesTokenCount ?? 0;
+      debugPrint('📊 Tokens - Input: $inputTokens, Output: $outputTokens');
+
       debugPrint('📥 Firebase Gemini API response: $aiText');
 
       if (aiText == null || aiText.isEmpty) {
@@ -880,7 +1013,21 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
           isError: true,
         );
       } else {
-        _addAIMessage(aiText);
+        // ✅ Deduct real credits based on token usage
+        final deducted = await CreditRepository.instance.deductCredits(
+          inputTokens: inputTokens,
+          outputTokens: outputTokens,
+          conversationId: _currentConversationId?.toString(),
+        );
+
+        if (deducted) {
+          debugPrint('✅ Credits deducted successfully');
+          _addAIMessage(aiText, tokenUsage: (inputTokens, outputTokens));
+        } else {
+          debugPrint('⚠️ Failed to deduct credits but showing message');
+          // Still show message - credit deduction is best-effort
+          _addAIMessage(aiText);
+        }
       }
     } catch (e) {
       debugPrint('❌ Firebase Gemini API error: $e');
@@ -891,8 +1038,21 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
     }
   }
 
-  void _addAIMessage(String text, {bool isError = false}) {
+  void _addAIMessage(
+    String text, {
+    bool isError = false,
+    (int, int)? tokenUsage,
+  }) {
     if (mounted) {
+      // Calculate credit cost from token usage if available
+      int? creditCost;
+      if (tokenUsage != null) {
+        creditCost = CreditRepository.estimateCreditCostForTokens(
+          inputTokens: tokenUsage.$1,
+          outputTokens: tokenUsage.$2,
+        );
+      }
+
       setState(() {
         _messages.add(
           ChatMessage(
@@ -900,6 +1060,8 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
             isUser: false,
             timestamp: DateTime.now(),
             isError: isError,
+            tokenUsage: tokenUsage,
+            creditCost: creditCost,
           ),
         );
         _isLoading = false;
@@ -1797,6 +1959,51 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
                         ),
                 ),
 
+                // ✅ Balance display
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.blue[50],
+                    border: Border(
+                      bottom: BorderSide(color: Colors.blue[200]!),
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      ValueListenableBuilder<int>(
+                        valueListenable:
+                            CreditRepository.instance.creditBalance,
+                        builder: (context, balance, child) {
+                          return Text(
+                            '💳 Balance: $balance credits',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: balance > 10
+                                  ? Colors.green[700]
+                                  : balance > 0
+                                  ? Colors.orange[700]
+                                  : Colors.red[700],
+                            ),
+                          );
+                        },
+                      ),
+                      TextButton.icon(
+                        onPressed: _showCreditPurchaseBottomSheet,
+                        icon: const Icon(Icons.add_circle_outline, size: 18),
+                        label: const Text('Buy Credits'),
+                        style: TextButton.styleFrom(
+                          foregroundColor: Colors.blue,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
                 // Message input
                 Container(
                   padding: const EdgeInsets.symmetric(
@@ -1938,12 +2145,16 @@ class ChatMessage {
   final bool isUser;
   final DateTime timestamp;
   final bool isError;
+  final (int, int)? tokenUsage; // (inputTokens, outputTokens)
+  final int? creditCost; // credits charged
 
   ChatMessage({
     required this.text,
     required this.isUser,
     required this.timestamp,
     this.isError = false,
+    this.tokenUsage,
+    this.creditCost,
   });
 }
 
@@ -1968,45 +2179,75 @@ class ChatBubble extends StatelessWidget {
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        mainAxisAlignment: message.isUser
-            ? MainAxisAlignment.end
-            : MainAxisAlignment.start,
-        crossAxisAlignment: CrossAxisAlignment.end,
+      child: Column(
+        crossAxisAlignment: message.isUser
+            ? CrossAxisAlignment.end
+            : CrossAxisAlignment.start,
         children: [
-          if (!message.isUser) ...[
-            CircleAvatar(
-              radius: 16,
-              backgroundColor: message.isError ? Colors.red : Colors.blue,
-              child: Icon(
-                message.isError ? Icons.error : Icons.smart_toy,
-                size: 16,
-                color: Colors.white,
-              ),
-            ),
-            const SizedBox(width: 8),
-          ],
-          Flexible(
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              decoration: BoxDecoration(
-                color: bubbleColor,
-                borderRadius: BorderRadius.only(
-                  topLeft: const Radius.circular(20),
-                  topRight: const Radius.circular(20),
-                  bottomLeft: Radius.circular(message.isUser ? 20 : 4),
-                  bottomRight: Radius.circular(message.isUser ? 4 : 20),
+          Row(
+            mainAxisAlignment: message.isUser
+                ? MainAxisAlignment.end
+                : MainAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              if (!message.isUser) ...[
+                CircleAvatar(
+                  radius: 16,
+                  backgroundColor: message.isError ? Colors.red : Colors.blue,
+                  child: Icon(
+                    message.isError ? Icons.error : Icons.smart_toy,
+                    size: 16,
+                    color: Colors.white,
+                  ),
+                ),
+                const SizedBox(width: 8),
+              ],
+              Flexible(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 12,
+                  ),
+                  decoration: BoxDecoration(
+                    color: bubbleColor,
+                    borderRadius: BorderRadius.only(
+                      topLeft: const Radius.circular(20),
+                      topRight: const Radius.circular(20),
+                      bottomLeft: Radius.circular(message.isUser ? 20 : 4),
+                      bottomRight: Radius.circular(message.isUser ? 4 : 20),
+                    ),
+                  ),
+                  child: Text(message.text, style: TextStyle(color: textColor)),
                 ),
               ),
-              child: Text(message.text, style: TextStyle(color: textColor)),
-            ),
+              if (message.isUser) ...[
+                const SizedBox(width: 8),
+                CircleAvatar(
+                  radius: 16,
+                  backgroundColor: Colors.grey[400],
+                  child: const Icon(
+                    Icons.person,
+                    size: 16,
+                    color: Colors.white,
+                  ),
+                ),
+              ],
+            ],
           ),
-          if (message.isUser) ...[
-            const SizedBox(width: 8),
-            CircleAvatar(
-              radius: 16,
-              backgroundColor: Colors.grey[400],
-              child: const Icon(Icons.person, size: 16, color: Colors.white),
+          // ✅ Show cost info for AI messages with token usage
+          if (!message.isUser &&
+              message.tokenUsage != null &&
+              message.creditCost != null) ...[
+            const SizedBox(height: 4),
+            Padding(
+              padding: EdgeInsets.only(
+                left: message.isUser ? 0 : 24,
+                right: message.isUser ? 24 : 0,
+              ),
+              child: Text(
+                '💳 Cost: ${message.creditCost} credits • ${message.tokenUsage!.$1 + message.tokenUsage!.$2} tokens',
+                style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+              ),
             ),
           ],
         ],

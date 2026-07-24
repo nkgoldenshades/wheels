@@ -1,0 +1,14 @@
+{
+  "specType": "feature",
+  "title": "AI Credit Deduction System",
+  "description": "Implement proper credit deduction for AI chat messages based on actual Gemini API token usage",
+  "status": "new",
+  "createdAt": "2026-07-24",
+  "priority": "high",
+  "estimatedHours": 4.5,
+  "team": ["backend", "frontend"],
+  "tags": ["payments", "ai", "credits", "monetization"],
+  "relatedSpecs": ["guest-mode-optional-auth"],
+  "blockers": [],
+  "notes": "Currently credits are NOT being deducted at all. Users get unlimited free AI messages. This spec implements the missing deduction logic."
+}

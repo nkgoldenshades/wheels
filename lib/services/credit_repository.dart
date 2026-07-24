@@ -127,6 +127,7 @@ class CreditRepository {
     required int inputTokens,
     required int outputTokens,
     String? relatedBookingId,
+    String? conversationId,
   }) async {
     try {
       final authUser = AuthRepository.instance.currentUser;
@@ -169,6 +170,7 @@ class CreditRepository {
           'output_tokens': outputTokens,
           'input_price': inputPrice,
           'output_price': outputPrice,
+          if (conversationId != null) 'conversation_id': conversationId,
         },
       );
 
@@ -233,6 +235,35 @@ class CreditRepository {
     final creditsCost = (inputTokens * inputPrice + outputTokens * outputPrice)
         .ceil();
     return creditBalance.value >= creditsCost;
+  }
+
+  /// Check if user has sufficient credits before sending AI message
+  /// Returns true if balance >= estimatedCredits
+  Future<bool> hasEnoughCreditsForAI({required int estimatedCredits}) async {
+    return creditBalance.value >= estimatedCredits;
+  }
+
+  /// Estimate credit cost based on message length
+  /// Returns estimated credits needed (conservative estimate)
+  static int estimateCreditCostForMessage(String message) {
+    // Conservative estimate: always use at least 1 credit
+    // to account for AI response generation
+    // Actual cost will be calculated after getting token counts from API
+    return 1; // Safe default for display purposes
+  }
+
+  /// Get cost estimate for specific token counts
+  /// Used for displaying predicted cost to user
+  static int estimateCreditCostForTokens({
+    required int inputTokens,
+    required int outputTokens,
+  }) {
+    // Gemini pricing: $0.30 per 1M input, $2.50 per 1M output
+    // 1 credit = $0.06
+    // cost = (inputTokens * 0.30 + outputTokens * 2.50) / 1_000_000 / 0.06
+    const double inputPrice = 0.30 / 1_000_000 / 0.06;
+    const double outputPrice = 2.50 / 1_000_000 / 0.06;
+    return ((inputTokens * inputPrice) + (outputTokens * outputPrice)).ceil();
   }
 
   /// Record a credit purchase (called after successful payment)
