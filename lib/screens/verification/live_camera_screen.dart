@@ -9,12 +9,12 @@ enum CaptureMode {
 }
 
 /// Live camera screen for capturing photos and videos
-/// 
+///
 /// **Web Behavior:**
 /// On web, ImagePicker uses the browser's native camera API (getUserMedia).
 /// Modern browsers (Chrome, Firefox, Safari) will show a camera permission dialog
 /// and open the device camera directly - NOT the file browser.
-/// 
+///
 /// **Mobile Behavior:**
 /// Uses the native camera plugin for full camera control.
 class LiveCameraScreen extends StatefulWidget {
@@ -90,9 +90,9 @@ class _LiveCameraScreenState extends State<LiveCameraScreen> {
       _cameras = await availableCameras();
       if (_cameras == null || _cameras!.isEmpty) {
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('No camera found')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('No camera found')));
         return;
       }
 
@@ -120,16 +120,18 @@ class _LiveCameraScreenState extends State<LiveCameraScreen> {
     } catch (e) {
       debugPrint('Camera initialization error: $e');
       if (!mounted) return;
-      
+
       if (!mounted) return;
       String errorMessage = 'Camera error: $e';
-      if (e.toString().contains('RECORD_AUDIO') || e.toString().contains('audio')) {
-        errorMessage = 'Audio permission required for video recording. Please grant microphone permission.';
+      if (e.toString().contains('RECORD_AUDIO') ||
+          e.toString().contains('audio')) {
+        errorMessage =
+            'Audio permission required for video recording. Please grant microphone permission.';
       }
-      
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(errorMessage)),
-      );
+
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(errorMessage)));
     }
   }
 
@@ -140,16 +142,42 @@ class _LiveCameraScreenState extends State<LiveCameraScreen> {
   }
 
   Future<void> _capturePhoto() async {
-    if (_controller == null || !_controller!.value.isInitialized) return;
+    if (_controller == null || !_controller!.value.isInitialized) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Camera not initialized. Please try again.'),
+          ),
+        );
+      }
+      return;
+    }
 
     try {
+      debugPrint('📷 Starting photo capture...');
       final image = await _controller!.takePicture();
+      debugPrint('✅ Photo captured successfully: ${image.path}');
       if (!mounted) return;
       Navigator.pop(context, {'type': 'photo', 'path': image.path});
     } catch (e) {
+      debugPrint('❌ Photo capture error: $e');
       if (!mounted) return;
+
+      String errorMsg = 'Failed to capture photo';
+      if (e.toString().contains('permission')) {
+        errorMsg = 'Camera permission denied. Please check your permissions.';
+      } else if (e.toString().contains('storage')) {
+        errorMsg = 'Storage permission required to save photo.';
+      } else if (e.toString().contains('timeout')) {
+        errorMsg = 'Camera capture timeout. Please try again.';
+      }
+
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to capture: $e')),
+        SnackBar(
+          content: Text(errorMsg),
+          backgroundColor: Colors.red,
+          duration: const Duration(seconds: 3),
+        ),
       );
     }
   }
@@ -174,16 +202,18 @@ class _LiveCameraScreenState extends State<LiveCameraScreen> {
       _updateTimer();
     } catch (e) {
       if (!mounted) return;
-      
+
       if (!mounted) return;
       String errorMessage = 'Failed to start recording: $e';
-      if (e.toString().contains('RECORD_AUDIO') || e.toString().contains('audio')) {
-        errorMessage = 'Audio permission required for video recording. Please grant microphone permission.';
+      if (e.toString().contains('RECORD_AUDIO') ||
+          e.toString().contains('audio')) {
+        errorMessage =
+            'Audio permission required for video recording. Please grant microphone permission.';
       }
-      
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(errorMessage)),
-      );
+
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(errorMessage)));
     }
   }
 
@@ -200,14 +230,32 @@ class _LiveCameraScreenState extends State<LiveCameraScreen> {
     if (_controller == null || !_isRecording) return;
 
     try {
+      debugPrint('🎥 Stopping video recording...');
       final video = await _controller!.stopVideoRecording();
+      debugPrint('✅ Video recorded successfully: ${video.path}');
       setState(() => _isRecording = false);
       if (!mounted) return;
       Navigator.pop(context, {'type': 'video', 'path': video.path});
     } catch (e) {
+      debugPrint('❌ Video recording error: $e');
+      setState(() => _isRecording = false);
       if (!mounted) return;
+
+      String errorMsg = 'Failed to stop recording';
+      if (e.toString().contains('permission')) {
+        errorMsg = 'Camera/Audio permission denied.';
+      } else if (e.toString().contains('storage')) {
+        errorMsg = 'Storage permission required to save video.';
+      } else if (e.toString().contains('timeout')) {
+        errorMsg = 'Video recording timeout. Please try again.';
+      }
+
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to stop recording: $e')),
+        SnackBar(
+          content: Text(errorMsg),
+          backgroundColor: Colors.red,
+          duration: const Duration(seconds: 3),
+        ),
       );
     }
   }
@@ -226,9 +274,7 @@ class _LiveCameraScreenState extends State<LiveCameraScreen> {
           : Stack(
               children: [
                 // Camera preview
-                Positioned.fill(
-                  child: CameraPreview(_controller!),
-                ),
+                Positioned.fill(child: CameraPreview(_controller!)),
 
                 // Instruction overlay
                 Positioned(
@@ -346,6 +392,3 @@ class _LiveCameraScreenState extends State<LiveCameraScreen> {
     );
   }
 }
-
-
-
