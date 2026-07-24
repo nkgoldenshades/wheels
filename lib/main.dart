@@ -151,8 +151,21 @@ void main() async {
     if (kDebugMode) print('⚠️ AuthRepository init failed: $e');
   }
 
-  // Now start app - Firebase and Auth are ready
-  if (kDebugMode) print('?? Starting app...');
+  // CRITICAL: Initialize AppPreferences BEFORE app builds UI
+  // This ensures currency is loaded from SharedPreferences
+  if (kDebugMode) print('⚙️ Initializing AppPreferences...');
+  try {
+    await AppPreferences.instance.init();
+    if (kDebugMode)
+      print(
+        '✅ AppPreferences initialized - Currency: ${AppPreferences.instance.currencyCode.value}',
+      );
+  } catch (e) {
+    if (kDebugMode) print('⚠️ AppPreferences init failed: $e');
+  }
+
+  // Now start app - Firebase, Auth, and AppPreferences are ready
+  if (kDebugMode) print('🚀 Starting app...');
   runApp(const MyApp());
 
   // Initialize other services in background (non-blocking)
@@ -246,8 +259,8 @@ Future<void> _initializeServicesInBackground() async {
       // Continue anyway - app can work with limited functionality
     }
 
-    // Initialize core services with timeout protection (AuthRepository already done)
-    await initWithTimeout(AppPreferences.instance.init(), 'AppPreferences');
+    // Initialize core services with timeout protection (AuthRepository already done, AppPreferences done in main)
+    // Skip AppPreferences since it's already initialized in main() before UI builds
 
     // Initialize ProfileRepository with timeout protection (already had timeout)
     if (kDebugMode) print('? Starting ProfileRepository...');

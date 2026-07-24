@@ -38,8 +38,23 @@ class AppPreferences {
 
   Future<void> init() async {
     final prefs = await SharedPreferences.getInstance();
-    // Default to INR and India for new users
-    currencyCode.value = prefs.getString(_currencyCodeKey) ?? 'INR';
+
+    // CRITICAL: Default to INR for all users (India-based app)
+    // This ensures new users and users without payment provider show INR
+    final savedCurrency = prefs.getString(_currencyCodeKey);
+
+    if (savedCurrency == null || savedCurrency.isEmpty) {
+      // First app load - set to INR
+      currencyCode.value = 'INR';
+      await prefs.setString(_currencyCodeKey, 'INR');
+      debugPrint('💰 First app load: Currency initialized to INR');
+    } else {
+      // Load saved currency
+      currencyCode.value = savedCurrency;
+      debugPrint(
+        '💰 Loaded saved currency from SharedPreferences: $savedCurrency',
+      );
+    }
 
     // Ensure currency code is never null or invalid
     if (currencyCode.value.isEmpty) {
