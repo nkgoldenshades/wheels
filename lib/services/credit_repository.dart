@@ -170,7 +170,7 @@ class CreditRepository {
           'output_tokens': outputTokens,
           'input_price': inputPrice,
           'output_price': outputPrice,
-          if (conversationId != null) 'conversation_id': conversationId,
+          'conversation_id': ?conversationId,
         },
       );
 

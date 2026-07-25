@@ -494,8 +494,9 @@ class _CreateEventSlotScreenState extends State<CreateEventSlotScreen> {
                     keyboardType: TextInputType.number,
                     validator: (value) {
                       if (value?.isEmpty ?? true) return 'Required';
-                      if (double.tryParse(value!) == null)
+                      if (double.tryParse(value!) == null) {
                         return 'Invalid number';
+                      }
                       return null;
                     },
                   );

@@ -156,10 +156,11 @@ void main() async {
   if (kDebugMode) print('⚙️ Initializing AppPreferences...');
   try {
     await AppPreferences.instance.init();
-    if (kDebugMode)
+    if (kDebugMode) {
       print(
         '✅ AppPreferences initialized - Currency: ${AppPreferences.instance.currencyCode.value}',
       );
+    }
   } catch (e) {
     if (kDebugMode) print('⚠️ AppPreferences init failed: $e');
   }
