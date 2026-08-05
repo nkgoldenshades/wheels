@@ -954,18 +954,34 @@ class SlotCard extends StatelessWidget {
           slot.capacity,
         );
 
+        // Check if slot has a layout (with variable prices per seat/compartment)
+        final hasLayout =
+            slot.seatLayoutOwnerId != null || slot.seatLayoutStructure != null;
+
         return Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            // Use post-specific currency symbol instead of global currency
-            Text(
-              '${slot.currencySymbol}${slot.price.toStringAsFixed(0)}',
-              style: const TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-                color: Colors.green,
+            // Only show price if NO layout (prices are fixed for entire post)
+            // Hide price if layout exists (prices vary per seat/compartment)
+            if (!hasLayout)
+              Text(
+                '${slot.currencySymbol}${slot.price.toStringAsFixed(0)}',
+                style: const TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.green,
+                ),
+              )
+            else
+              // Show placeholder text when layout exists
+              Text(
+                'View details',
+                style: TextStyle(
+                  fontSize: 14,
+                  color: Colors.grey[600],
+                  fontStyle: FontStyle.italic,
+                ),
               ),
-            ),
             Row(
               children: [
                 Icon(_getCapacityIcon(), size: 16, color: Colors.grey[600]),

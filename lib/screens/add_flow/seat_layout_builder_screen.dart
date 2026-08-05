@@ -298,43 +298,147 @@ class _SeatLayoutBuilderScreenState extends State<SeatLayoutBuilderScreen> {
       );
     }
 
-    final name = c.seatName ?? '';
     final kindLabel = c.seatKind == SeatKind.berth ? 'B' : 'S';
     final genderLabel = switch (c.gender) {
       SeatGender.male => 'M',
       SeatGender.female => 'F',
       SeatGender.any => '',
     };
-    return Padding(
-      padding: const EdgeInsets.all(4),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Text(
-            '$kindLabel $name${genderLabel.isEmpty ? '' : ' ($genderLabel)'}',
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w700,
-              color: c.isLocked ? Colors.grey : Colors.black,
+
+    // Parse parcel dimensions if they exist (format: name|L:10|B:20|H:30|W:5|...)
+    // IMPORTANT: Only show dimensions if ALL FOUR are present and non-empty (complete compartment)
+    String? length, breadth, height, weight;
+    if (c.seatName != null && c.seatName!.contains('|')) {
+      final parts = c.seatName!.split('|');
+      for (final part in parts.skip(1)) {
+        if (part.startsWith('L:')) {
+          length = part.substring(2);
+        } else if (part.startsWith('B:')) {
+          breadth = part.substring(2);
+        } else if (part.startsWith('H:')) {
+          height = part.substring(2);
+        } else if (part.startsWith('W:')) {
+          weight = part.substring(2);
+        }
+      }
+    }
+
+    // Check if this is a parcel compartment with COMPLETE dimensions
+    // Only show if all 4 dimensions are present AND non-empty
+    final hasCompleteParcelDimensions =
+        length != null &&
+        length.isNotEmpty &&
+        breadth != null &&
+        breadth.isNotEmpty &&
+        height != null &&
+        height.isNotEmpty &&
+        weight != null &&
+        weight.isNotEmpty;
+
+    return Stack(
+      children: [
+        // Top-left: Kind label (S/B/C) with optional gender
+        Positioned(
+          top: 2,
+          left: 2,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                kindLabel,
+                style: TextStyle(
+                  fontSize: 9,
+                  fontWeight: FontWeight.bold,
+                  color: c.isLocked ? Colors.grey : Colors.black,
+                ),
+              ),
+              if (genderLabel.isNotEmpty)
+                Text(
+                  genderLabel,
+                  style: TextStyle(
+                    fontSize: 7,
+                    color: c.isLocked ? Colors.grey : Colors.black54,
+                  ),
+                ),
+            ],
+          ),
+        ),
+
+        // For parcel dimensions: show in vertical stack on left edge (tiny, blue)
+        // ONLY if all dimensions are complete
+        if (hasCompleteParcelDimensions)
+          Positioned(
+            bottom: 2,
+            left: 2,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'L:$length',
+                  style: const TextStyle(fontSize: 5, color: Colors.blue),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                Text(
+                  'B:$breadth',
+                  style: const TextStyle(fontSize: 5, color: Colors.blue),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                Text(
+                  'H:$height',
+                  style: const TextStyle(fontSize: 5, color: Colors.blue),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                Text(
+                  'W:$weight',
+                  style: const TextStyle(fontSize: 5, color: Colors.blue),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          )
+        // For passenger seats: show price in bottom-right
+        else if (!hasCompleteParcelDimensions && c.price != null)
+          Positioned(
+            bottom: 2,
+            right: 2,
+            child: Text(
+              '₹${c.price}',
+              style: TextStyle(
+                fontSize: 7,
+                fontWeight: FontWeight.w600,
+                color: c.isLocked ? Colors.grey : Colors.green.shade700,
+              ),
             ),
           ),
-          const SizedBox(height: 2),
-          Text(
-            c.price?.toString() ?? '',
-            style: TextStyle(
-              fontSize: 10,
-              color: c.isLocked ? Colors.grey : Colors.black54,
+
+        // Top-right corner: Lock icon (if locked)
+        if (c.isLocked)
+          Positioned(
+            top: 2,
+            right: 2,
+            child: Icon(Icons.lock, size: 10, color: Colors.grey),
+          ),
+
+        // Bottom-right: Price for parcels (tiny, only if complete dimensions showing)
+        if (hasCompleteParcelDimensions && c.price != null)
+          Positioned(
+            bottom: 2,
+            right: 2,
+            child: Text(
+              '₹${c.price}',
+              style: TextStyle(
+                fontSize: 5,
+                fontWeight: FontWeight.w600,
+                color: c.isLocked ? Colors.grey : Colors.green.shade700,
+              ),
             ),
           ),
-          if (c.isLocked)
-            const Padding(
-              padding: EdgeInsets.only(top: 2),
-              child: Icon(Icons.lock, size: 12, color: Colors.grey),
-            ),
-        ],
-      ),
+      ],
     );
   }
 
@@ -759,7 +863,7 @@ class _SeatLayoutBuilderScreenState extends State<SeatLayoutBuilderScreen> {
     final isParcel = widget.serviceType == ServiceType.parcel;
 
     // Parse existing parcel data — dimensions are encoded into seatName as
-    // "CompartmentName|L:10|B:20|H:30|W:5|T:Normal" on save.
+    // "CompartmentName|L:10|B:20|H:30|W:5|T:Normal|HS:392310" on save.
     // Split it back out so the fields pre-fill correctly when editing.
     String existingName = existing?.seatName ?? '';
     String existingLength = '';
@@ -767,6 +871,7 @@ class _SeatLayoutBuilderScreenState extends State<SeatLayoutBuilderScreen> {
     String existingHeight = '';
     String existingWeight = '';
     String existingParcelType = 'Normal';
+    String existingHSCode = '';
 
     if (isParcel && existingName.contains('|')) {
       final parts = existingName.split('|');
@@ -781,7 +886,23 @@ class _SeatLayoutBuilderScreenState extends State<SeatLayoutBuilderScreen> {
         } else if (part.startsWith('W:')) {
           existingWeight = part.substring(2);
         } else if (part.startsWith('T:')) {
-          existingParcelType = part.substring(2);
+          final typeData = part.substring(2);
+          // Handle formats: "type:Normal", "type:Normal|code:392310", "code:392310"
+          if (typeData.startsWith('type:')) {
+            // Simple mode: "type:Normal" or "type:Normal|code:392310"
+            if (typeData.contains('|code:')) {
+              final split = typeData.split('|code:');
+              existingParcelType = split[0].substring(5); // Remove "type:"
+              existingHSCode = split[1];
+            } else {
+              existingParcelType = typeData.substring(5); // Remove "type:"
+            }
+          } else if (typeData.startsWith('code:')) {
+            // Advanced mode: just "code:392310"
+            existingHSCode = typeData.substring(5); // Remove "code:"
+          }
+        } else if (part.startsWith('HS:')) {
+          existingHSCode = part.substring(3);
         }
       }
     }
@@ -804,6 +925,7 @@ class _SeatLayoutBuilderScreenState extends State<SeatLayoutBuilderScreen> {
     var seatKind = existing?.seatKind ?? SeatKind.seat;
     var gender = existing?.gender ?? SeatGender.any;
     var parcelType = existingParcelType;
+    var selectedHSCode = existingHSCode; // Pre-fill with existing HS code
 
     final ok = await showModalBottomSheet<bool>(
       context: context,
@@ -955,6 +1077,30 @@ class _SeatLayoutBuilderScreenState extends State<SeatLayoutBuilderScreen> {
                           setModalState(() => parcelType = v);
                         },
                       ),
+                      const SizedBox(height: 16),
+                      // HS Code for Parcel (Customs Classification)
+                      const Text(
+                        'HS Code (Optional - Customs)',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      // HS Code Text Input
+                      TextField(
+                        onChanged: (value) {
+                          setModalState(() => selectedHSCode = value);
+                        },
+                        controller: TextEditingController(text: selectedHSCode),
+                        decoration: const InputDecoration(
+                          labelText: 'Enter HS Code',
+                          hintText: 'e.g., 392310, 870000, etc.',
+                          border: OutlineInputBorder(),
+                          prefixIcon: Icon(Icons.local_shipping),
+                        ),
+                        keyboardType: TextInputType.text,
+                      ),
                     ],
 
                     // Passenger-specific fields
@@ -1104,8 +1250,16 @@ class _SeatLayoutBuilderScreenState extends State<SeatLayoutBuilderScreen> {
             breadth.isNotEmpty ||
             height.isNotEmpty ||
             weight.isNotEmpty) {
+          // Combine parcelType with HS code using prefix format
+          final parcelWithHS = selectedHSCode.isNotEmpty
+              ? 'type:$parcelType|code:$selectedHSCode'
+              : 'type:$parcelType';
           finalSeatName =
-              '$finalSeatName|L:$length|B:$breadth|H:$height|W:$weight|T:$parcelType';
+              '$finalSeatName|L:$length|B:$breadth|H:$height|W:$weight|T:$parcelWithHS';
+        } else if (selectedHSCode.isNotEmpty) {
+          // Even if no dimensions, store parcel type + HS code
+          final parcelWithHS = 'type:$parcelType|code:$selectedHSCode';
+          finalSeatName = '$finalSeatName|T:$parcelWithHS';
         }
       }
 

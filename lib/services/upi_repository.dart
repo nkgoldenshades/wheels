@@ -67,11 +67,24 @@ class UPIRepository {
     }
   }
 
-  /// Validate UPI ID format
-  /// Valid formats: user@upi, user@okhdfcbank, etc.
+  /// Validate UPI ID format - STRICT MODE
+  /// Only accepts standard UPI formats without hyphens
+  /// Valid formats: user@upi, user@okhdfcbank, 8925021005@apl, etc.
+  /// Accepts: letters, numbers, dots, underscores before @
+  /// Bank/provider name: letters and numbers only (no hyphens)
   bool _isValidUPI(String upi) {
-    final regex = RegExp(r'^[a-zA-Z0-9._-]+@[a-zA-Z0-9]+$');
-    return regex.hasMatch(upi) && upi.length >= 5 && upi.length <= 60;
+    // Strict regex: no hyphens allowed
+    // - Before @: letters, numbers, dots, underscores only
+    // - After @: letters, numbers only (standard bank codes: upi, apl, ybl, okhdfcbank, etc.)
+    final regex = RegExp(r'^[a-zA-Z0-9._]+@[a-zA-Z0-9]+$');
+    final isMatch = regex.hasMatch(upi);
+    final isLength = upi.length >= 5 && upi.length <= 60;
+
+    debugPrint(
+      '[UPIRepository] Strict validation: $upi | Regex: $isMatch | Length: $isLength',
+    );
+
+    return isMatch && isLength;
   }
 
   /// Check if UPI ID is saved
