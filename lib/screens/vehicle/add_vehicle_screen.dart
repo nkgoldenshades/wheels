@@ -690,25 +690,25 @@ class _AddVehicleScreenState extends State<AddVehicleScreen> {
       return;
     }
 
-    // Check if all media is verified
+    // Check if all media is uploaded
     if (!_profileImageVerified) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Profile image is not verified')),
+        const SnackBar(content: Text('Profile image needs to be added')),
       );
       return;
     }
 
     if (_galleryVerified.any((v) => !v)) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Some gallery images are not verified')),
+        const SnackBar(content: Text('Some gallery images need to be added')),
       );
       return;
     }
 
     if (_videoBase64 != null && !_videoVerified) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Video is not verified')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Video needs to be processed')),
+      );
       return;
     }
 

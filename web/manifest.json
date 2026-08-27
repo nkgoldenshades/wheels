@@ -5,7 +5,7 @@
     "display": "standalone",
     "background_color": "#2196F3",
     "theme_color": "#2196F3",
-    "description": "India's most secure ride-sharing platform with escrow payments, OTP verification, and lowest fees.",
+    "description": "Social media and community coordination platform. Connect, share posts, coordinate rides. NOT a rental or insurance service.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

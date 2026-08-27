@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/trip_media.dart';
 import '../models/booking.dart';
 import '../services/auth_repository.dart';
+import '../services/image_content_filter_service.dart';
 
 /// Step-by-step trip media upload widget.
 ///
@@ -119,6 +120,15 @@ class _TripMediaWidgetState extends State<TripMediaWidget> {
 
       // Upload each picked image
       for (final file in picked) {
+        // Validate image content (check for phone numbers, emails, etc.)
+        final filterError = await ImageContentFilterService.instance
+            .validateImage(file);
+
+        if (filterError != null) {
+          setState(() => _uploadError = filterError);
+          continue; // Skip this image
+        }
+
         final ext = file.name.split('.').last;
         final url = await _uploadFile(
           file,
@@ -158,6 +168,16 @@ class _TripMediaWidgetState extends State<TripMediaWidget> {
     });
 
     try {
+      // Validate video (check for phone numbers, emails, etc.)
+      final filterError = await ImageContentFilterService.instance
+          .validateImage(file);
+
+      if (filterError != null) {
+        setState(() => _uploadError = filterError);
+        setState(() => _uploading = false);
+        return;
+      }
+
       final ext = file.name.split('.').last;
       final url = await _uploadFile(
         file,
@@ -525,53 +545,95 @@ class _PhaseCard extends StatelessWidget {
                 ),
                 const SizedBox(height: 8),
 
-                if (myParty.images.isNotEmpty) ...[
+                // PHOTOS + VIDEOS in ONE horizontal row
+                if (myParty.images.isNotEmpty || myParty.videoUrl != null) ...[
                   SizedBox(
                     height: 80,
-                    child: ListView.separated(
+                    child: ListView(
                       scrollDirection: Axis.horizontal,
-                      itemCount: myParty.images.length + (isSubmitted ? 0 : 1),
-                      separatorBuilder: (_, _) => const SizedBox(width: 8),
-                      itemBuilder: (context, i) {
-                        if (!isSubmitted && i == myParty.images.length) {
-                          return _AddBtn(
-                            onTap: uploading ? null : onPickImages,
+                      children: [
+                        // All photos
+                        ...myParty.images.asMap().entries.map((entry) {
+                          final i = entry.key;
+                          return Padding(
+                            padding: const EdgeInsets.only(right: 8),
+                            child: _Thumb(
+                              url: myParty.images[i],
+                              canRemove: !isSubmitted,
+                              onRemove: () => onRemoveImage(i),
+                            ),
                           );
-                        }
-                        return _Thumb(
-                          url: myParty.images[i],
-                          canRemove: !isSubmitted,
-                          onRemove: () => onRemoveImage(i),
-                        );
-                      },
+                        }),
+                        // Video (if exists)
+                        if (myParty.videoUrl != null)
+                          Padding(
+                            padding: const EdgeInsets.only(right: 8),
+                            child: Container(
+                              width: 80,
+                              height: 80,
+                              decoration: BoxDecoration(
+                                color: Colors.black87,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Stack(
+                                alignment: Alignment.center,
+                                children: [
+                                  Container(
+                                    decoration: BoxDecoration(
+                                      color: Colors.black,
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    child: const Icon(
+                                      Icons.play_circle_filled,
+                                      size: 40,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                  if (!isSubmitted)
+                                    Positioned(
+                                      top: 2,
+                                      right: 2,
+                                      child: GestureDetector(
+                                        onTap: () {
+                                          // Remove video logic
+                                        },
+                                        child: Container(
+                                          decoration: const BoxDecoration(
+                                            color: Colors.red,
+                                            shape: BoxShape.circle,
+                                          ),
+                                          padding: const EdgeInsets.all(2),
+                                          child: const Icon(
+                                            Icons.close,
+                                            size: 12,
+                                            color: Colors.white,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        // Add button
+                        if (!isSubmitted)
+                          _AddBtn(onTap: uploading ? null : onPickImages),
+                      ],
                     ),
                   ),
                 ] else if (!isSubmitted) ...[
                   _AddBtn(onTap: uploading ? null : onPickImages),
                 ] else ...[
                   Text(
-                    'No photos uploaded',
+                    'No photos or videos uploaded',
                     style: TextStyle(fontSize: 12, color: Colors.grey[400]),
                   ),
                 ],
 
-                const SizedBox(height: 8),
+                const SizedBox(height: 12),
 
-                // Video
-                if (myParty.videoUrl != null)
-                  Row(
-                    children: [
-                      const Icon(Icons.videocam, size: 16, color: Colors.blue),
-                      const SizedBox(width: 6),
-                      const Expanded(
-                        child: Text(
-                          'Video uploaded',
-                          style: TextStyle(fontSize: 12, color: Colors.blue),
-                        ),
-                      ),
-                    ],
-                  )
-                else if (!isSubmitted)
+                // Video button (only if no video uploaded yet)
+                if (myParty.videoUrl == null && !isSubmitted)
                   OutlinedButton.icon(
                     onPressed: uploading ? null : onPickVideo,
                     icon: const Icon(Icons.videocam_outlined, size: 16),
@@ -635,6 +697,63 @@ class _PhaseCard extends StatelessWidget {
                         ),
                       ),
                     ),
+                  // Other party's video (if any)
+                  if (otherParty.videoUrl != null) ...[
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Container(
+                          width: 80,
+                          height: 80,
+                          decoration: BoxDecoration(
+                            color: Colors.black87,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Stack(
+                            alignment: Alignment.center,
+                            children: [
+                              Container(
+                                decoration: BoxDecoration(
+                                  color: Colors.black,
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: const Icon(
+                                  Icons.play_circle_filled,
+                                  size: 40,
+                                  color: Colors.white,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Text(
+                                '🎥 $otherLabel Video',
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.blue,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                'Max 30s',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: Colors.grey[600],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
                 ],
               ],
             ),

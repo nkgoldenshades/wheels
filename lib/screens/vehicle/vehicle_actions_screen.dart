@@ -15,6 +15,7 @@ import '../../models/slot_entry.dart';
 import '../../models/vehicle.dart';
 import '../../services/auth_repository.dart';
 import '../../services/booking_repository.dart';
+import '../../services/profile_repository.dart';
 import '../../services/review_repository.dart';
 import '../../services/slot_repository.dart';
 import '../../services/vehicle_repository.dart';
@@ -50,6 +51,28 @@ Future<String?> _uploadVehicleSensitiveDoc({
     return supabase.storage.from('vehicle_sensitive_media').getPublicUrl(path);
   } catch (e) {
     debugPrint('❌ Vehicle sensitive doc upload failed: $e');
+    return null;
+  }
+}
+
+/// Upload operator photo to vehicle_sensitive_media bucket
+/// Returns the public URL or null on failure
+Future<String?> _uploadOperatorPhoto({
+  required String vehicleId,
+  required Uint8List bytes,
+}) async {
+  try {
+    final userId = AuthRepository.instance.currentUser?.id;
+    if (userId == null) return null;
+    final supabase = Supabase.instance.client;
+    final timestamp = DateTime.now().millisecondsSinceEpoch;
+    final path = '$vehicleId/operator_photo/photo_$timestamp.jpg';
+    await supabase.storage
+        .from('vehicle_sensitive_media')
+        .uploadBinary(path, bytes);
+    return supabase.storage.from('vehicle_sensitive_media').getPublicUrl(path);
+  } catch (e) {
+    debugPrint('❌ Operator photo upload failed: $e');
     return null;
   }
 }
@@ -240,30 +263,37 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        SlotCard(
-          slot: entry.slot,
-          vehicle: entry.vehicle,
-          providerName: 'You',
-          providerAvatar: '',
-          providerRating: 5.0,
-          isOffer: true,
-          isUserPost: widget.isUserMode,
-          onTap: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (context) => SlotDetailScreen(
-                  slot: entry.slot,
-                  vehicle: entry.vehicle,
-                  providerName: 'You',
-                  providerAvatar: '',
-                  providerRating: 5.0,
-                  isOffer: true,
-                ),
-              ),
+        ValueListenableBuilder<ProfileInfo>(
+          valueListenable: ProfileRepository.instance.profile,
+          builder: (context, currentProfile, _) {
+            final userAvatar = currentProfile.avatarUrl ?? '';
+
+            return SlotCard(
+              slot: entry.slot,
+              vehicle: entry.vehicle,
+              providerName: 'You',
+              providerAvatar: userAvatar,
+              providerRating: 5.0,
+              isOffer: true,
+              isUserPost: widget.isUserMode,
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => SlotDetailScreen(
+                      slot: entry.slot,
+                      vehicle: entry.vehicle,
+                      providerName: 'You',
+                      providerAvatar: userAvatar,
+                      providerRating: 5.0,
+                      isOffer: true,
+                    ),
+                  ),
+                );
+              },
+              onAction: () {},
             );
           },
-          onAction: () {},
         ),
         Padding(
           padding: const EdgeInsets.only(right: 16, bottom: 4),
@@ -1266,54 +1296,110 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                       width: double.infinity,
                       child: FilledButton(
                         onPressed: () async {
-                          final name = nameCtrl.text.trim();
-                          if (name.isEmpty) {
+                          try {
+                            final name = nameCtrl.text.trim();
+                            if (name.isEmpty) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('Enter vehicle name'),
+                                ),
+                              );
+                              return;
+                            }
+                            final type = selectedType == 'Other'
+                                ? typeCtrl.text.trim()
+                                : (selectedType ?? vehicle.type);
+                            final year = int.tryParse(yearCtrl.text.trim());
+
+                            // Handle operator photo upload if it's base64
+                            String? finalOperatorPhoto = operatorPhoto;
+                            if (operatorPhoto != null &&
+                                operatorPhoto!.isNotEmpty &&
+                                !operatorPhoto!.startsWith('http')) {
+                              // It's base64, upload to storage
+                              try {
+                                final photoBytes = base64Decode(operatorPhoto!);
+                                finalOperatorPhoto = await _uploadOperatorPhoto(
+                                  vehicleId: vehicle.id,
+                                  bytes: photoBytes,
+                                );
+                                if (finalOperatorPhoto == null) {
+                                  if (ctx.mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text(
+                                          'Failed to upload operator photo',
+                                        ),
+                                        backgroundColor: Colors.orange,
+                                      ),
+                                    );
+                                  }
+                                  return;
+                                }
+                              } catch (e) {
+                                debugPrint(
+                                  '❌ Error uploading operator photo: $e',
+                                );
+                                if (ctx.mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text(
+                                        'Photo upload error: ${e.toString()}',
+                                      ),
+                                      backgroundColor: Colors.orange,
+                                    ),
+                                  );
+                                }
+                                return;
+                              }
+                            }
+
+                            final updated = vehicle.copyWith(
+                              name: name,
+                              type: type,
+                              year: year,
+                              profileImage: profileImage,
+                              galleryImages: galleryImages,
+                              videoUrl: videoUrl,
+                              operatorName: operatorNameCtrl.text.trim().isEmpty
+                                  ? null
+                                  : operatorNameCtrl.text.trim(),
+                              operatorPhone:
+                                  operatorPhoneCtrl.text.trim().isEmpty
+                                  ? null
+                                  : operatorPhoneCtrl.text.trim(),
+                              operatorGender: operatorGender,
+                              operatorDob: operatorDob,
+                              operatorLicense:
+                                  operatorLicenseCtrl.text.trim().isEmpty
+                                  ? null
+                                  : operatorLicenseCtrl.text.trim(),
+                              operatorPhoto: finalOperatorPhoto,
+                              operatorDocumentUrl: operatorDocument,
+                            );
+                            if (widget.isUserMode) {
+                              await CustomerVehicleRepository.instance
+                                  .updateVehicle(updated);
+                            } else {
+                              await widget.vehicleRepository!.updateVehicle(
+                                updated,
+                              );
+                            }
+                            if (!context.mounted) return;
+                            Navigator.pop(ctx);
                             ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text('Enter vehicle name'),
+                              const SnackBar(content: Text('Vehicle updated')),
+                            );
+                          } catch (e) {
+                            debugPrint('❌ Error updating vehicle: $e');
+                            if (!context.mounted) return;
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('Error: ${e.toString()}'),
+                                backgroundColor: Colors.red[700],
                               ),
                             );
-                            return;
                           }
-                          final type = selectedType == 'Other'
-                              ? typeCtrl.text.trim()
-                              : (selectedType ?? vehicle.type);
-                          final year = int.tryParse(yearCtrl.text.trim());
-                          final updated = vehicle.copyWith(
-                            name: name,
-                            type: type,
-                            year: year,
-                            profileImage: profileImage,
-                            galleryImages: galleryImages,
-                            videoUrl: videoUrl,
-                            operatorName: operatorNameCtrl.text.trim().isEmpty
-                                ? null
-                                : operatorNameCtrl.text.trim(),
-                            operatorPhone: operatorPhoneCtrl.text.trim().isEmpty
-                                ? null
-                                : operatorPhoneCtrl.text.trim(),
-                            operatorGender: operatorGender,
-                            operatorDob: operatorDob,
-                            operatorLicense:
-                                operatorLicenseCtrl.text.trim().isEmpty
-                                ? null
-                                : operatorLicenseCtrl.text.trim(),
-                            operatorPhoto: operatorPhoto,
-                            operatorDocumentUrl: operatorDocument,
-                          );
-                          if (widget.isUserMode) {
-                            await CustomerVehicleRepository.instance
-                                .updateVehicle(updated);
-                          } else {
-                            await widget.vehicleRepository!.updateVehicle(
-                              updated,
-                            );
-                          }
-                          if (!context.mounted) return;
-                          Navigator.pop(ctx);
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Vehicle updated')),
-                          );
                         },
                         child: const Text('Save Changes'),
                       ),
@@ -1402,8 +1488,8 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                         },
                       ),
                       ListTile(
-                        leading: const Icon(Icons.car_rental),
-                        title: const Text('Lease'),
+                        leading: const Icon(Icons.handshake),
+                        title: const Text('Help Vehicle'),
                         subtitle: const Text('With or without operator'),
                         onTap: () {
                           Navigator.pop(context);
@@ -1773,21 +1859,64 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                 ),
                 const SizedBox(height: 16),
 
-                // Mandatory Documents Section
+                // All Documents Section - Build Trust Voluntarily
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.blue[50],
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.blue[200]!),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.verified_user,
+                        color: Colors.blue[700],
+                        size: 20,
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Build Trust Voluntarily',
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'All documents are optional. Upload to increase bookings.',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: Colors.grey[700],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+
+                // Documents List
                 Row(
                   children: [
                     const Icon(
-                      Icons.error_outline,
+                      Icons.info_outline,
                       size: 16,
-                      color: Colors.red,
+                      color: Colors.blue,
                     ),
                     const SizedBox(width: 6),
                     Text(
-                      'MANDATORY (Required by Law)',
+                      'OPTIONAL DOCUMENTS',
                       style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.bold,
-                        color: Colors.red[700],
+                        color: Colors.blue[700],
                       ),
                     ),
                   ],
@@ -1799,38 +1928,38 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                   verificationStatus['RC Book']!,
                   DocumentType.rc,
                   imageBase64: vehicle.rcFrontUrl,
-                  isMandatory: true,
+                  isMandatory: false,
                   canVerify: canVerify,
                 ),
                 const Divider(height: 1),
                 _buildDocumentItemWithExpiry(
                   'Insurance',
-                  'Vehicle Insurance - Mandatory by law',
+                  'Vehicle Insurance - Shows professionalism',
                   verificationStatus['Insurance']!,
                   DocumentType.insurance,
                   imageBase64: vehicle.insuranceDocumentUrl,
                   expiryDate: vehicle.insuranceExpiry,
-                  isMandatory: true,
+                  isMandatory: false,
                   canVerify: canVerify,
                 ),
 
                 const SizedBox(height: 16),
 
-                // Optional Documents Section
+                // Additional Documents
                 Row(
                   children: [
                     const Icon(
-                      Icons.info_outline,
+                      Icons.star_outline,
                       size: 16,
-                      color: Colors.blue,
+                      color: Colors.amber,
                     ),
                     const SizedBox(width: 6),
                     Text(
-                      'OPTIONAL (Increases Trust)',
+                      'ADDITIONAL (Increases Trust)',
                       style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.bold,
-                        color: Colors.blue[700],
+                        color: Colors.amber[700],
                       ),
                     ),
                   ],
@@ -1873,9 +2002,9 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                       Icons.lock_outline,
                       color: Colors.orange,
                     ),
-                    title: const Text('Verification locked'),
+                    title: const Text('Document upload locked'),
                     subtitle: const Text(
-                      'Upgrade to Premium or Expert plan to verify documents',
+                      'Upgrade to Premium or Expert plan to add documents',
                     ),
                     trailing: TextButton(
                       onPressed: () => Navigator.pushNamed(context, '/plans'),
@@ -1969,7 +2098,7 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                         ? const BorderSide(color: Colors.red, width: 2)
                         : null,
                   ),
-                  child: Text(imageBytes != null ? 'Verify' : 'Upload'),
+                  child: Text(imageBytes != null ? 'Update' : 'Add'),
                 )
               : const Icon(Icons.lock_outline, color: Colors.orange),
         ),
@@ -2357,17 +2486,17 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
             ListTile(
               contentPadding: EdgeInsets.zero,
               leading: const Icon(Icons.save_alt, color: Colors.blue),
-              title: const Text('Save document only'),
-              subtitle: const Text('Upload without live verification'),
+              title: const Text('Save only'),
+              subtitle: const Text('Upload document to profile'),
               onTap: () => Navigator.pop(context, 'save'),
             ),
             const Divider(),
             ListTile(
               contentPadding: EdgeInsets.zero,
-              leading: const Icon(Icons.verified_user, color: Colors.green),
-              title: const Text('Save & Verify'),
+              leading: const Icon(Icons.face, color: Colors.green),
+              title: const Text('Save & Face Match'),
               subtitle: const Text(
-                'Live camera verification (adds verified badge)',
+                'Upload with face matching (adds trust badge)',
               ),
               onTap: () => Navigator.pop(context, 'verify'),
             ),
@@ -2462,15 +2591,15 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
       return;
     }
 
-    // action == 'verify' — charge KYC fee before opening camera
+    // action == 'verify' — charge trust fee before opening camera
     if (!mounted) return;
     final payConfirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('KYC Verification Fee'),
+        title: const Text('Face Matching Fee'),
         content: const Text(
-          'A one-time fee of ₹49 is charged to verify your document.\n\n'
-          'This helps prevent fake accounts and covers verification costs.',
+          'A one-time fee of ₹49 enables face matching for your profile.\n\n'
+          'This helps build trust in the community.',
         ),
         actions: [
           TextButton(
@@ -2480,7 +2609,7 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
           FilledButton.icon(
             onPressed: () => Navigator.pop(ctx, true),
             icon: const Icon(Icons.payment),
-            label: const Text('Pay ₹49 & Verify'),
+            label: const Text('Pay ₹49 & Continue'),
           ),
         ],
       ),

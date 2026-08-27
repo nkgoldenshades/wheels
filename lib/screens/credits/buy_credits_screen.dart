@@ -212,14 +212,28 @@ class _BuyCreditsScreenState extends State<BuyCreditsScreen> {
               padding: const EdgeInsets.all(16),
               child: Row(
                 children: [
-                  Radio<String>(
-                    value: package.id,
-                    groupValue: _selectedPackageId,
-                    onChanged: (value) {
-                      if (value != null) {
-                        setState(() => _selectedPackageId = value);
-                      }
-                    },
+                  // Remove deprecated Radio widget - GestureDetector handles selection
+                  Container(
+                    width: 24,
+                    height: 24,
+                    decoration: BoxDecoration(
+                      border: Border.all(
+                        color: isSelected ? Colors.blue : Colors.grey.shade300,
+                        width: 2,
+                      ),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: isSelected
+                        ? const Center(
+                            child: DecoratedBox(
+                              decoration: BoxDecoration(
+                                color: Colors.blue,
+                                shape: BoxShape.circle,
+                              ),
+                              child: SizedBox(width: 8, height: 8),
+                            ),
+                          )
+                        : null,
                   ),
                   const SizedBox(width: 12),
                   Expanded(
@@ -362,7 +376,9 @@ class _BuyCreditsScreenState extends State<BuyCreditsScreen> {
         await CreditRepository.instance.refreshFromSupabase();
 
         // Pop back to previous screen
-        Navigator.pop(context);
+        if (mounted) {
+          Navigator.pop(context);
+        }
       }
     } on StripeException catch (_) {
       setState(() {

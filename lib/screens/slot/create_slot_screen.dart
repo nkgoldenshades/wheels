@@ -227,15 +227,18 @@ class _CreateSlotScreenState extends State<CreateSlotScreen> {
                         onChanged: (value) =>
                             setState(() => _serviceType = value!),
                       ),
-                      const Icon(Icons.car_rental, color: Colors.green),
+                      const Icon(Icons.handshake, color: Colors.green),
                       const SizedBox(width: 8),
                       const Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text('Lease', style: TextStyle(fontSize: 16)),
                             Text(
-                              'Rent out vehicle with or without operator',
+                              'Help Vehicle',
+                              style: TextStyle(fontSize: 16),
+                            ),
+                            Text(
+                              'Help others with vehicle needs',
                               style: TextStyle(
                                 fontSize: 12,
                                 color: Colors.grey,

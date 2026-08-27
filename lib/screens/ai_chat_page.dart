@@ -1,13 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_ai/firebase_ai.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/auth_repository.dart';
 import '../services/profile_repository.dart';
 import '../services/payment_service.dart';
+import '../services/pricing_service.dart';
 import '../services/app_preferences.dart';
 import '../services/dispute_service.dart';
 import '../services/credit_repository.dart';
+import '../services/ai_memory_service.dart';
 import 'package:image_picker/image_picker.dart';
 // import 'package:speech_to_text/speech_to_text.dart'; // Commented out for Windows compatibility
 // import 'package:permission_handler/permission_handler.dart'; // Not needed
@@ -39,9 +42,10 @@ class _AIChatPageState extends State<AIChatPage> {
   int? _currentConversationId; // Track current conversation
   bool _showSidebar = true; // ← ADD: Toggle sidebar
 
-  // Guest user conversation limit
-  static const int _guestConversationLimit = 10;
-  int _guestConversationCount = 0;
+  // Guest user credit allowance (instead of conversation limit)
+  static const double _guestInitialCredits =
+      0.0; // Guests get 0 credits - must login for AI access
+  double _guestCreditsRemaining = _guestInitialCredits;
   bool _isGuest = false;
 
   // Image and voice functionality
@@ -60,6 +64,7 @@ class _AIChatPageState extends State<AIChatPage> {
     super.initState();
     _loadAIToggleState();
     _checkGuestStatus();
+    AIMemoryService.instance.initialize(); // Initialize memory service
 
     // Load specific conversation if provided
     if (widget.conversationId != null) {
@@ -107,11 +112,14 @@ class _AIChatPageState extends State<AIChatPage> {
     _isGuest = currentUser == null;
 
     if (_isGuest) {
-      // Load guest conversation count from SharedPreferences
+      // Load guest conversation count from SharedPreferences (stored as string to preserve decimals)
       final prefs = await SharedPreferences.getInstance();
-      _guestConversationCount = prefs.getInt('guest_conversation_count') ?? 0;
+      final creditsStr = prefs.getString('guest_credits_remaining');
+      _guestCreditsRemaining = creditsStr != null
+          ? double.tryParse(creditsStr) ?? _guestInitialCredits
+          : _guestInitialCredits;
       debugPrint(
-        '👤 Guest user - conversation count: $_guestConversationCount/$_guestConversationLimit',
+        '👤 Guest user - credits remaining: $_guestCreditsRemaining/$_guestInitialCredits',
       );
     }
   }
@@ -211,7 +219,7 @@ You are a helpful AI assistant for QuickOHunt, a ride-sharing and vehicle rental
 Key features of QuickOHunt:
 - Users can book rides (passenger service)
 - Users can send parcels (parcel delivery)
-- Users can rent/lease vehicles (with or without operators)
+- Users can help with vehicles (with or without operators)
 - Users can add their own vehicles to provide services
 - Users can add needed vehicles to find rides
 - Payment system with wallet and Razorpay integration
@@ -250,18 +258,22 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
 
       _chat = _model!.startChat();
 
-      // Test the connection
-      final testResponse = await _chat!
-          .sendMessage(Content.text('say "ready" in one word'))
-          .timeout(
-            const Duration(seconds: 10),
-            onTimeout: () {
-              throw Exception('Connection timeout');
-            },
-          );
+      // Test the connection silently (don't add to messages)
+      try {
+        final testResponse = await _chat!
+            .sendMessage(Content.text('say "ready" in one word'))
+            .timeout(
+              const Duration(seconds: 10),
+              onTimeout: () {
+                throw Exception('Connection timeout');
+              },
+            );
 
-      final testText = testResponse.text ?? '';
-      debugPrint('✅ Firebase Gemini API test response: $testText');
+        final testText = testResponse.text ?? '';
+        debugPrint('✅ Firebase Gemini API test response: $testText');
+      } catch (e) {
+        debugPrint('⚠️ Connection test failed: $e');
+      }
 
       if (!mounted) return;
       setState(() {
@@ -270,7 +282,7 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
         // (dispute mode already has welcome message from DisputeService)
         if (_messages.isEmpty && !widget.isDisputeMode) {
           final welcomeMessage = _isGuest
-              ? "Hi there! Welcome to QuickOHunt. I'm your AI assistant here to help you with rides, vehicle rentals, bookings, and any questions about the app.\n\n⚠️ Guest Mode: You have $_guestConversationLimit free conversations. Login for unlimited access!\n\nWhat can I help you with today?"
+              ? "Hi there! Welcome to QuickOHunt. I'm your AI assistant here to help you with rides, vehicle rentals, bookings, and any questions about the app.\n\n⚠️ Guest Mode: AI assistant requires login. Please login to get free credits and unlimited access!\n\nWhat can I help you with today?"
               : "Hi there! Welcome to QuickOHunt. I'm your AI assistant here to help you with rides, vehicle rentals, bookings, and any questions about the app. What can I help you with today?";
 
           _messages.add(
@@ -395,6 +407,84 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
     );
   }
 
+  // Memory Settings functionality
+  void _showMemorySettings(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('🧠 Memory Settings'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Memory status text
+            Padding(
+              padding: const EdgeInsets.only(bottom: 16),
+              child: Text(
+                'Status: ${AIMemoryService.instance.getMemoryStatusText()}',
+                style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+              ),
+            ),
+            // Thread Memory Toggle
+            ValueListenableBuilder<bool>(
+              valueListenable: AIMemoryService.instance.threadMemoryEnabled,
+              builder: (context, threadEnabled, _) {
+                return CheckboxListTile(
+                  title: const Text('🧵 Thread Memory'),
+                  subtitle: const Text(
+                    'Remember messages in this conversation',
+                  ),
+                  value: threadEnabled,
+                  onChanged: (value) {
+                    if (value != null) {
+                      AIMemoryService.instance.setThreadMemory(value);
+                      setState(() {});
+                    }
+                  },
+                );
+              },
+            ),
+            // Chat Memory Toggle
+            ValueListenableBuilder<bool>(
+              valueListenable: AIMemoryService.instance.chatMemoryEnabled,
+              builder: (context, chatEnabled, _) {
+                return CheckboxListTile(
+                  title: const Text('💬 Chat Memory'),
+                  subtitle: const Text('Reference previous conversations'),
+                  value: chatEnabled,
+                  onChanged: (value) {
+                    if (value != null) {
+                      AIMemoryService.instance.setChatMemory(value);
+                      setState(() {});
+                    }
+                  },
+                );
+              },
+            ),
+            const Divider(),
+            Padding(
+              padding: const EdgeInsets.only(top: 12),
+              child: Text(
+                'Memory Modes:\n'
+                '🧠 = Full (Thread + Chat)\n'
+                '🧵 = Thread only\n'
+                '💬 = Chat only\n'
+                '🆕 = No Memory (Fresh)',
+                style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
   // AI Settings functionality
   void _showAISettings() {
     showModalBottomSheet(
@@ -463,17 +553,40 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
       return;
     }
 
-    // Check guest conversation limit
-    if (_isGuest && _guestConversationCount >= _guestConversationLimit) {
-      _showLoginPrompt();
-      return;
+    // Check guest credit limit
+    if (_isGuest) {
+      final threadMemory = AIMemoryService.instance.threadMemoryEnabled.value;
+      final chatMemory = AIMemoryService.instance.chatMemoryEnabled.value;
+      final estimatedCredits = CreditRepository.estimateCreditCostForMessage(
+        text,
+        threadMemory: threadMemory,
+        chatMemory: chatMemory,
+      );
+      if (_guestCreditsRemaining < estimatedCredits) {
+        _showLoginPrompt(
+          message:
+              '⚠️ Insufficient guest credits.\n\nYou have ${_guestCreditsRemaining.toStringAsFixed(4)} credits left, need ~${estimatedCredits.toStringAsFixed(4)}.\n\nLogin to purchase more credits.',
+        );
+        return;
+      }
     }
 
-    // Check AI credits for logged-in users
+    // Check AI credits for logged-in users (using token-based pricing)
     if (!_isGuest) {
-      final profile = ProfileRepository.instance.profile.value;
-      if (profile.aiCredits < 1) {
-        _showBuyCreditsDialog(context);
+      final threadMemory = AIMemoryService.instance.threadMemoryEnabled.value;
+      final chatMemory = AIMemoryService.instance.chatMemoryEnabled.value;
+      final estimatedCredits = CreditRepository.estimateCreditCostForMessage(
+        text,
+        threadMemory: threadMemory,
+        chatMemory: chatMemory,
+      );
+      final hasCredits = await CreditRepository.instance.hasEnoughCreditsForAI(
+        estimatedCredits: estimatedCredits,
+      );
+      if (!hasCredits) {
+        if (mounted) {
+          _showBuyCreditsDialog(context);
+        }
         return;
       }
     }
@@ -489,27 +602,20 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
     _messageController.clear();
     _scrollToBottom();
 
-    // Increment guest conversation count
-    if (_isGuest) {
-      _guestConversationCount++;
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setInt('guest_conversation_count', _guestConversationCount);
-      debugPrint(
-        '👤 Guest conversation count: $_guestConversationCount/$_guestConversationLimit',
-      );
-    } else {
-      // Deduct 1 credit for logged-in users
-      final success = await ProfileRepository.instance.deductAICredits(1);
-      if (!success) {
-        // This shouldn't happen as we checked above, but handle it anyway
-        if (mounted) {
-          setState(() {
-            _messages.removeLast(); // Remove the user message
-            _isLoading = false;
-          });
-          _showBuyCreditsDialog(context);
-        }
-        return;
+    // Deduct guest credits (keep as raw decimal values)
+    if (_isGuest && _messages.isNotEmpty) {
+      final lastMessage = _messages.last;
+      if (lastMessage.creditCost != null) {
+        _guestCreditsRemaining -= lastMessage.creditCost!;
+        final prefs = await SharedPreferences.getInstance();
+        // Store as string to preserve decimal precision
+        await prefs.setString(
+          'guest_credits_remaining',
+          _guestCreditsRemaining.toString(),
+        );
+        debugPrint(
+          '👤 Guest credits deducted: ${lastMessage.creditCost?.toStringAsFixed(4)}, remaining: ${_guestCreditsRemaining.toStringAsFixed(4)}/$_guestInitialCredits',
+        );
       }
     }
 
@@ -526,15 +632,15 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
     }
   }
 
-  void _showLoginPrompt() {
+  void _showLoginPrompt({String? message}) {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
         title: const Row(
           children: [
-            Icon(Icons.lock, color: Colors.orange),
+            Icon(Icons.warning, color: Colors.orange),
             SizedBox(width: 8),
-            Text('Conversation Limit Reached'),
+            Text('Guest Credit Limit'),
           ],
         ),
         content: Column(
@@ -542,16 +648,16 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'You\'ve reached the limit of $_guestConversationLimit conversations as a guest.',
+              message ?? 'You\'ve used all your 20 guest credits.',
               style: const TextStyle(fontSize: 16),
             ),
             const SizedBox(height: 16),
             const Text(
-              'Login to get unlimited AI conversations and access to:',
+              'Login to get unlimited credits and access to:',
               style: TextStyle(fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 8),
-            const Text('• Unlimited AI chat'),
+            const Text('• Unlimited AI chat with credits'),
             const Text('• Save conversation history'),
             const Text('• Book rides and services'),
             const Text('• Create posts'),
@@ -599,16 +705,33 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
               style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
             ),
             const SizedBox(height: 16),
-            _buildCreditPackage(context, 100, 1),
+            _buildCreditPackage(context, 50, 3),
             const SizedBox(height: 8),
-            _buildCreditPackage(context, 500, 4, popular: true),
+            _buildCreditPackage(context, 200, 10, popular: true),
             const SizedBox(height: 8),
-            _buildCreditPackage(context, 1000, 7),
+            _buildCreditPackage(context, 1000, 50),
             const SizedBox(height: 16),
-            Text(
-              'Cost varies by message length & complexity\n'
-              '1 credit = ${AppPreferences.instance.currencySymbol}0.06',
-              style: const TextStyle(fontSize: 12, color: Colors.grey),
+            ValueListenableBuilder<String>(
+              valueListenable: AppPreferences.instance.currencyCode,
+              builder: (context, currency, _) {
+                // ✅ NEW: Show converted credit value
+                final creditValue = PricingService.instance.convertPrice(
+                  0.06,
+                  currency,
+                );
+                final symbol = AppPreferences.instance.currencySymbol;
+                String formattedValue;
+                if (currency == 'INR') {
+                  formattedValue = '$symbol${creditValue.toInt()}';
+                } else {
+                  formattedValue = '$symbol${creditValue.toStringAsFixed(4)}';
+                }
+                return Text(
+                  'Cost varies by message length & complexity\n'
+                  '1 credit = $formattedValue',
+                  style: const TextStyle(fontSize: 12, color: Colors.grey),
+                );
+              },
             ),
           ],
         ),
@@ -618,113 +741,6 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
             child: const Text('Cancel'),
           ),
         ],
-      ),
-    );
-  }
-
-  // ✅ NEW: Quick credit purchase from chat
-  void _showCreditPurchaseBottomSheet() {
-    showModalBottomSheet(
-      context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) => Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const SizedBox(height: 8),
-            Container(
-              width: 40,
-              height: 4,
-              decoration: BoxDecoration(
-                color: Colors.grey[300],
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-            const SizedBox(height: 16),
-            const Text(
-              'Get AI Credits',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              '1 credit = ${AppPreferences.instance.currencySymbol}0.06',
-              style: TextStyle(fontSize: 14, color: Colors.grey[600]),
-            ),
-            const SizedBox(height: 20),
-            // Credit packages
-            _buildCreditPackageButton(
-              context,
-              50,
-              '${AppPreferences.instance.currencySymbol}3',
-            ),
-            const SizedBox(height: 12),
-            _buildCreditPackageButton(
-              context,
-              200,
-              '${AppPreferences.instance.currencySymbol}10',
-              popular: true,
-            ),
-            const SizedBox(height: 12),
-            _buildCreditPackageButton(
-              context,
-              1000,
-              '${AppPreferences.instance.currencySymbol}50',
-            ),
-            const SizedBox(height: 20),
-            Text(
-              'Pricing is based on actual API token usage',
-              style: TextStyle(fontSize: 11, color: Colors.grey[500]),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // ✅ Helper for credit package button in bottom sheet
-  Widget _buildCreditPackageButton(
-    BuildContext context,
-    int credits,
-    String price, {
-    bool popular = false,
-  }) {
-    return Container(
-      decoration: BoxDecoration(
-        border: Border.all(
-          color: popular ? Colors.blue : Colors.grey[300]!,
-          width: popular ? 2 : 1,
-        ),
-        borderRadius: BorderRadius.circular(12),
-        color: popular ? Colors.blue[50] : null,
-      ),
-      child: ListTile(
-        title: Text('$credits Credits'),
-        subtitle: Text(price),
-        trailing: popular
-            ? Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: Colors.blue,
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: const Text(
-                  'Popular',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 11,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              )
-            : null,
-        onTap: () {
-          Navigator.pop(context);
-          // Navigate to buy credits screen
-          Navigator.pushNamed(context, '/buy_credits');
-        },
       ),
     );
   }
@@ -793,11 +809,16 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
               style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
             ),
             const SizedBox(height: 8),
-            _buildUsageRow(Icons.chat, 'Cost per message', '1 credit'),
+            // Calculate total credits used today
             _buildUsageRow(
-              Icons.history,
+              Icons.chat,
               'Messages sent today',
               '${_messages.where((m) => m.isUser).length}',
+            ),
+            _buildUsageRow(
+              Icons.calculate,
+              'Total credits used',
+              '${_messages.fold<double>(0, (sum, m) => sum + (m.creditCost ?? 0)).toStringAsFixed(4)} credits',
             ),
             _buildUsageRow(
               Icons.warning_amber,
@@ -944,8 +965,11 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
                   ValueListenableBuilder<String>(
                     valueListenable: AppPreferences.instance.currencyCode,
                     builder: (context, currency, _) {
+                      // ✅ NEW: Use dynamic pricing conversion
+                      final displayPrice = PricingService.instance
+                          .formatCreditPrice(credits, currency);
                       return Text(
-                        '${AppPreferences.instance.currencySymbol}$price',
+                        displayPrice,
                         style: TextStyle(
                           fontSize: 14,
                           color: Colors.grey.shade700,
@@ -977,9 +1001,13 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
     }
 
     try {
-      // ✅ Check credits before sending
+      // ✅ Check credits before sending (with memory markup)
+      final threadMemory = AIMemoryService.instance.threadMemoryEnabled.value;
+      final chatMemory = AIMemoryService.instance.chatMemoryEnabled.value;
       final estimatedCredits = CreditRepository.estimateCreditCostForMessage(
         userText,
+        threadMemory: threadMemory,
+        chatMemory: chatMemory,
       );
       final hasCredits = await CreditRepository.instance.hasEnoughCreditsForAI(
         estimatedCredits: estimatedCredits,
@@ -997,7 +1025,53 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
       }
 
       debugPrint('📤 Sending to Firebase Gemini API: $userText');
-      final response = await _chat!.sendMessage(Content.text(userText));
+
+      // ✅ Build context based on memory settings
+      String contextMessage = userText;
+      final threadMemoryEnabled =
+          AIMemoryService.instance.threadMemoryEnabled.value;
+      final chatMemoryEnabled =
+          AIMemoryService.instance.chatMemoryEnabled.value;
+
+      if (threadMemoryEnabled || chatMemoryEnabled) {
+        final contextParts = <String>[];
+
+        // Add thread memory context (current conversation)
+        if (threadMemoryEnabled && _messages.isNotEmpty) {
+          final recentMessages = _messages.take(
+            10,
+          ); // Last 10 messages for context
+          for (final msg in recentMessages) {
+            if (msg.isUser) {
+              contextParts.add('User: ${msg.text}');
+            } else {
+              final preview = msg.text.length > 100
+                  ? '${msg.text.substring(0, 100)}...'
+                  : msg.text;
+              contextParts.add('Assistant: $preview');
+            }
+          }
+        }
+
+        // Add chat memory note (cross-conversation reference)
+        if (chatMemoryEnabled && _currentConversationId != null) {
+          contextParts.add(
+            '\n[Note: You can reference previous conversations in your response]',
+          );
+        }
+
+        if (contextParts.isNotEmpty) {
+          contextMessage =
+              '${contextParts.join("\n")}\n\nCurrent message: $userText';
+          debugPrint(
+            '[Memory] Context built - Thread: $threadMemoryEnabled, Chat: $chatMemoryEnabled',
+          );
+        }
+      } else {
+        debugPrint('[Memory] No memory enabled - Fresh start mode');
+      }
+
+      final response = await _chat!.sendMessage(Content.text(contextMessage));
       final aiText = response.text?.trim();
 
       // ✅ Extract token counts from response
@@ -1054,12 +1128,17 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
     (int, int)? tokenUsage,
   }) {
     if (mounted) {
-      // Calculate credit cost from token usage if available
-      int? creditCost;
+      // Calculate credit cost from token usage if available (raw decimal value)
+      // Include memory markup multiplier
+      double? creditCost;
       if (tokenUsage != null) {
+        final threadMemory = AIMemoryService.instance.threadMemoryEnabled.value;
+        final chatMemory = AIMemoryService.instance.chatMemoryEnabled.value;
         creditCost = CreditRepository.estimateCreditCostForTokens(
           inputTokens: tokenUsage.$1,
           outputTokens: tokenUsage.$2,
+          threadMemory: threadMemory,
+          chatMemory: chatMemory,
         );
       }
 
@@ -1322,7 +1401,7 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
     );
 
     try {
-      // Get user details
+      // Get user details and currency
       final profile = ProfileRepository.instance.profile.value;
       final userName = profile.profileName.isEmpty
           ? 'User'
@@ -1331,14 +1410,43 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
       final userPhone = profile.phone ?? '0000000000';
       final currency = AppPreferences.instance.currencyCode.value;
 
+      // Convert price to double for payment
+      final priceDouble = price.toDouble();
+
       debugPrint(
-        '💳 Starting AI credit purchase: $credits credits for \$$price',
+        '💳 Starting AI credit purchase: $credits credits, $priceDouble $currency',
       );
 
-      // Process payment via PaymentService (uses same subscription flow)
+      // ✅ NEW: Validate price with backend before processing payment
+      // This prevents users from modifying prices in the frontend
+      final validationResult = await _validateCreditPriceWithBackend(
+        credits: credits,
+        amountUSD: priceDouble,
+        currency: currency,
+      );
+
+      if (!validationResult['valid']) {
+        // Close loading
+        if (navigator.canPop()) navigator.pop();
+
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text(
+              '⚠️ Price validation failed: ${validationResult['error']}',
+            ),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+
+      // Use validated price from backend
+      final validatedPrice = validationResult['amount'] ?? priceDouble;
+
+      // Process payment via PaymentService
       final result = await PaymentService.instance.processSubscriptionPayment(
         planName: 'AI Credits ($credits)',
-        amount: price.toDouble(),
+        amount: validatedPrice,
         userName: userName,
         userEmail: userEmail,
         userPhone: userPhone,
@@ -1347,7 +1455,7 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
 
       debugPrint('💳 Payment result received: ${result.keys.join(", ")}');
 
-      // Close loading - use the captured navigator
+      // Close loading
       if (navigator.canPop()) {
         navigator.pop();
         debugPrint('💳 Closed loading dialog');
@@ -1406,6 +1514,46 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
           backgroundColor: Colors.red,
         ),
       );
+    }
+  }
+
+  /// Validate credit package price with backend
+  /// Prevents clients from tampering with prices
+  Future<Map<String, dynamic>> _validateCreditPriceWithBackend({
+    required int credits,
+    required double amountUSD,
+    required String currency,
+  }) async {
+    try {
+      final functions = FirebaseFunctions.instanceFor(region: 'us-central1');
+      final callable = functions.httpsCallable('validateAndPurchaseAICredits');
+
+      final result = await callable.call({
+        'credits': credits,
+        'amountUSD': amountUSD,
+        'currency': currency,
+      });
+
+      final data = result.data as Map<String, dynamic>;
+
+      if (data['valid'] == true) {
+        debugPrint('✅ Backend validated credit purchase');
+        return {
+          'valid': true,
+          'amount': data['amount'] as double,
+          'credits': data['credits'] as int,
+        };
+      } else {
+        debugPrint('❌ Backend rejected credit purchase');
+        return {
+          'valid': false,
+          'error': data['message'] ?? 'Price validation failed',
+        };
+      }
+    } catch (e) {
+      debugPrint('⚠️ Price validation error: $e');
+      // Fail open - if backend validation fails, reject the purchase
+      return {'valid': false, 'error': 'Could not validate price with server'};
     }
   }
 
@@ -1734,10 +1882,17 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
             Icon(
               widget.isDisputeMode ? Icons.gavel : Icons.smart_toy,
               color: _aiInitialized ? Colors.blue : Colors.orange,
+              size: 20, // Slightly smaller icon for mobile
             ),
-            const SizedBox(width: 8),
-            Text(widget.isDisputeMode ? 'Dispute Mediator' : 'AI Assistant'),
-            const SizedBox(width: 8),
+            const SizedBox(width: 6),
+            Flexible(
+              child: Text(
+                widget.isDisputeMode ? 'Dispute Mediator' : 'AI Assistant',
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 16), // Slightly smaller text
+              ),
+            ),
+            const SizedBox(width: 6),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
               decoration: BoxDecoration(
@@ -1774,21 +1929,21 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
               valueListenable: ProfileRepository.instance.profile,
               builder: (context, profile, _) {
                 return Padding(
-                  padding: const EdgeInsets.only(right: 8),
+                  padding: const EdgeInsets.only(right: 4),
                   child: Center(
                     child: InkWell(
                       onTap: () => _showCreditUsageDetails(context, profile),
-                      borderRadius: BorderRadius.circular(12),
+                      borderRadius: BorderRadius.circular(10),
                       child: Container(
                         padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 6,
+                          horizontal: 6,
+                          vertical: 4,
                         ),
                         decoration: BoxDecoration(
                           color: profile.aiCredits < 10
                               ? Colors.red.withValues(alpha: 0.1)
                               : Colors.blue.withValues(alpha: 0.1),
-                          borderRadius: BorderRadius.circular(12),
+                          borderRadius: BorderRadius.circular(10),
                           border: Border.all(
                             color: profile.aiCredits < 10
                                 ? Colors.red
@@ -1801,29 +1956,21 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
                           children: [
                             Icon(
                               Icons.stars,
-                              size: 16,
+                              size: 14,
                               color: profile.aiCredits < 10
                                   ? Colors.red.shade700
                                   : Colors.blue.shade700,
                             ),
-                            const SizedBox(width: 4),
+                            const SizedBox(width: 3),
                             Text(
                               '${profile.aiCredits}',
                               style: TextStyle(
-                                fontSize: 13,
+                                fontSize: 12,
                                 fontWeight: FontWeight.bold,
                                 color: profile.aiCredits < 10
                                     ? Colors.red.shade700
                                     : Colors.blue.shade700,
                               ),
-                            ),
-                            const SizedBox(width: 2),
-                            Icon(
-                              Icons.info_outline,
-                              size: 12,
-                              color: profile.aiCredits < 10
-                                  ? Colors.red.shade700
-                                  : Colors.blue.shade700,
                             ),
                           ],
                         ),
@@ -1836,41 +1983,41 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
           // Buy credits button for logged-in users
           if (!_isGuest)
             Padding(
-              padding: const EdgeInsets.only(right: 8),
+              padding: const EdgeInsets.only(right: 4),
               child: Center(
-                child: TextButton.icon(
+                child: IconButton(
                   onPressed: () => _showBuyCreditsDialog(context),
-                  icon: const Icon(Icons.shopping_cart, size: 16),
-                  label: const Text('Buy', style: TextStyle(fontSize: 12)),
-                  style: TextButton.styleFrom(
+                  icon: const Icon(Icons.shopping_cart, size: 20),
+                  tooltip: 'Buy Credits',
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(
+                    minWidth: 36,
+                    minHeight: 36,
+                  ),
+                  style: IconButton.styleFrom(
                     foregroundColor: Colors.blue.shade700,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 4,
-                    ),
-                    minimumSize: Size.zero,
                     tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   ),
                 ),
               ),
             ),
-          // Guest conversation counter
+          // Guest credit counter
           if (_isGuest)
             Padding(
-              padding: const EdgeInsets.only(right: 8),
+              padding: const EdgeInsets.only(right: 4),
               child: Center(
                 child: Container(
                   padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 6,
+                    horizontal: 6,
+                    vertical: 4,
                   ),
                   decoration: BoxDecoration(
-                    color: _guestConversationCount >= _guestConversationLimit
+                    color: _guestCreditsRemaining < 5
                         ? Colors.red.withValues(alpha: 0.2)
                         : Colors.orange.withValues(alpha: 0.2),
-                    borderRadius: BorderRadius.circular(12),
+                    borderRadius: BorderRadius.circular(10),
                     border: Border.all(
-                      color: _guestConversationCount >= _guestConversationLimit
+                      color: _guestCreditsRemaining < 5
                           ? Colors.red
                           : Colors.orange,
                       width: 1,
@@ -1880,23 +2027,21 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Icon(
-                        _guestConversationCount >= _guestConversationLimit
-                            ? Icons.lock
-                            : Icons.chat_bubble_outline,
-                        size: 14,
-                        color:
-                            _guestConversationCount >= _guestConversationLimit
+                        _guestCreditsRemaining < 5
+                            ? Icons.warning
+                            : Icons.stars,
+                        size: 12,
+                        color: _guestCreditsRemaining < 5
                             ? Colors.red
                             : Colors.orange,
                       ),
-                      const SizedBox(width: 4),
+                      const SizedBox(width: 3),
                       Text(
-                        '${_guestConversationLimit - _guestConversationCount} left',
+                        '${_guestCreditsRemaining.toStringAsFixed(1)}',
                         style: TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.bold,
-                          color:
-                              _guestConversationCount >= _guestConversationLimit
+                          color: _guestCreditsRemaining < 5
                               ? Colors.red
                               : Colors.orange,
                         ),
@@ -1906,11 +2051,39 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
                 ),
               ),
             ),
+          // Memory settings button (icon only on mobile)
+          ValueListenableBuilder<bool>(
+            valueListenable: AIMemoryService.instance.threadMemoryEnabled,
+            builder: (context, _, _) {
+              return ValueListenableBuilder<bool>(
+                valueListenable: AIMemoryService.instance.chatMemoryEnabled,
+                builder: (context, _, _) {
+                  final memoryIcon = AIMemoryService.instance
+                      .getMemoryStatusIcon();
+                  return IconButton(
+                    onPressed: () => _showMemorySettings(context),
+                    icon: Text(
+                      memoryIcon,
+                      style: const TextStyle(fontSize: 18),
+                    ),
+                    tooltip: AIMemoryService.instance.getMemoryStatusText(),
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(
+                      minWidth: 36,
+                      minHeight: 36,
+                    ),
+                  );
+                },
+              );
+            },
+          ),
           // AI Settings button
           IconButton(
             onPressed: _showAISettings,
-            icon: const Icon(Icons.settings),
+            icon: const Icon(Icons.settings, size: 20),
             tooltip: 'AI Settings',
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
           ),
         ],
       ),
@@ -1986,32 +2159,34 @@ Be conversational, helpful, and specific to ride-sharing context. Keep responses
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      ValueListenableBuilder<int>(
-                        valueListenable:
-                            CreditRepository.instance.creditBalance,
-                        builder: (context, balance, child) {
-                          return Text(
-                            '💳 Balance: $balance credits',
-                            style: TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w600,
-                              color: balance > 10
-                                  ? Colors.green[700]
-                                  : balance > 0
-                                  ? Colors.orange[700]
-                                  : Colors.red[700],
-                            ),
-                          );
-                        },
-                      ),
-                      TextButton.icon(
-                        onPressed: _showCreditPurchaseBottomSheet,
-                        icon: const Icon(Icons.add_circle_outline, size: 18),
-                        label: const Text('Buy Credits'),
-                        style: TextButton.styleFrom(
-                          foregroundColor: Colors.blue,
-                        ),
-                      ),
+                      // HIDDEN: Credits balance moved to top header
+                      // ValueListenableBuilder<int>(
+                      //   valueListenable:
+                      //       CreditRepository.instance.creditBalance,
+                      //   builder: (context, balance, child) {
+                      //     return Text(
+                      //       '💳 Balance: $balance credits',
+                      //       style: TextStyle(
+                      //         fontSize: 13,
+                      //         fontWeight: FontWeight.w600,
+                      //         color: balance > 10
+                      //             ? Colors.green[700]
+                      //             : balance > 0
+                      //             ? Colors.orange[700]
+                      //             : Colors.red[700],
+                      //       ),
+                      //     );
+                      //   },
+                      // ),
+                      // TextButton.icon(
+                      //   onPressed: _showCreditPurchaseBottomSheet,
+                      //   icon: const Icon(Icons.add_circle_outline, size: 18),
+                      //   label: const Text('Buy Credits'),
+                      //   style: TextButton.styleFrom(
+                      //     foregroundColor: Colors.blue,
+                      //   ),
+                      // ),
+                      const SizedBox.shrink(), // Empty space
                     ],
                   ),
                 ),
@@ -2158,7 +2333,7 @@ class ChatMessage {
   final DateTime timestamp;
   final bool isError;
   final (int, int)? tokenUsage; // (inputTokens, outputTokens)
-  final int? creditCost; // credits charged
+  final double? creditCost; // credits charged (raw decimal)
 
   ChatMessage({
     required this.text,
@@ -2257,7 +2432,7 @@ class ChatBubble extends StatelessWidget {
                 right: message.isUser ? 24 : 0,
               ),
               child: Text(
-                '💳 Cost: ${message.creditCost} credits • ${message.tokenUsage!.$1 + message.tokenUsage!.$2} tokens',
+                '💳 Cost: ${message.creditCost?.toStringAsFixed(4)} credits • ${message.tokenUsage!.$1 + message.tokenUsage!.$2} tokens',
                 style: TextStyle(fontSize: 11, color: Colors.grey[600]),
               ),
             ),

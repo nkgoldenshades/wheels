@@ -17,6 +17,15 @@ class CreditRepository {
   static const _storageKey = 'credit_balance';
   static const _transactionsKey = 'credit_transactions';
 
+  // ✅ Pricing Configuration - TWO SEPARATE PRICES
+  // Raw token calculation: What Gemini actually costs us
+  static const double rawTokenCreditPrice =
+      0.06; // $0.06 per credit = raw Gemini cost
+
+  // Credit purchase price: What users pay
+  static const double purchaseCreditPrice =
+      0.10; // $0.10 per credit = purchase price (markup included)
+
   final ValueNotifier<int> creditBalance = ValueNotifier<int>(0);
   final ValueNotifier<List<CreditTransaction>> transactions =
       ValueNotifier<List<CreditTransaction>>([]);
@@ -38,6 +47,7 @@ class CreditRepository {
     try {
       final authUser = AuthRepository.instance.currentUser;
       if (authUser == null) {
+        // Guest users get 0 credits - must login for AI access
         creditBalance.value = 0;
         transactions.value = [];
         return;
@@ -136,11 +146,11 @@ class CreditRepository {
         return false;
       }
 
-      // Calculate cost in credits
+      // Calculate cost in credits with sustainable pricing
       // Gemini pricing: $0.30 per 1M input tokens, $2.50 per 1M output tokens
-      // 1 credit = $0.06, so cost = (tokens * price) / 1_000_000 / 0.06
-      const double inputPrice = 0.30 / 1_000_000 / 0.06;
-      const double outputPrice = 2.50 / 1_000_000 / 0.06;
+      // Use rawTokenCreditPrice ($0.06) for actual cost calculation
+      const double inputPrice = 0.30 / 1_000_000 / rawTokenCreditPrice;
+      const double outputPrice = 2.50 / 1_000_000 / rawTokenCreditPrice;
 
       final creditsCost =
           (inputTokens * inputPrice + outputTokens * outputPrice).ceil();
@@ -230,8 +240,8 @@ class CreditRepository {
 
   /// Check if user has enough credits
   bool hasEnoughCredits({required int inputTokens, required int outputTokens}) {
-    const double inputPrice = 0.30 / 1_000_000 / 0.06;
-    const double outputPrice = 2.50 / 1_000_000 / 0.06;
+    const double inputPrice = 0.30 / 1_000_000 / rawTokenCreditPrice;
+    const double outputPrice = 2.50 / 1_000_000 / rawTokenCreditPrice;
     final creditsCost = (inputTokens * inputPrice + outputTokens * outputPrice)
         .ceil();
     return creditBalance.value >= creditsCost;
@@ -239,31 +249,74 @@ class CreditRepository {
 
   /// Check if user has sufficient credits before sending AI message
   /// Returns true if balance >= estimatedCredits
-  Future<bool> hasEnoughCreditsForAI({required int estimatedCredits}) async {
+  Future<bool> hasEnoughCreditsForAI({required double estimatedCredits}) async {
     return creditBalance.value >= estimatedCredits;
   }
 
-  /// Estimate credit cost based on message length
-  /// Returns estimated credits needed (conservative estimate)
-  static int estimateCreditCostForMessage(String message) {
-    // Conservative estimate: always use at least 1 credit
-    // to account for AI response generation
-    // Actual cost will be calculated after getting token counts from API
-    return 1; // Safe default for display purposes
+  /// Estimate credit cost based on message length (raw token pricing, no rounding)
+  /// Returns estimated credits as raw decimal value
+  /// Includes memory markup: Full=5x, Thread=3x, Chat=2x, None=1x
+  static double estimateCreditCostForMessage(
+    String message, {
+    bool threadMemory = false,
+    bool chatMemory = false,
+  }) {
+    // Estimate tokens: ~1.3 tokens per word
+    // Plus ~100 tokens for AI response generation
+    final estimatedInputTokens = (message.split(' ').length * 1.3);
+    const estimatedOutputTokens = 100.0; // Conservative estimate for response
+
+    // Step 1: Calculate raw API cost in USD
+    // Gemini pricing: $0.30 per 1M input, $2.50 per 1M output
+    const double inputPriceUSD = 0.30 / 1_000_000;
+    const double outputPriceUSD = 2.50 / 1_000_000;
+    double apiCostUSD =
+        (estimatedInputTokens * inputPriceUSD) +
+        (estimatedOutputTokens * outputPriceUSD);
+
+    // Step 2: Apply memory-based markup to API cost (BEFORE converting to credits)
+    // Full memory (Thread + Chat) = 5x
+    // Thread only = 3x
+    // Chat only = 2x
+    // No memory = 1x (raw)
+    final markupMultiplier = _getMemoryMarkupMultiplier(
+      threadMemory,
+      chatMemory,
+    );
+    final costWithMarkupUSD = apiCostUSD * markupMultiplier;
+
+    // Step 3: Convert USD to credits (using purchaseCreditPrice for user payment)
+    final estimatedCost = costWithMarkupUSD / purchaseCreditPrice;
+
+    // Return raw decimal value (no rounding)
+    return estimatedCost > 0 ? estimatedCost : 0.0;
   }
 
-  /// Get cost estimate for specific token counts
+  /// Get cost estimate for specific token counts (raw decimal, no rounding)
   /// Used for displaying predicted cost to user
-  static int estimateCreditCostForTokens({
+  /// Includes memory-based markup multiplier
+  static double estimateCreditCostForTokens({
     required int inputTokens,
     required int outputTokens,
+    bool threadMemory = false,
+    bool chatMemory = false,
   }) {
     // Gemini pricing: $0.30 per 1M input, $2.50 per 1M output
-    // 1 credit = $0.06
-    // cost = (inputTokens * 0.30 + outputTokens * 2.50) / 1_000_000 / 0.06
-    const double inputPrice = 0.30 / 1_000_000 / 0.06;
-    const double outputPrice = 2.50 / 1_000_000 / 0.06;
-    return ((inputTokens * inputPrice) + (outputTokens * outputPrice)).ceil();
+    // Step 1: Calculate raw API cost in USD
+    const double inputPriceUSD = 0.30 / 1_000_000;
+    const double outputPriceUSD = 2.50 / 1_000_000;
+    double apiCostUSD =
+        (inputTokens * inputPriceUSD) + (outputTokens * outputPriceUSD);
+
+    // Step 2: Apply memory-based markup to API cost (BEFORE converting to credits)
+    final markupMultiplier = _getMemoryMarkupMultiplier(
+      threadMemory,
+      chatMemory,
+    );
+    final costWithMarkupUSD = apiCostUSD * markupMultiplier;
+
+    // Step 3: Convert USD to credits (using purchaseCreditPrice for user payment)
+    return costWithMarkupUSD / purchaseCreditPrice;
   }
 
   /// Record a credit purchase (called after successful payment)
@@ -402,13 +455,47 @@ class CreditRepository {
     }
   }
 
+  /// Get credit cost estimate for tokens (raw decimal, no rounding)
   /// Get credit cost estimate for tokens
-  static int estimateCreditCost({
+  /// Formula: (API Cost in USD × Markup) ÷ 0.10 = Credits
+  /// Includes memory-based markup multiplier
+  static double estimateCreditCost({
     required int inputTokens,
     required int outputTokens,
+    bool threadMemory = false,
+    bool chatMemory = false,
   }) {
-    const double inputPrice = 0.30 / 1_000_000 / 0.06;
-    const double outputPrice = 2.50 / 1_000_000 / 0.06;
-    return (inputTokens * inputPrice + outputTokens * outputPrice).ceil();
+    // Step 1: Calculate raw API cost in USD
+    const double inputPriceUSD = 0.30 / 1_000_000;
+    const double outputPriceUSD = 2.50 / 1_000_000;
+    double apiCostUSD =
+        (inputTokens * inputPriceUSD + outputTokens * outputPriceUSD);
+
+    // Step 2: Apply memory-based markup to API cost (BEFORE converting to credits)
+    final markupMultiplier = _getMemoryMarkupMultiplier(
+      threadMemory,
+      chatMemory,
+    );
+    final costWithMarkupUSD = apiCostUSD * markupMultiplier;
+
+    // Step 3: Convert USD to credits (using purchaseCreditPrice for user payment)
+    return costWithMarkupUSD / purchaseCreditPrice;
+  }
+
+  /// Helper: Calculate markup multiplier based on memory mode
+  /// 🧠 Full (Thread + Chat) = 5x markup
+  /// 🧵 Thread only = 3x markup
+  /// 💬 Chat only = 2x markup
+  /// 🆕 No memory = 1x (raw price)
+  static double _getMemoryMarkupMultiplier(bool threadMemory, bool chatMemory) {
+    if (threadMemory && chatMemory) {
+      return 5.0; // 🧠 Full memory
+    } else if (threadMemory) {
+      return 3.0; // 🧵 Thread only
+    } else if (chatMemory) {
+      return 2.0; // 💬 Chat only
+    } else {
+      return 1.0; // 🆕 No memory (raw)
+    }
   }
 }

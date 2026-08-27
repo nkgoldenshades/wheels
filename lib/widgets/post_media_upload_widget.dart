@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/post_media_item.dart';
 import '../services/post_media_service.dart';
+import '../services/image_content_filter_service.dart';
 
 class PostMediaUploadWidget extends StatefulWidget {
   final List<PostMediaItem> initialMedia;
@@ -41,6 +42,21 @@ class _PostMediaUploadWidgetState extends State<PostMediaUploadWidget> {
       }
 
       for (final file in files) {
+        // Validate image content (check for phone numbers, emails, etc.)
+        final filterError = await ImageContentFilterService.instance
+            .validateImage(file);
+
+        if (filterError != null && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(filterError),
+              backgroundColor: Colors.red,
+              duration: const Duration(seconds: 4),
+            ),
+          );
+          continue; // Skip this image
+        }
+
         final url = await PostMediaService.instance.uploadPostImage(
           postId: widget.postId,
           imageFile: file,
@@ -79,6 +95,23 @@ class _PostMediaUploadWidgetState extends State<PostMediaUploadWidget> {
 
       final file = await PostMediaService.instance.pickPostVideo();
       if (file == null) {
+        setState(() => _uploading = false);
+        return;
+      }
+
+      // For videos, validate the first frame thumbnail for contact info
+      // (This is a safety check - ideally should extract and check frames)
+      final filterError = await ImageContentFilterService.instance
+          .validateImage(file);
+
+      if (filterError != null && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Video contains prohibited content: $filterError'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 4),
+          ),
+        );
         setState(() => _uploading = false);
         return;
       }
@@ -182,83 +215,158 @@ class _PostMediaUploadWidgetState extends State<PostMediaUploadWidget> {
             runSpacing: 8,
             children: List.generate(_media.length, (index) {
               final item = _media[index];
-              return SizedBox(
-                width: 100,
-                height: 100,
-                child: Stack(
-                  children: [
-                    Container(
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(8),
-                        color: Colors.grey.shade200,
-                      ),
-                      child: item.type == 'video'
-                          ? Container(
-                              color: Colors.black87,
-                              child: const Center(
-                                child: Icon(
-                                  Icons.videocam,
-                                  color: Colors.white,
-                                  size: 32,
+              return GestureDetector(
+                onTap: () {
+                  // Preview the image/video on click
+                  if (item.type == 'image') {
+                    showDialog(
+                      context: context,
+                      builder: (context) => Dialog(
+                        backgroundColor: Colors.black,
+                        child: GestureDetector(
+                          onTap: () => Navigator.pop(context),
+                          child: Image.network(
+                            item.url,
+                            fit: BoxFit.contain,
+                            loadingBuilder: (context, child, loadingProgress) {
+                              if (loadingProgress == null) return child;
+                              return Center(
+                                child: CircularProgressIndicator(
+                                  value:
+                                      loadingProgress.expectedTotalBytes != null
+                                      ? loadingProgress.cumulativeBytesLoaded /
+                                            loadingProgress.expectedTotalBytes!
+                                      : null,
                                 ),
-                              ),
-                            )
-                          : Image.network(
-                              item.url,
-                              fit: BoxFit.cover,
-                              errorBuilder: (context, error, stackTrace) =>
-                                  Container(
+                              );
+                            },
+                            errorBuilder: (context, error, stackTrace) {
+                              debugPrint('❌ Failed to load preview: $error');
+                              return Center(
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    const Icon(
+                                      Icons.image_not_supported,
+                                      color: Colors.white,
+                                      size: 48,
+                                    ),
+                                    const SizedBox(height: 16),
+                                    Text(
+                                      'Failed to load image',
+                                      style: TextStyle(
+                                        color: Colors.grey.shade400,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                      ),
+                    );
+                  }
+                },
+                child: SizedBox(
+                  width: 100,
+                  height: 100,
+                  child: Stack(
+                    children: [
+                      Container(
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(8),
+                          color: Colors.grey.shade200,
+                        ),
+                        child: item.type == 'video'
+                            ? Container(
+                                color: Colors.black87,
+                                child: const Center(
+                                  child: Icon(
+                                    Icons.videocam,
+                                    color: Colors.white,
+                                    size: 32,
+                                  ),
+                                ),
+                              )
+                            : Image.network(
+                                item.url,
+                                fit: BoxFit.cover,
+                                loadingBuilder:
+                                    (context, child, loadingProgress) {
+                                      if (loadingProgress == null) return child;
+                                      return Center(
+                                        child: CircularProgressIndicator(
+                                          value:
+                                              loadingProgress
+                                                      .expectedTotalBytes !=
+                                                  null
+                                              ? loadingProgress
+                                                        .cumulativeBytesLoaded /
+                                                    loadingProgress
+                                                        .expectedTotalBytes!
+                                              : null,
+                                        ),
+                                      );
+                                    },
+                                errorBuilder: (context, error, stackTrace) {
+                                  debugPrint(
+                                    '❌ Failed to load thumbnail: $error\nURL: ${item.url}',
+                                  );
+                                  return Container(
                                     color: Colors.grey.shade300,
                                     child: const Icon(
                                       Icons.image_not_supported,
                                       color: Colors.grey,
                                     ),
-                                  ),
-                            ),
-                    ),
-                    Positioned(
-                      top: 4,
-                      right: 4,
-                      child: GestureDetector(
-                        onTap: () => _removeMedia(index),
-                        child: Container(
-                          padding: const EdgeInsets.all(4),
-                          decoration: BoxDecoration(
-                            color: Colors.red.withValues(alpha: 0.8),
-                            shape: BoxShape.circle,
-                          ),
-                          child: const Icon(
-                            Icons.close,
-                            color: Colors.white,
-                            size: 16,
-                          ),
-                        ),
+                                  );
+                                },
+                              ),
                       ),
-                    ),
-                    if (item.type == 'video')
                       Positioned(
-                        bottom: 4,
-                        left: 4,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 6,
-                            vertical: 2,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.blue,
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          child: const Text(
-                            'VIDEO',
-                            style: TextStyle(
+                        top: 4,
+                        right: 4,
+                        child: GestureDetector(
+                          onTap: () => _removeMedia(index),
+                          child: Container(
+                            padding: const EdgeInsets.all(4),
+                            decoration: BoxDecoration(
+                              color: Colors.red.withValues(alpha: 0.8),
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Icon(
+                              Icons.close,
                               color: Colors.white,
-                              fontSize: 10,
-                              fontWeight: FontWeight.bold,
+                              size: 16,
                             ),
                           ),
                         ),
                       ),
-                  ],
+                      if (item.type == 'video')
+                        Positioned(
+                          bottom: 4,
+                          left: 4,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.blue,
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: const Text(
+                              'VIDEO',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
                 ),
               );
             }),

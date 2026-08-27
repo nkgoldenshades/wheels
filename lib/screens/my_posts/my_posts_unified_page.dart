@@ -31,7 +31,9 @@ class _MyPostsUnifiedPageState extends State<MyPostsUnifiedPage>
   }
 
   bool _isFullyVerified(Vehicle vehicle) {
-    return vehicle.rcVerified && _isInsuranceValidNow(vehicle) && vehicle.dlVerified;
+    return vehicle.rcVerified &&
+        _isInsuranceValidNow(vehicle) &&
+        vehicle.dlVerified;
   }
 
   @override
@@ -67,10 +69,7 @@ class _MyPostsUnifiedPageState extends State<MyPostsUnifiedPage>
       ),
       body: TabBarView(
         controller: _tabController,
-        children: [
-          _buildMyPostsTab(),
-          _buildMyVehiclesTab(),
-        ],
+        children: [_buildMyPostsTab(), _buildMyVehiclesTab()],
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => _showCreateOptions(context),
@@ -180,10 +179,7 @@ class _MyPostsUnifiedPageState extends State<MyPostsUnifiedPage>
                       ),
                       Text(
                         '${vehicle.type} • ${vehicle.year}',
-                        style: TextStyle(
-                          color: Colors.grey[600],
-                          fontSize: 12,
-                        ),
+                        style: TextStyle(color: Colors.grey[600], fontSize: 12),
                       ),
                     ],
                   ),
@@ -226,7 +222,10 @@ class _MyPostsUnifiedPageState extends State<MyPostsUnifiedPage>
             Row(
               children: [
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 6,
+                  ),
                   decoration: BoxDecoration(
                     color: Colors.green.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(8),
@@ -271,10 +270,10 @@ class _MyPostsUnifiedPageState extends State<MyPostsUnifiedPage>
       builder: (context, allVehicles, _) {
         // Filter to show only current user's vehicles
         final currentUser = AuthRepository.instance.currentUser;
-        final vehicles = currentUser == null 
+        final vehicles = currentUser == null
             ? <Vehicle>[]
             : allVehicles.where((v) => v.userId == currentUser.id).toList();
-        
+
         if (vehicles.isEmpty) {
           return Center(
             child: Padding(
@@ -345,9 +344,7 @@ class _MyPostsUnifiedPageState extends State<MyPostsUnifiedPage>
     // Both tabs go directly to vehicle list
     Navigator.push(
       context,
-      MaterialPageRoute(
-        builder: (context) => VehicleListScreen(),
-      ),
+      MaterialPageRoute(builder: (context) => VehicleListScreen()),
     );
   }
 
@@ -362,7 +359,11 @@ class _MyPostsUnifiedPageState extends State<MyPostsUnifiedPage>
   }
 
   String _formatTimeRange(DateTime start, DateTime end) {
-    return TimezoneUtils.formatTimeRangeWithTimezone(start, end, show24Hour: true);
+    return TimezoneUtils.formatTimeRangeWithTimezone(
+      start,
+      end,
+      show24Hour: true,
+    );
   }
 
   String _getServiceLabel(ServiceType type) {
@@ -372,7 +373,7 @@ class _MyPostsUnifiedPageState extends State<MyPostsUnifiedPage>
       case ServiceType.parcel:
         return 'Parcel';
       case ServiceType.lease:
-        return 'Lease';
+        return 'Help Vehicle';
       case ServiceType.working:
         return 'Working';
     }
@@ -391,6 +392,3 @@ class _MyPostsUnifiedPageState extends State<MyPostsUnifiedPage>
     }
   }
 }
-
-
-

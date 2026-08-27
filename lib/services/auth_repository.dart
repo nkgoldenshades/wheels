@@ -216,7 +216,7 @@ class AuthRepository {
 
       await supabase.from('profiles_private').insert({
         'profile_id': uid,
-        'ai_credits_available': 50,
+        'ai_credits_available': 20,
       });
 
       debugPrint('✅ User synced to Supabase (3 tables): $uid');

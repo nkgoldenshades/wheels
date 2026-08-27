@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/review.dart';
+import '../models/service_type.dart';
 
 class ReviewRepository {
   ReviewRepository._();
@@ -20,7 +21,7 @@ class ReviewRepository {
     try {
       // First load from Supabase (source of truth)
       await _loadFromSupabase();
-      
+
       // Then load from local storage as fallback/cache
       if (reviews.value.isEmpty) {
         final prefs = await SharedPreferences.getInstance();
@@ -40,7 +41,7 @@ class ReviewRepository {
   Future<void> _loadFromSupabase() async {
     try {
       final supabase = Supabase.instance.client;
-      
+
       // Load all reviews (they're public data for ratings)
       final response = await supabase
           .from('reviews')
@@ -58,7 +59,7 @@ class ReviewRepository {
 
       reviews.value = loadedReviews;
       await _persist(); // Save to local storage
-      
+
       debugPrint('✅ Loaded ${loadedReviews.length} reviews from Supabase');
     } catch (e) {
       debugPrint('❌ Failed to load reviews from Supabase: $e');
@@ -84,9 +85,11 @@ class ReviewRepository {
     required String reviewerId,
     required String revieweeId,
     required ReviewType type,
+    ServiceType? serviceType,
     required double rating,
     String? comment,
     List<String> mediaUrls = const [],
+    bool hasOperator = false,
   }) async {
     final review = Review(
       id: DateTime.now().microsecondsSinceEpoch.toString(),
@@ -94,6 +97,8 @@ class ReviewRepository {
       reviewerId: reviewerId,
       revieweeId: revieweeId,
       type: type,
+      serviceType: serviceType,
+      hasOperator: hasOperator,
       rating: rating,
       comment: comment,
       mediaUrls: mediaUrls,
@@ -102,10 +107,10 @@ class ReviewRepository {
 
     reviews.value = [review, ...reviews.value];
     await _persist();
-    
+
     // Sync to Supabase
     await _syncReviewToSupabase(review);
-    
+
     return review;
   }
 
@@ -126,6 +131,12 @@ class ReviewRepository {
           ? review.revieweeId
           : review.reviewerId;
 
+      // Build trip_data JSON with only essential fields
+      final tripData = {
+        'service_type': review.serviceType?.name,
+        'has_operator': review.hasOperator,
+      };
+
       await supabase.from('reviews').insert({
         'id': review.id,
         'booking_id': int.tryParse(review.bookingId) ?? review.bookingId,
@@ -135,7 +146,10 @@ class ReviewRepository {
         'reviewer_role': reviewerRole,
         'rating': review.rating.round(),
         'comment': review.comment,
-        'media_urls': review.mediaUrls.isEmpty ? null : review.mediaUrls,
+        'media_urls': review.mediaUrls.isEmpty
+            ? null
+            : review.mediaUrls, // review_media URLs
+        'trip_data': tripData, // Only service_type and has_operator
         'created_at': review.createdAt.toIso8601String(),
       });
 
@@ -166,7 +180,7 @@ class ReviewRepository {
   double getAverageRating(String userId) {
     final userReviews = getReviewsForUser(userId);
     if (userReviews.isEmpty) return 0.0;
-    
+
     final sum = userReviews.fold<double>(0, (sum, r) => sum + r.rating);
     return sum / userReviews.length;
   }
@@ -185,6 +199,3 @@ class ReviewRepository {
     }
   }
 }
-
-
-

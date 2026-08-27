@@ -2,12 +2,7 @@
 /// Used for storing seat configurations in posts
 library;
 
-enum SlotStatus {
-  available,
-  booked,
-  locked,
-  gap,
-}
+enum SlotStatus { available, booked, locked, gap }
 
 extension SlotStatusExtension on SlotStatus {
   String get value {
@@ -52,12 +47,7 @@ class ParcelDimensions {
   });
 
   Map<String, dynamic> toJson() {
-    return {
-      'h': h,
-      'w': w,
-      'l': l,
-      'b': b,
-    };
+    return {'h': h, 'w': w, 'l': l, 'b': b};
   }
 
   factory ParcelDimensions.fromJson(Map<String, dynamic> json) {
@@ -101,6 +91,7 @@ abstract class LayoutItem {
 /// Passenger seat item
 class PassengerSeat extends LayoutItem {
   final String allowedGender; // Rule: "Male", "Female", "Any"
+  final double? securityDeposit; // Security deposit for this seat
 
   PassengerSeat({
     required super.key,
@@ -109,6 +100,7 @@ class PassengerSeat extends LayoutItem {
     required super.price,
     super.bookingId,
     this.allowedGender = 'Any',
+    this.securityDeposit,
   });
 
   PassengerSeat copyWith({
@@ -118,6 +110,7 @@ class PassengerSeat extends LayoutItem {
     int? price,
     String? bookingId,
     String? allowedGender,
+    double? securityDeposit,
   }) {
     return PassengerSeat(
       key: key ?? this.key,
@@ -126,6 +119,7 @@ class PassengerSeat extends LayoutItem {
       price: price ?? this.price,
       bookingId: bookingId ?? this.bookingId,
       allowedGender: allowedGender ?? this.allowedGender,
+      securityDeposit: securityDeposit ?? this.securityDeposit,
     );
   }
 
@@ -137,16 +131,16 @@ class PassengerSeat extends LayoutItem {
       'status': status.value,
       'price': price,
     };
-    
+
     // Only add allowed_gender if not gap
     if (status != SlotStatus.gap) {
       json['allowed_gender'] = allowedGender;
     }
-    
+
     if (bookingId != null) {
       json['booking_id'] = bookingId;
     }
-    
+
     return json;
   }
 
@@ -154,7 +148,9 @@ class PassengerSeat extends LayoutItem {
     return PassengerSeat(
       key: json['key'] as String,
       matrix: json['matrix'] as String,
-      status: SlotStatusExtension.fromString(json['status'] as String? ?? 'available'),
+      status: SlotStatusExtension.fromString(
+        json['status'] as String? ?? 'available',
+      ),
       price: (json['price'] as num?)?.toInt() ?? 0,
       bookingId: json['booking_id'] as String?,
       allowedGender: json['allowed_gender'] as String? ?? 'Any',
@@ -172,7 +168,9 @@ class PassengerSeat extends LayoutItem {
 /// Parcel slot item
 class ParcelSlot extends LayoutItem {
   final String? parcelType; // "Normal", "Fragile", "Perishable", etc.
+  final String? hsCode; // HS Code for customs (8-10 digits)
   final ParcelDimensions? dimensions;
+  final double? securityDeposit; // Security deposit amount for this parcel
 
   ParcelSlot({
     required super.key,
@@ -181,7 +179,9 @@ class ParcelSlot extends LayoutItem {
     required super.price,
     super.bookingId,
     this.parcelType,
+    this.hsCode,
     this.dimensions,
+    this.securityDeposit,
   });
 
   ParcelSlot copyWith({
@@ -191,7 +191,9 @@ class ParcelSlot extends LayoutItem {
     int? price,
     String? bookingId,
     String? parcelType,
+    String? hsCode,
     ParcelDimensions? dimensions,
+    double? securityDeposit,
   }) {
     return ParcelSlot(
       key: key ?? this.key,
@@ -200,7 +202,9 @@ class ParcelSlot extends LayoutItem {
       price: price ?? this.price,
       bookingId: bookingId ?? this.bookingId,
       parcelType: parcelType ?? this.parcelType,
+      hsCode: hsCode ?? this.hsCode,
       dimensions: dimensions ?? this.dimensions,
+      securityDeposit: securityDeposit ?? this.securityDeposit,
     );
   }
 
@@ -211,18 +215,19 @@ class ParcelSlot extends LayoutItem {
       'matrix': matrix,
       'status': status.value,
     };
-    
+
     // Only add price and other fields if not gap
     if (status != SlotStatus.gap) {
       json['price'] = price;
       if (parcelType != null) json['parcel_type'] = parcelType;
+      if (hsCode != null) json['hs_code'] = hsCode;
       if (dimensions != null) json['dimensions'] = dimensions!.toJson();
     }
-    
+
     if (bookingId != null) {
       json['booking_id'] = bookingId;
     }
-    
+
     return json;
   }
 
@@ -230,12 +235,17 @@ class ParcelSlot extends LayoutItem {
     return ParcelSlot(
       key: json['key'] as String,
       matrix: json['matrix'] as String,
-      status: SlotStatusExtension.fromString(json['status'] as String? ?? 'available'),
+      status: SlotStatusExtension.fromString(
+        json['status'] as String? ?? 'available',
+      ),
       price: (json['price'] as num?)?.toInt() ?? 0,
       bookingId: json['booking_id'] as String?,
       parcelType: json['parcel_type'] as String?,
+      hsCode: json['hs_code'] as String?,
       dimensions: json['dimensions'] != null
-          ? ParcelDimensions.fromJson(json['dimensions'] as Map<String, dynamic>)
+          ? ParcelDimensions.fromJson(
+              json['dimensions'] as Map<String, dynamic>,
+            )
           : null,
     );
   }
@@ -246,18 +256,12 @@ class SimpleSeatLayout {
   final String type; // "passenger" or "parcel"
   final List<LayoutItem> layout;
 
-  SimpleSeatLayout({
-    required this.type,
-    required this.layout,
-  });
+  SimpleSeatLayout({required this.type, required this.layout});
 
   bool get isPassenger => type == 'passenger';
   bool get isParcel => type == 'parcel';
 
-  SimpleSeatLayout copyWith({
-    String? type,
-    List<LayoutItem>? layout,
-  }) {
+  SimpleSeatLayout copyWith({String? type, List<LayoutItem>? layout}) {
     return SimpleSeatLayout(
       type: type ?? this.type,
       layout: layout ?? this.layout,
@@ -278,20 +282,22 @@ class SimpleSeatLayout {
     List<LayoutItem> items;
     if (type == 'passenger') {
       items = layoutList
-          .map((itemJson) => PassengerSeat.fromJson(itemJson as Map<String, dynamic>))
+          .map(
+            (itemJson) =>
+                PassengerSeat.fromJson(itemJson as Map<String, dynamic>),
+          )
           .toList();
     } else if (type == 'parcel') {
       items = layoutList
-          .map((itemJson) => ParcelSlot.fromJson(itemJson as Map<String, dynamic>))
+          .map(
+            (itemJson) => ParcelSlot.fromJson(itemJson as Map<String, dynamic>),
+          )
           .toList();
     } else {
       items = [];
     }
 
-    return SimpleSeatLayout(
-      type: type,
-      layout: items,
-    );
+    return SimpleSeatLayout(type: type, layout: items);
   }
 
   // Helper methods
@@ -312,8 +318,7 @@ class SimpleSeatLayout {
   List<LayoutItem> get lockedItems =>
       layout.where((item) => item.isLocked).toList();
 
-  List<LayoutItem> get gapItems =>
-      layout.where((item) => item.isGap).toList();
+  List<LayoutItem> get gapItems => layout.where((item) => item.isGap).toList();
 
   int get totalItems => layout.where((item) => !item.isGap).length;
   int get availableCount => availableItems.length;
@@ -321,7 +326,11 @@ class SimpleSeatLayout {
   int get lockedCount => lockedItems.length;
 
   // Update item status
-  SimpleSeatLayout updateItemStatus(String key, SlotStatus status, {String? bookingId}) {
+  SimpleSeatLayout updateItemStatus(
+    String key,
+    SlotStatus status, {
+    String? bookingId,
+  }) {
     final updatedLayout = layout.map((item) {
       if (item.key == key) {
         if (item is PassengerSeat) {
@@ -337,9 +346,10 @@ class SimpleSeatLayout {
   }
 
   // Get max row and column for grid display
-  int get maxRow => layout.isEmpty ? 0 : layout.map((s) => s.row).reduce((a, b) => a > b ? a : b);
-  int get maxCol => layout.isEmpty ? 0 : layout.map((s) => s.col).reduce((a, b) => a > b ? a : b);
+  int get maxRow => layout.isEmpty
+      ? 0
+      : layout.map((s) => s.row).reduce((a, b) => a > b ? a : b);
+  int get maxCol => layout.isEmpty
+      ? 0
+      : layout.map((s) => s.col).reduce((a, b) => a > b ? a : b);
 }
-
-
-

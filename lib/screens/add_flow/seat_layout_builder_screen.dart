@@ -176,7 +176,11 @@ class _SeatLayoutBuilderScreenState extends State<SeatLayoutBuilderScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Seating setup'),
+        title: Text(
+          widget.serviceType == ServiceType.parcel
+              ? 'Compartment setup'
+              : 'Seating setup',
+        ),
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
         actions: [
           IconButton(
@@ -209,13 +213,18 @@ class _SeatLayoutBuilderScreenState extends State<SeatLayoutBuilderScreen> {
               final layout = widget.controller.layout;
               return InteractiveViewer(
                 minScale: 0.5,
-                maxScale: 2.5,
-                constrained: false,
+                maxScale: 3.0,
+                constrained: true,
+                boundaryMargin: const EdgeInsets.all(100),
+                panEnabled: true,
+                scaleEnabled: true,
                 child: SizedBox(
                   width: layout.cols * _cellSize,
                   height: layout.rows * _cellSize,
                   child: GridView.builder(
                     physics: const NeverScrollableScrollPhysics(),
+                    addAutomaticKeepAlives: true,
+                    addRepaintBoundaries: true,
                     gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                       crossAxisCount: layout.cols,
                       childAspectRatio: 1,
@@ -237,31 +246,34 @@ class _SeatLayoutBuilderScreenState extends State<SeatLayoutBuilderScreen> {
                         height: _cellSize,
                         child: InkWell(
                           onTap: () => _onTapCell(context, row, col),
-                          child: Container(
-                            margin: const EdgeInsets.all(2),
-                            decoration: BoxDecoration(
-                              color: _bgColor(type),
-                              borderRadius: BorderRadius.circular(6),
-                              border: Border.all(
-                                color: isSelected
-                                    ? Colors.blue
-                                    : (type == CellType.seat
-                                          ? ((stored?.gender ??
-                                                        SeatGender.any) ==
-                                                    SeatGender.male
-                                                ? Colors.blue
-                                                : ((stored?.gender ??
-                                                              SeatGender.any) ==
-                                                          SeatGender.female
-                                                      ? Colors.pink
-                                                      : Colors.grey.shade400))
-                                          : (type == CellType.empty
-                                                ? Colors.grey.shade300
-                                                : Colors.grey.shade400)),
-                                width: isSelected ? 2 : 1,
+                          child: Padding(
+                            padding: const EdgeInsets.all(2),
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: _bgColor(type),
+                                borderRadius: BorderRadius.circular(6),
+                                border: Border.all(
+                                  color: isSelected
+                                      ? Colors.blue
+                                      : (type == CellType.seat
+                                            ? ((stored?.gender ??
+                                                          SeatGender.any) ==
+                                                      SeatGender.male
+                                                  ? Colors.blue
+                                                  : ((stored?.gender ??
+                                                                SeatGender
+                                                                    .any) ==
+                                                            SeatGender.female
+                                                        ? Colors.pink
+                                                        : Colors.grey.shade400))
+                                            : (type == CellType.empty
+                                                  ? Colors.grey.shade300
+                                                  : Colors.grey.shade400)),
+                                  width: isSelected ? 2 : 1,
+                                ),
                               ),
+                              child: _cellChild(stored),
                             ),
-                            child: _cellChild(stored),
                           ),
                         ),
                       );
@@ -298,7 +310,6 @@ class _SeatLayoutBuilderScreenState extends State<SeatLayoutBuilderScreen> {
       );
     }
 
-    final kindLabel = c.seatKind == SeatKind.berth ? 'B' : 'S';
     final genderLabel = switch (c.gender) {
       SeatGender.male => 'M',
       SeatGender.female => 'F',
@@ -308,8 +319,12 @@ class _SeatLayoutBuilderScreenState extends State<SeatLayoutBuilderScreen> {
     // Parse parcel dimensions if they exist (format: name|L:10|B:20|H:30|W:5|...)
     // IMPORTANT: Only show dimensions if ALL FOUR are present and non-empty (complete compartment)
     String? length, breadth, height, weight;
+    String displayName =
+        c.seatName ?? 'Seat'; // Get the actual compartment name
+
     if (c.seatName != null && c.seatName!.contains('|')) {
       final parts = c.seatName!.split('|');
+      displayName = parts[0]; // First part is the compartment name
       for (final part in parts.skip(1)) {
         if (part.startsWith('L:')) {
           length = part.substring(2);
@@ -337,7 +352,7 @@ class _SeatLayoutBuilderScreenState extends State<SeatLayoutBuilderScreen> {
 
     return Stack(
       children: [
-        // Top-left: Kind label (S/B/C) with optional gender
+        // Top-left: Compartment name with optional gender
         Positioned(
           top: 2,
           left: 2,
@@ -345,12 +360,16 @@ class _SeatLayoutBuilderScreenState extends State<SeatLayoutBuilderScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                kindLabel,
+                displayName.length > 8
+                    ? displayName.substring(0, 8)
+                    : displayName,
                 style: TextStyle(
                   fontSize: 9,
                   fontWeight: FontWeight.bold,
                   color: c.isLocked ? Colors.grey : Colors.black,
                 ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
               ),
               if (genderLabel.isNotEmpty)
                 Text(
@@ -416,10 +435,25 @@ class _SeatLayoutBuilderScreenState extends State<SeatLayoutBuilderScreen> {
             ),
           ),
 
-        // Top-right corner: Lock icon (if locked)
-        if (c.isLocked)
+        // Top-right: Security Deposit (if exists) - positioned above lock icon
+        if (c.securityDeposit != null)
           Positioned(
             top: 2,
+            right: 2,
+            child: Text(
+              'Dep: ₹${c.securityDeposit}',
+              style: TextStyle(
+                fontSize: 5,
+                color: c.isLocked ? Colors.grey : Colors.orange.shade700,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+
+        // Top-right corner: Lock icon (if locked) - positioned below deposit label
+        if (c.isLocked)
+          Positioned(
+            top: 9,
             right: 2,
             child: Icon(Icons.lock, size: 10, color: Colors.grey),
           ),
@@ -984,9 +1018,18 @@ class _SeatLayoutBuilderScreenState extends State<SeatLayoutBuilderScreen> {
                     ),
                     const SizedBox(height: 8),
 
-                    // Parcel-specific fields
+                    // Parcel-specific fields — SIMPLIFIED LAYOUT
                     if (isParcel) ...[
                       const SizedBox(height: 12),
+                      const Text(
+                        'Dimensions',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      // L × B × H × W in one compact row
                       Row(
                         children: [
                           Expanded(
@@ -994,112 +1037,136 @@ class _SeatLayoutBuilderScreenState extends State<SeatLayoutBuilderScreen> {
                               controller: lengthController,
                               keyboardType: TextInputType.number,
                               decoration: const InputDecoration(
-                                labelText: 'Length (cm)',
+                                labelText: 'L',
                                 border: OutlineInputBorder(),
+                                isDense: true,
+                                contentPadding: EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 8,
+                                ),
                               ),
                             ),
                           ),
-                          const SizedBox(width: 12),
+                          const SizedBox(width: 8),
                           Expanded(
                             child: TextField(
                               controller: breadthController,
                               keyboardType: TextInputType.number,
                               decoration: const InputDecoration(
-                                labelText: 'Breadth (cm)',
+                                labelText: 'B',
                                 border: OutlineInputBorder(),
+                                isDense: true,
+                                contentPadding: EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 8,
+                                ),
                               ),
                             ),
                           ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      Row(
-                        children: [
+                          const SizedBox(width: 8),
                           Expanded(
                             child: TextField(
                               controller: heightController,
                               keyboardType: TextInputType.number,
                               decoration: const InputDecoration(
-                                labelText: 'Height (cm)',
+                                labelText: 'H',
                                 border: OutlineInputBorder(),
+                                isDense: true,
+                                contentPadding: EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 8,
+                                ),
                               ),
                             ),
                           ),
-                          const SizedBox(width: 12),
+                          const SizedBox(width: 8),
                           Expanded(
                             child: TextField(
                               controller: weightController,
                               keyboardType: TextInputType.number,
                               decoration: const InputDecoration(
-                                labelText: 'Weight (kg)',
+                                labelText: 'W',
                                 border: OutlineInputBorder(),
+                                isDense: true,
+                                contentPadding: EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 8,
+                                ),
                               ),
                             ),
                           ),
                         ],
                       ),
                       const SizedBox(height: 12),
-                      DropdownButtonFormField<String>(
-                        initialValue: parcelType,
-                        decoration: const InputDecoration(
-                          labelText: 'Parcel Type',
-                          border: OutlineInputBorder(),
-                          prefixIcon: Icon(Icons.category),
-                        ),
-                        items: const [
-                          DropdownMenuItem(
-                            value: 'Normal',
-                            child: Text('Normal'),
+                      // Type + HS Code side by side
+                      Row(
+                        children: [
+                          Expanded(
+                            child: DropdownButtonFormField<String>(
+                              initialValue: parcelType,
+                              decoration: const InputDecoration(
+                                labelText: 'Type',
+                                border: OutlineInputBorder(),
+                                isDense: true,
+                                contentPadding: EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 8,
+                                ),
+                              ),
+                              items: const [
+                                DropdownMenuItem(
+                                  value: 'Normal',
+                                  child: Text('Normal'),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'Fragile',
+                                  child: Text('Fragile'),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'Perishable',
+                                  child: Text('Perishable'),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'Medical',
+                                  child: Text('Medical'),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'Hazardous',
+                                  child: Text('Hazardous'),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'Live Animals',
+                                  child: Text('Animals'),
+                                ),
+                              ],
+                              onChanged: (v) {
+                                if (v == null) return;
+                                setModalState(() => parcelType = v);
+                              },
+                            ),
                           ),
-                          DropdownMenuItem(
-                            value: 'Fragile',
-                            child: Text('Fragile'),
-                          ),
-                          DropdownMenuItem(
-                            value: 'Perishable',
-                            child: Text('Perishable'),
-                          ),
-                          DropdownMenuItem(
-                            value: 'Medical',
-                            child: Text('Medical'),
-                          ),
-                          DropdownMenuItem(
-                            value: 'Hazardous',
-                            child: Text('Hazardous'),
-                          ),
-                          DropdownMenuItem(
-                            value: 'Live Animals',
-                            child: Text('Live Animals'),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: TextField(
+                              onChanged: (value) {
+                                setModalState(() => selectedHSCode = value);
+                              },
+                              controller: TextEditingController(
+                                text: selectedHSCode,
+                              ),
+                              decoration: const InputDecoration(
+                                labelText: 'HS Code',
+                                hintText: 'e.g., 392310',
+                                border: OutlineInputBorder(),
+                                isDense: true,
+                                contentPadding: EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 8,
+                                ),
+                              ),
+                            ),
                           ),
                         ],
-                        onChanged: (v) {
-                          if (v == null) return;
-                          setModalState(() => parcelType = v);
-                        },
-                      ),
-                      const SizedBox(height: 16),
-                      // HS Code for Parcel (Customs Classification)
-                      const Text(
-                        'HS Code (Optional - Customs)',
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      // HS Code Text Input
-                      TextField(
-                        onChanged: (value) {
-                          setModalState(() => selectedHSCode = value);
-                        },
-                        controller: TextEditingController(text: selectedHSCode),
-                        decoration: const InputDecoration(
-                          labelText: 'Enter HS Code',
-                          hintText: 'e.g., 392310, 870000, etc.',
-                          border: OutlineInputBorder(),
-                          prefixIcon: Icon(Icons.local_shipping),
-                        ),
-                        keyboardType: TextInputType.text,
                       ),
                     ],
 

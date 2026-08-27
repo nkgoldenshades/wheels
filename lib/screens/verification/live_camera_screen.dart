@@ -189,6 +189,7 @@ class _LiveCameraScreenState extends State<LiveCameraScreen> {
       if (!mounted) return;
       // Read bytes from the captured image file
       final bytes = await XFile(image.path).readAsBytes();
+      if (!mounted) return;
       Navigator.pop(context, {'type': 'photo', 'bytes': bytes});
     } catch (e) {
       debugPrint('❌ Photo capture error: $e');

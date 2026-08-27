@@ -42,6 +42,8 @@ class Slot {
   final double? maxLength; // in cm
   final double? maxWidth; // in cm
   final double? maxHeight; // in cm
+  final String? parcelType; // "Normal", "Fragile", "Perishable", etc.
+  final String? hsCode; // HS Code for customs (8-10 digits)
 
   // Lease-specific fields
   final String? leaseDuration; // hourly, daily, weekly, monthly
@@ -49,6 +51,11 @@ class Slot {
   final String? fuelPolicy; // full-to-full, included, etc.
   final bool? insuranceIncluded;
   final String? leaseTerms; // additional terms and conditions
+
+  // Operator information
+  final String? operatorName; // Name of the driver/operator
+  final String?
+  operatorGender; // Gender: 'male', 'female', or null for not specified
 
   // Operator availability
   final bool withOperator; // true = with operator, false = without operator
@@ -127,12 +134,16 @@ class Slot {
     this.maxLength,
     this.maxWidth,
     this.maxHeight,
+    this.parcelType,
+    this.hsCode,
     this.leaseDuration,
     this.securityDeposit,
     this.fuelPolicy,
     this.insuranceIncluded,
     this.leaseTerms,
     this.withOperator = false,
+    this.operatorName,
+    this.operatorGender,
     this.bookingMode = BookingMode.shared,
     this.minCustomerTier = UserTier.basic,
     this.fullVehiclePrice,
@@ -198,6 +209,10 @@ class Slot {
     String? leaseTerms,
     bool setLeaseTermsNull = false,
     bool? withOperator,
+    String? operatorName,
+    bool setOperatorNameNull = false,
+    String? operatorGender,
+    bool setOperatorGenderNull = false,
     BookingMode? bookingMode,
     UserTier? minCustomerTier,
     double? fullVehiclePrice,
@@ -213,6 +228,10 @@ class Slot {
     EditHistory? editHistory,
     String? escrowPaymentId,
     String? currencyType,
+    String? parcelType,
+    bool setParcelTypeNull = false,
+    String? hsCode,
+    bool setHsCodeNull = false,
   }) {
     return Slot(
       id: id ?? this.id,
@@ -257,6 +276,12 @@ class Slot {
           : (insuranceIncluded ?? this.insuranceIncluded),
       leaseTerms: setLeaseTermsNull ? null : (leaseTerms ?? this.leaseTerms),
       withOperator: withOperator ?? this.withOperator,
+      operatorName: setOperatorNameNull
+          ? null
+          : (operatorName ?? this.operatorName),
+      operatorGender: setOperatorGenderNull
+          ? null
+          : (operatorGender ?? this.operatorGender),
       bookingMode: bookingMode ?? this.bookingMode,
       minCustomerTier: minCustomerTier ?? this.minCustomerTier,
       fullVehiclePrice: setFullVehiclePriceNull
@@ -274,6 +299,8 @@ class Slot {
       editHistory: editHistory ?? this.editHistory,
       escrowPaymentId: escrowPaymentId ?? this.escrowPaymentId,
       currencyType: currencyType ?? this.currencyType,
+      parcelType: setParcelTypeNull ? null : (parcelType ?? this.parcelType),
+      hsCode: setHsCodeNull ? null : (hsCode ?? this.hsCode),
     );
   }
 
@@ -304,12 +331,16 @@ class Slot {
       'max_length': maxLength,
       'max_width': maxWidth,
       'max_height': maxHeight,
+      'parcel_type': parcelType,
+      'hs_code': hsCode,
       'lease_duration': leaseDuration,
       'security_deposit': securityDeposit,
       'fuel_policy': fuelPolicy,
       'insurance_included': insuranceIncluded,
       'lease_terms': leaseTerms,
       'with_operator': withOperator,
+      'operator_name': operatorName,
+      'operator_gender': operatorGender,
       'booking_mode': bookingMode.name,
       'min_customer_tier': minCustomerTier.name,
       'full_vehicle_price': fullVehiclePrice,
@@ -396,6 +427,8 @@ class Slot {
       maxLength: (json['max_length'] ?? json['maxLength'] as num?)?.toDouble(),
       maxWidth: (json['max_width'] ?? json['maxWidth'] as num?)?.toDouble(),
       maxHeight: (json['max_height'] ?? json['maxHeight'] as num?)?.toDouble(),
+      parcelType: json['parcel_type'] ?? json['parcelType'],
+      hsCode: json['hs_code'] ?? json['hsCode'],
       // lease_duration / lease_terms / insurance_included are not live DB columns
       // — kept in local cache only
       leaseDuration: json['lease_duration'] ?? json['leaseDuration'],
@@ -407,6 +440,8 @@ class Slot {
           json['insurance_included'] ?? json['insuranceIncluded'],
       leaseTerms: json['lease_terms'] ?? json['leaseTerms'],
       withOperator: json['with_operator'] ?? json['withOperator'] ?? false,
+      operatorName: json['operator_name'] ?? json['operatorName'],
+      operatorGender: json['operator_gender'] ?? json['operatorGender'],
       // booking_mode / min_customer_tier / full_vehicle_price are not live DB columns
       // — default safely
       bookingMode: json['booking_mode'] != null || json['bookingMode'] != null

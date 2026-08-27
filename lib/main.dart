@@ -28,8 +28,10 @@ import 'models/booking.dart' show Booking, BookingStatus, BookingStatusX;
 import 'models/booking.dart' as booking_types show BookingMode;
 import 'models/exceptions.dart';
 import 'models/review.dart';
+import 'models/post_media_item.dart';
 import 'config/supabase_config.dart';
 import 'widgets/payment_method_info.dart';
+import 'widgets/post_media_upload_widget.dart';
 import 'screens/slot_detail_screen.dart';
 import 'screens/vehicle/vehicle_list_screen.dart';
 import 'services/booking_repository.dart';
@@ -47,6 +49,7 @@ import 'models/user_post_acceptance.dart'
     show UserPostAcceptance, AcceptanceStatus;
 import 'models/review.dart' show ReviewType;
 import 'services/review_repository.dart' show ReviewRepository;
+import 'services/credit_repository.dart' show CreditRepository;
 import 'widgets/slot_card.dart';
 import 'widgets/booking_confirm_sheet.dart'
     show BookingConfirmSheet, BookingConfirmResult;
@@ -58,6 +61,7 @@ import 'services/app_preferences.dart' show AppPreferences, SubscriptionPlan;
 
 import 'services/passenger_repository.dart' show PassengerRepository;
 import 'services/payment_service.dart' show PaymentService;
+import 'services/upi_repository.dart' show UPIRepository;
 import 'screens/booking_map_screen.dart' show BookingMapScreen;
 import 'services/location_autocomplete_service.dart'
     show LocationAutocompleteService;
@@ -66,6 +70,10 @@ import 'screens/auth/login_screen.dart';
 import 'screens/auth/register_screen.dart';
 import 'screens/reviews_screen.dart';
 import 'screens/ai_chat_page.dart'; // ← Keep original
+import 'screens/upi_settings_screen.dart';
+import 'screens/legal/privacy_policy_screen.dart';
+import 'screens/legal/terms_of_service_screen.dart';
+import 'screens/settings/data_management_screen.dart';
 import 'widgets/voice_ai_overlay.dart';
 import 'services/voice_ai_service.dart';
 import 'services/pricing_service.dart';
@@ -322,6 +330,7 @@ Future<void> _initializeServicesInBackground() async {
       'PassengerRepository',
     );
     await initWithTimeout(ReviewRepository.instance.init(), 'ReviewRepository');
+    await initWithTimeout(CreditRepository.instance.init(), 'CreditRepository');
 
     // Force refresh slot entries after all data is loaded
     // This ensures slots find their vehicles even if there was a timing issue
@@ -707,13 +716,44 @@ ImageProvider? _profileAvatarProvider(ProfileInfo info) {
   if (avatar == null || avatar.trim().isEmpty) return null;
 
   final a = avatar.trim();
+
+  // Handle URLs
   if (a.startsWith('http://') || a.startsWith('https://')) {
+    debugPrint('✓ Loading profile avatar from URL: ${a.substring(0, 50)}...');
     return NetworkImage(a);
   }
 
+  // Handle base64 images
   try {
-    return MemoryImage(base64Decode(a));
-  } catch (_) {
+    String base64String = a;
+
+    // Remove data URI prefix if present
+    if (a.contains(',')) {
+      base64String = a.split(',').last;
+    }
+
+    // Additional validation - ensure it's valid base64
+    if (base64String.isEmpty) {
+      debugPrint('⚠️ Base64 string is empty after parsing');
+      return null;
+    }
+
+    debugPrint(
+      '✓ Loading profile avatar from base64 (length: ${base64String.length})',
+    );
+    final bytes = base64Decode(base64String);
+
+    if (bytes.isEmpty) {
+      debugPrint('⚠️ Decoded bytes are empty');
+      return null;
+    }
+
+    return MemoryImage(bytes);
+  } catch (e) {
+    debugPrint('❌ Failed to decode avatar: $e');
+    debugPrint(
+      '   Avatar string: ${a.substring(0, math.min(100, a.length))}...',
+    );
     return null;
   }
 }
@@ -733,7 +773,7 @@ Future<void> _pickAndSaveAvatar(BuildContext context) async {
           ),
           const SizedBox(height: 20),
 
-          // Option 1: Verified Upload
+          // Option 1: Profile Recognition Upload
           InkWell(
             onTap: () => Navigator.pop(context, 'verified'),
             child: Container(
@@ -745,15 +785,15 @@ Future<void> _pickAndSaveAvatar(BuildContext context) async {
               ),
               child: const Column(
                 children: [
-                  Icon(Icons.verified_user, color: Colors.green, size: 40),
+                  Icon(Icons.face, color: Colors.green, size: 40),
                   SizedBox(height: 8),
                   Text(
-                    'Verified Upload',
+                    'Enhanced Profile',
                     style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                   ),
                   SizedBox(height: 4),
                   Text(
-                    'Upload + Live verification\n(Recommended for trust)',
+                    'Upload + Face matching\n(Recommended for trust)',
                     textAlign: TextAlign.center,
                     style: TextStyle(fontSize: 12, color: Colors.grey),
                   ),
@@ -764,7 +804,7 @@ Future<void> _pickAndSaveAvatar(BuildContext context) async {
 
           const SizedBox(height: 12),
 
-          // Option 2: Normal Upload
+          // Option 2: Quick Upload
           InkWell(
             onTap: () => Navigator.pop(context, 'normal'),
             child: Container(
@@ -778,12 +818,12 @@ Future<void> _pickAndSaveAvatar(BuildContext context) async {
                   Icon(Icons.photo_library, color: Colors.grey, size: 40),
                   SizedBox(height: 8),
                   Text(
-                    'Normal Upload',
+                    'Quick Upload',
                     style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                   ),
                   SizedBox(height: 4),
                   Text(
-                    'Quick upload from gallery\n(No verification)',
+                    'Upload profile photo\n(No face matching)',
                     textAlign: TextAlign.center,
                     style: TextStyle(fontSize: 12, color: Colors.grey),
                   ),
@@ -1171,6 +1211,10 @@ class MyApp extends StatelessWidget {
         '/expert-support': (context) => const ExpertSupportScreen(),
         '/payment-success': (context) => const PaymentSuccessScreen(),
         '/payment-cancel': (context) => const PaymentCancelScreen(),
+        '/upi-settings': (context) => const UPISettingsScreen(),
+        '/privacy-policy': (context) => const PrivacyPolicyScreen(),
+        '/terms-of-service': (context) => const TermsOfServiceScreen(),
+        '/data-management': (context) => const DataManagementScreen(),
       },
     );
   }
@@ -1481,6 +1525,33 @@ class PlansScreen extends StatelessWidget {
           : profile.profileName;
       final userEmail = currentUser.email;
       final userPhone = profile.phone ?? '0000000000';
+
+      // ✅ Validate user data before payment
+      if (userEmail.isEmpty) {
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Email is required for payment. Please update your profile.',
+            ),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        return;
+      }
+
+      if (userPhone.isEmpty || userPhone == '0000000000') {
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Phone number is required for payment. Please update your profile.',
+            ),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        return;
+      }
 
       // ✅ Determine currency based on selected payment gateway
       // Razorpay only supports INR, Stripe supports multiple currencies
@@ -1910,8 +1981,8 @@ class PlansScreen extends StatelessWidget {
                     currencySymbol: symbol,
                     bullets: const [
                       'Everything in Basic',
-                      'Verify PAN / Aadhaar',
-                      'Verify RC / Driving License',
+                      'Add PAN / Aadhaar to profile',
+                      'Add RC / Driving License to profile',
                       'Priority listing',
                       'Advanced analytics',
                     ],
@@ -2317,6 +2388,9 @@ class _CreateUserPostPageState extends State<CreateUserPostPage> {
   final _parcelWidthController = TextEditingController();
   final _parcelHeightController = TextEditingController();
 
+  // Post Media
+  List<PostMediaItem> _postMedia = [];
+
   bool _requiresVerifiedVehicle = false;
   bool _requiresExpertVehicle = false;
 
@@ -2721,7 +2795,16 @@ class _CreateUserPostPageState extends State<CreateUserPostPage> {
               border: OutlineInputBorder(),
             ),
           ),
-          // Parcel dimensions ? only shown for parcel service type
+          const SizedBox(height: 24),
+          // Post Media (Images/Videos)
+          PostMediaUploadWidget(
+            initialMedia: _postMedia,
+            onMediaChanged: (media) {
+              setState(() => _postMedia = media);
+            },
+            postId: 'temp_${DateTime.now().millisecondsSinceEpoch}',
+          ),
+          // Parcel dimensions - only shown for parcel service type
           if (_serviceType == ServiceType.parcel) ...[
             const SizedBox(height: 16),
             const Text(
@@ -2761,6 +2844,70 @@ class _CreateUserPostPageState extends State<CreateUserPostPage> {
             const SizedBox(height: 8),
             Row(
               children: [
+                Expanded(
+                  child: TextField(
+                    controller: _parcelWidthController,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    decoration: const InputDecoration(
+                      labelText: 'Width (cm)',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: TextField(
+                    controller: _parcelHeightController,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    decoration: const InputDecoration(
+                      labelText: 'Height (cm)',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+          // HS Code for Parcel (Customs Classification)
+          if (_serviceType == ServiceType.parcel) ...[
+            const SizedBox(height: 24),
+            const Text(
+              'Parcel Dimensions',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _parcelWeightController,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    decoration: const InputDecoration(
+                      labelText: 'Weight (kg)',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: TextField(
+                    controller: _parcelLengthController,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    decoration: const InputDecoration(
+                      labelText: 'Length (cm)',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
                 Expanded(
                   child: TextField(
                     controller: _parcelWidthController,
@@ -3351,7 +3498,7 @@ class MyPostsPage extends StatelessWidget {
       case ServiceType.working:
         return 'Working';
       case ServiceType.lease:
-        return 'Lease';
+        return 'Help Vehicle';
     }
   }
 }
@@ -3439,6 +3586,88 @@ class _EarningsPageState extends State<EarningsPage> {
           return ListView(
             padding: const EdgeInsets.all(16),
             children: [
+              // ⚠️ UPI ID Warning Banner
+              ValueListenableBuilder<String?>(
+                valueListenable: UPIRepository.instance.upiId,
+                builder: (context, upiIdValue, _) {
+                  // Check if UPI ID is not set
+                  final hasUPIId = upiIdValue != null && upiIdValue.isNotEmpty;
+
+                  if (!hasUPIId && totalEarnings > 0) {
+                    return Column(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.orange[50],
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: Colors.orange[300]!,
+                              width: 1,
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(
+                                Icons.warning_amber_rounded,
+                                color: Colors.orange[700],
+                                size: 24,
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'Add UPI ID to receive payouts',
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w600,
+                                        color: Colors.orange[900],
+                                      ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      'You have ₹${totalEarnings.toStringAsFixed(2)} earnings. After 5% commission, you\'ll receive ₹${(totalEarnings * 0.95).toStringAsFixed(2)}',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: Colors.orange[800],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              ElevatedButton(
+                                onPressed: () {
+                                  Navigator.pushNamed(context, '/upi-settings');
+                                },
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.orange[700],
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 8,
+                                  ),
+                                ),
+                                child: const Text(
+                                  'Set UPI',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                      ],
+                    );
+                  }
+                  return const SizedBox.shrink();
+                },
+              ),
               // Total Earnings Card
               Card(
                 elevation: 4,
@@ -3519,9 +3748,9 @@ class _EarningsPageState extends State<EarningsPage> {
               const SizedBox(height: 8),
 
               _buildServiceEarningCard(
-                'Lease/Working',
+                'Help Vehicle/Working',
                 leaseEarnings,
-                Icons.car_rental,
+                Icons.handshake,
                 Colors.purple,
               ),
 
@@ -3726,7 +3955,10 @@ class SettingsPage extends StatelessWidget {
                           radius: 44,
                           backgroundColor: Colors.grey[300],
                           backgroundImage: _profileAvatarProvider(info),
-                          child: info.avatarUrl == null
+                          onBackgroundImageError: (_, _) {
+                            debugPrint('⚠️ Error loading profile avatar');
+                          },
+                          child: _profileAvatarProvider(info) == null
                               ? const Icon(
                                   Icons.person,
                                   size: 44,
@@ -3975,10 +4207,10 @@ class SettingsPage extends StatelessWidget {
                   ] else ...[
                     ListTile(
                       contentPadding: EdgeInsets.zero,
-                      leading: const Icon(Icons.lock_outline),
-                      title: const Text('Document verification'),
+                      leading: const Icon(Icons.description_outlined),
+                      title: const Text('Profile Documents'),
                       subtitle: const Text(
-                        'Upgrade to Premium to add Tax ID/National ID/Vehicle Docs',
+                        'Upgrade to Premium to add Tax ID/National ID/Vehicle Documents',
                       ),
                       trailing: TextButton(
                         onPressed: () => Navigator.pushNamed(context, '/plans'),
@@ -4016,79 +4248,31 @@ class SettingsPage extends StatelessWidget {
                         ),
                         const SizedBox(height: 8),
                         const Text(
-                          '🇮🇳 Earn in INR with Razorpay\n\nDirect bank payouts for all your trip earnings. Quick setup in 2 minutes!',
+                          '💳 Receive Payouts\n\nSet up your UPI ID to receive payouts from your earnings!',
                           style: TextStyle(fontSize: 13, color: Colors.grey),
                         ),
                         const SizedBox(height: 12),
-                        // Only show setup button if Razorpay is NOT already selected
-                        if (info.paymentProvider != 'razorpay')
-                          SizedBox(
-                            width: double.infinity,
-                            child: ElevatedButton.icon(
-                              onPressed: () async {
-                                // Trigger Razorpay setup
-                                try {
-                                  await ProfileRepository.instance
-                                      .updatePaymentProvider('razorpay');
-                                } catch (e) {
-                                  if (context.mounted) {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(content: Text('Error: $e')),
-                                    );
-                                  }
-                                }
-                              },
-                              icon: const Icon(Icons.account_balance),
-                              label: const Text('Setup Razorpay Now'),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.blue,
-                                foregroundColor: Colors.white,
-                              ),
-                            ),
-                          )
-                        else
-                          Container(
-                            width: double.infinity,
-                            padding: const EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              color: Colors.green.withValues(alpha: 0.1),
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: Colors.green, width: 2),
-                            ),
-                            child: const Row(
-                              children: [
-                                Icon(
-                                  Icons.check_circle,
-                                  color: Colors.green,
-                                  size: 24,
+                        // Setup UPI ID button
+                        SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton.icon(
+                            onPressed: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) =>
+                                      const UPISettingsScreen(),
                                 ),
-                                SizedBox(width: 12),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        'Razorpay Setup Complete ✓',
-                                        style: TextStyle(
-                                          fontWeight: FontWeight.bold,
-                                          color: Colors.green,
-                                          fontSize: 14,
-                                        ),
-                                      ),
-                                      Text(
-                                        'Ready to receive payments in INR',
-                                        style: TextStyle(
-                                          fontSize: 12,
-                                          color: Colors.grey,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ],
+                              );
+                            },
+                            icon: const Icon(Icons.account_balance_wallet),
+                            label: const Text('Setup UPI ID'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.blue,
+                              foregroundColor: Colors.white,
                             ),
                           ),
+                        ),
                       ],
                     ),
                   ),
@@ -4102,7 +4286,7 @@ class SettingsPage extends StatelessWidget {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'Choose how you want to receive earnings from completed trips',
+                    'Choose how you want to receive earnings from completed trips. We process payouts with 5% commission deducted.',
                     style: TextStyle(fontSize: 12, color: Colors.grey[600]),
                   ),
                   const SizedBox(height: 16),
@@ -4125,149 +4309,11 @@ class SettingsPage extends StatelessWidget {
                                 child: GestureDetector(
                                   onTap: () async {
                                     try {
-                                      // For new Razorpay users, show setup instructions
+                                      // Navigate to UPI settings screen
                                       if (!isRazorpay) {
-                                        final accountIdController =
-                                            TextEditingController();
-                                        showDialog(
-                                          context: context,
-                                          builder: (ctx) => AlertDialog(
-                                            title: const Text(
-                                              '🎯 Set Up Razorpay',
-                                            ),
-                                            content: Column(
-                                              mainAxisSize: MainAxisSize.min,
-                                              crossAxisAlignment:
-                                                  CrossAxisAlignment.start,
-                                              children: [
-                                                const Text(
-                                                  'To receive payments via Razorpay:',
-                                                  style: TextStyle(
-                                                    fontWeight: FontWeight.bold,
-                                                  ),
-                                                ),
-                                                const SizedBox(height: 12),
-                                                const Text(
-                                                  '1. Go to Razorpay dashboard\n'
-                                                  '2. Create your Razorpay Account\n'
-                                                  '3. Add your bank account\n'
-                                                  '4. Get your Account ID\n'
-                                                  '5. Paste it below',
-                                                ),
-                                                const SizedBox(height: 16),
-                                                TextField(
-                                                  controller:
-                                                      accountIdController,
-                                                  decoration: InputDecoration(
-                                                    hintText:
-                                                        'Your Razorpay Account ID',
-                                                    border: OutlineInputBorder(
-                                                      borderRadius:
-                                                          BorderRadius.circular(
-                                                            8,
-                                                          ),
-                                                    ),
-                                                    prefixIcon: const Icon(
-                                                      Icons.vpn_key,
-                                                    ),
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                            actions: [
-                                              TextButton(
-                                                onPressed: () {
-                                                  Navigator.pop(ctx);
-                                                },
-                                                child: const Text('Cancel'),
-                                              ),
-                                              ElevatedButton.icon(
-                                                onPressed: () async {
-                                                  final url = Uri.parse(
-                                                    'https://dashboard.razorpay.com',
-                                                  );
-                                                  if (await canLaunchUrl(url)) {
-                                                    await launchUrl(
-                                                      url,
-                                                      mode: LaunchMode
-                                                          .externalApplication,
-                                                    );
-                                                  }
-                                                },
-                                                icon: const Icon(
-                                                  Icons.open_in_new,
-                                                ),
-                                                label: const Text(
-                                                  'Go to Razorpay',
-                                                ),
-                                              ),
-                                              ElevatedButton.icon(
-                                                onPressed: () async {
-                                                  final accountId =
-                                                      accountIdController.text
-                                                          .trim();
-                                                  if (accountId.isEmpty) {
-                                                    if (ctx.mounted) {
-                                                      ScaffoldMessenger.of(
-                                                        ctx,
-                                                      ).showSnackBar(
-                                                        const SnackBar(
-                                                          content: Text(
-                                                            'Please enter your Razorpay Account ID',
-                                                          ),
-                                                        ),
-                                                      );
-                                                    }
-                                                    return;
-                                                  }
-
-                                                  try {
-                                                    await ProfileRepository
-                                                        .instance
-                                                        .updateRazorpayAccount(
-                                                          accountId,
-                                                        );
-                                                    // Also set payment provider to razorpay
-                                                    await ProfileRepository
-                                                        .instance
-                                                        .updatePaymentProvider(
-                                                          'razorpay',
-                                                        );
-                                                    if (ctx.mounted) {
-                                                      Navigator.pop(ctx);
-                                                      ScaffoldMessenger.of(
-                                                        context,
-                                                      ).showSnackBar(
-                                                        const SnackBar(
-                                                          content: Text(
-                                                            '✅ Razorpay account linked!',
-                                                          ),
-                                                          backgroundColor:
-                                                              Colors.green,
-                                                        ),
-                                                      );
-                                                    }
-                                                  } catch (e) {
-                                                    if (ctx.mounted) {
-                                                      ScaffoldMessenger.of(
-                                                        ctx,
-                                                      ).showSnackBar(
-                                                        SnackBar(
-                                                          content: Text(
-                                                            'Error: $e',
-                                                          ),
-                                                        ),
-                                                      );
-                                                    }
-                                                  }
-                                                },
-                                                icon: const Icon(Icons.save),
-                                                label: const Text(
-                                                  'Save Account',
-                                                ),
-                                              ),
-                                            ],
-                                          ),
+                                        Navigator.pushNamed(
+                                          context,
+                                          '/upi-settings',
                                         );
                                       } else {
                                         // Already selected, just switch it off
@@ -4526,83 +4572,25 @@ class SettingsPage extends StatelessWidget {
                                       color: Colors.black87,
                                     ),
                                   ),
-                                  if (profile.razorpayAccountId != null &&
-                                      profile
-                                          .razorpayAccountId!
-                                          .isNotEmpty) ...[
-                                    const SizedBox(height: 12),
-                                    Text(
-                                      'Account ID: ${profile.razorpayAccountId}',
-                                      style: TextStyle(
-                                        fontSize: 11,
-                                        color: Colors.grey.shade700,
-                                        fontFamily: 'monospace',
+                                  // UPI ID Management for Payouts
+                                  const SizedBox(height: 16),
+                                  ElevatedButton.icon(
+                                    onPressed: () {
+                                      Navigator.pushNamed(
+                                        context,
+                                        '/upi-settings',
+                                      );
+                                    },
+                                    icon: const Icon(Icons.account_balance),
+                                    label: const Text('Manage UPI ID'),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: Colors.blue,
+                                      minimumSize: const Size(
+                                        double.infinity,
+                                        48,
                                       ),
                                     ),
-                                  ] else ...[
-                                    // NEW USERS: Prompt to enter account ID
-                                    const SizedBox(height: 12),
-                                    const Text(
-                                      '👉 Next Steps:',
-                                      style: TextStyle(
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 12,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 8),
-                                    const Text(
-                                      '1. Click "Set Up Razorpay" below\n'
-                                      '2. Create your account\n'
-                                      '3. Get your Account ID\n'
-                                      '4. Paste it here',
-                                      style: TextStyle(fontSize: 12),
-                                    ),
-                                  ],
-                                  const SizedBox(height: 12),
-                                  if (profile.razorpayAccountId != null &&
-                                      profile.razorpayAccountId!.isNotEmpty)
-                                    OutlinedButton.icon(
-                                      onPressed: () async {
-                                        // Open Razorpay dashboard for bank details management
-                                        final url = Uri.parse(
-                                          'https://dashboard.razorpay.com/app/route',
-                                        );
-                                        if (await canLaunchUrl(url)) {
-                                          await launchUrl(
-                                            url,
-                                            mode:
-                                                LaunchMode.externalApplication,
-                                          );
-                                        }
-                                      },
-                                      icon: const Icon(Icons.open_in_new),
-                                      label: const Text(
-                                        'Manage Bank Details on Razorpay',
-                                        style: TextStyle(fontSize: 12),
-                                      ),
-                                    )
-                                  else
-                                    ElevatedButton.icon(
-                                      onPressed: () async {
-                                        // Open Razorpay dashboard for new users
-                                        final url = Uri.parse(
-                                          'https://dashboard.razorpay.com',
-                                        );
-                                        if (await canLaunchUrl(url)) {
-                                          await launchUrl(
-                                            url,
-                                            mode:
-                                                LaunchMode.externalApplication,
-                                          );
-                                        }
-                                      },
-                                      icon: const Icon(
-                                        Icons.add_circle_outline,
-                                      ),
-                                      label: const Text(
-                                        'Set Up Razorpay Account',
-                                      ),
-                                    ),
+                                  ),
                                 ],
                               ),
                             ),
@@ -4827,18 +4815,30 @@ class _MainScreenState extends State<MainScreen> {
             });
             mainTabIndex.value = index;
           },
-          type: BottomNavigationBarType.fixed,
+          type: BottomNavigationBarType.shifting,
+          selectedItemColor: Colors.blue,
+          unselectedItemColor: Colors.grey,
           items: const [
-            BottomNavigationBarItem(icon: Icon(Icons.article), label: 'Posts'),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.article),
+              label: 'Posts',
+              backgroundColor: Colors.white,
+            ),
             BottomNavigationBarItem(
               icon: Icon(Icons.request_page),
               label: 'Requests',
+              backgroundColor: Colors.white,
             ),
             BottomNavigationBarItem(
-              icon: Icon(Icons.smart_toy), // AI chat icon
+              icon: Icon(Icons.smart_toy),
               label: 'AI Chat',
+              backgroundColor: Colors.white,
             ),
-            BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Profile'),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.person),
+              label: 'Profile',
+              backgroundColor: Colors.white,
+            ),
           ],
         ),
       ),
@@ -4935,6 +4935,9 @@ class _PostsPageState extends State<PostsPage> {
   // Currency filter
   String? _selectedCurrency; // null = show all currencies
 
+  // Gender filter - DISABLED due to performance issues
+  // String? _selectedGender; // null = all, 'male', 'female', or 'other'
+
   // Operator filter (only for Lease)
   bool?
   _withOperator; // null = both, true = with operator, false = without operator
@@ -4954,6 +4957,10 @@ class _PostsPageState extends State<PostsPage> {
   double? _maxParcelWidth;
   double? _minParcelHeight;
   double? _maxParcelHeight;
+
+  // Parcel type and HS Code filters
+  String? _selectedParcelType; // Filter by parcel type (Normal, Fragile, etc.)
+  String _hsCodeFilter = ''; // Filter by HS Code (partial match)
 
   final TextEditingController _searchController = TextEditingController();
   final TextEditingController _fromSearchController = TextEditingController();
@@ -5544,6 +5551,8 @@ class _PostsPageState extends State<PostsPage> {
                 providerRating: item.providerRating,
                 isOffer: item.isOffer,
                 isUserPost: item.isUserPost,
+                minPriceFilter: _minPrice,
+                maxPriceFilter: _maxPrice,
                 onRatingTap: () {
                   Navigator.push(
                     context,
@@ -5672,6 +5681,8 @@ class _PostsPageState extends State<PostsPage> {
                 providerRating: 0.0,
                 isOffer: false, // User is looking, not offering
                 isUserPost: true,
+                minPriceFilter: _minPrice,
+                maxPriceFilter: _maxPrice,
                 onTap: () {
                   Navigator.push(
                     context,
@@ -5760,7 +5771,7 @@ class _PostsPageState extends State<PostsPage> {
       case ServiceType.working:
         return 'Working';
       case ServiceType.lease:
-        return 'Lease';
+        return 'Help Vehicle';
     }
   }
 
@@ -5773,7 +5784,7 @@ class _PostsPageState extends State<PostsPage> {
       case ServiceType.working:
         return '💼 Find verified workers • Flexible hours • Hire instantly';
       case ServiceType.lease:
-        return '🏍️ Rent vehicles • Flexible lease terms • Insurance available';
+        return '🤝 Help with vehicles • Flexible terms • Peer community';
     }
   }
 
@@ -5808,7 +5819,9 @@ class _PostsPageState extends State<PostsPage> {
               slot: e.slot,
               vehicle: e.vehicle,
               providerName: e.vehicle.userName, // ? Show real name to everyone
-              providerAvatar: '',
+              providerAvatar:
+                  e.vehicle.operatorPhoto ??
+                  '', // Use operator/user photo, not vehicle image
               providerRating: 5.0,
               isOffer: false,
               isUserPost: true,
@@ -5848,7 +5861,9 @@ class _PostsPageState extends State<PostsPage> {
               slot: e.slot,
               vehicle: e.vehicle,
               providerName: providerName,
-              providerAvatar: '',
+              providerAvatar:
+                  e.vehicle.operatorPhoto ??
+                  '', // Use operator/user photo, not vehicle image
               providerRating: 5.0,
               isOffer: true,
               isUserPost: false,
@@ -5983,11 +5998,15 @@ class _PostsPageState extends State<PostsPage> {
               .where((e) => e.slot.withOperator == _withOperator)
               .toList();
 
+    // Gender filter temporarily disabled due to performance issues
+    // TODO: Re-implement with proper caching
+    final genderFiltered = operatorFiltered;
+
     // Apply security deposit filter (ALL service types)
     // Step 1: Filter by presence/absence of deposit
     final depositPresenceFiltered = _requiresSecurityDeposit == null
-        ? operatorFiltered
-        : operatorFiltered.where((e) {
+        ? genderFiltered
+        : genderFiltered.where((e) {
             final hasDeposit =
                 e.slot.securityDeposit != null && e.slot.securityDeposit! > 0;
             // _requiresSecurityDeposit: true = with deposit, false = without deposit
@@ -6012,7 +6031,7 @@ class _PostsPageState extends State<PostsPage> {
               })
               .toList(growable: false);
 
-    // Apply parcel dimension filter
+    // Apply parcel dimension, type, and HS Code filter
     final hasParcelFilter =
         _minParcelWeight != null ||
         _maxParcelWeight != null ||
@@ -6021,7 +6040,9 @@ class _PostsPageState extends State<PostsPage> {
         _minParcelWidth != null ||
         _maxParcelWidth != null ||
         _minParcelHeight != null ||
-        _maxParcelHeight != null;
+        _maxParcelHeight != null ||
+        _selectedParcelType != null ||
+        _hsCodeFilter.isNotEmpty;
     final parcelFiltered = !hasParcelFilter
         ? depositFiltered
         : depositFiltered
@@ -6034,7 +6055,9 @@ class _PostsPageState extends State<PostsPage> {
                   return true;
                 }
 
-                return check(
+                // Check dimensions
+                final dimensionsMatch =
+                    check(
                       e.slot.maxWeight,
                       _minParcelWeight,
                       _maxParcelWeight,
@@ -6046,6 +6069,18 @@ class _PostsPageState extends State<PostsPage> {
                     ) &&
                     check(e.slot.maxWidth, _minParcelWidth, _maxParcelWidth) &&
                     check(e.slot.maxHeight, _minParcelHeight, _maxParcelHeight);
+
+                // Check parcel type
+                final parcelTypeMatch =
+                    _selectedParcelType == null ||
+                    e.slot.parcelType == _selectedParcelType;
+
+                // Check HS Code (partial match)
+                final hsCodeMatch =
+                    _hsCodeFilter.isEmpty ||
+                    (e.slot.hsCode?.contains(_hsCodeFilter) ?? false);
+
+                return dimensionsMatch && parcelTypeMatch && hsCodeMatch;
               })
               .toList(growable: false);
 
@@ -7474,6 +7509,75 @@ class _PostsPageState extends State<PostsPage> {
                             ),
                           ],
                         ),
+                        const SizedBox(height: 16),
+
+                        // Parcel Type Filter
+                        const Text(
+                          'Parcel Type',
+                          style: TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                        const SizedBox(height: 8),
+                        DropdownButtonFormField<String>(
+                          initialValue: _selectedParcelType,
+                          decoration: const InputDecoration(
+                            labelText: 'Select Parcel Type',
+                            border: OutlineInputBorder(),
+                            prefixIcon: Icon(Icons.inventory_2),
+                          ),
+                          items: const [
+                            DropdownMenuItem(
+                              value: null,
+                              child: Text('All Types'),
+                            ),
+                            DropdownMenuItem(
+                              value: 'Normal',
+                              child: Text('Normal'),
+                            ),
+                            DropdownMenuItem(
+                              value: 'Fragile',
+                              child: Text('Fragile'),
+                            ),
+                            DropdownMenuItem(
+                              value: 'Perishable',
+                              child: Text('Perishable'),
+                            ),
+                            DropdownMenuItem(
+                              value: 'Medical',
+                              child: Text('Medical'),
+                            ),
+                            DropdownMenuItem(
+                              value: 'Hazardous',
+                              child: Text('Hazardous'),
+                            ),
+                            DropdownMenuItem(
+                              value: 'Live Animals',
+                              child: Text('Live Animals'),
+                            ),
+                          ],
+                          onChanged: (value) {
+                            setSheetState(() => _selectedParcelType = value);
+                          },
+                        ),
+                        const SizedBox(height: 12),
+
+                        // HS Code Filter
+                        const Text(
+                          'HS Code (Customs)',
+                          style: TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                        const SizedBox(height: 8),
+                        TextField(
+                          decoration: const InputDecoration(
+                            labelText: 'Filter by HS Code',
+                            hintText: 'e.g., 392310',
+                            border: OutlineInputBorder(),
+                            prefixIcon: Icon(Icons.local_shipping),
+                          ),
+                          keyboardType: TextInputType.text,
+                          onChanged: (value) {
+                            setSheetState(() => _hsCodeFilter = value.trim());
+                          },
+                        ),
                         const SizedBox(height: 12),
                       ],
                       Row(
@@ -7511,6 +7615,8 @@ class _PostsPageState extends State<PostsPage> {
                                   _maxParcelWidth = null;
                                   _minParcelHeight = null;
                                   _maxParcelHeight = null;
+                                  _selectedParcelType = null;
+                                  _hsCodeFilter = '';
                                   _selectedServiceType = null;
                                   _selectedCurrency = null;
                                   _searchController.clear();
@@ -11305,10 +11411,10 @@ class _SpendingPageState extends State<SpendingPage> {
               const SizedBox(height: 8),
 
               _buildServiceSpendingCard(
-                'Lease',
+                'Help Vehicle',
 
                 leaseSpending,
-                Icons.car_rental,
+                Icons.handshake,
                 Colors.purple,
               ),
 
@@ -11564,7 +11670,12 @@ class _ProfilePageState extends State<ProfilePage> {
                     radius: 40,
                     backgroundColor: Colors.grey[300],
                     backgroundImage: _profileAvatarProvider(info),
-                    child: info.avatarUrl == null
+                    onBackgroundImageError: _profileAvatarProvider(info) != null
+                        ? (_, _) {
+                            debugPrint('⚠️ Error loading profile avatar');
+                          }
+                        : null,
+                    child: _profileAvatarProvider(info) == null
                         ? const Icon(Icons.person, size: 40, color: Colors.grey)
                         : null,
                   ),
@@ -12161,30 +12272,39 @@ class UserPostsListPage extends StatelessWidget {
             separatorBuilder: (context, index) => const SizedBox(height: 12),
             itemBuilder: (context, index) {
               final entry = slots[index];
-              return SlotCard(
-                slot: entry.slot,
-                vehicle: entry.vehicle,
-                providerName: 'You',
-                providerAvatar: '',
-                providerRating: 5.0,
-                isOffer: true,
-                isUserPost: true,
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => SlotDetailScreen(
-                        slot: entry.slot,
-                        vehicle: entry.vehicle,
-                        providerName: 'You',
-                        providerAvatar: '',
-                        providerRating: 5.0,
-                        isOffer: true,
-                      ),
-                    ),
+              return ValueListenableBuilder<ProfileInfo>(
+                valueListenable: ProfileRepository.instance.profile,
+                builder: (context, currentProfile, _) {
+                  final userAvatar = currentProfile.avatarUrl ?? '';
+
+                  return SlotCard(
+                    slot: entry.slot,
+                    vehicle: entry.vehicle,
+                    providerName: 'You',
+                    providerAvatar: userAvatar,
+                    providerRating: 5.0,
+                    isOffer: true,
+                    isUserPost: true,
+                    minPriceFilter: null,
+                    maxPriceFilter: null,
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => SlotDetailScreen(
+                            slot: entry.slot,
+                            vehicle: entry.vehicle,
+                            providerName: 'You',
+                            providerAvatar: userAvatar,
+                            providerRating: 5.0,
+                            isOffer: true,
+                          ),
+                        ),
+                      );
+                    },
+                    onAction: () {},
                   );
                 },
-                onAction: () {},
               );
             },
           );
@@ -12254,30 +12374,39 @@ class ProviderPostsListPage extends StatelessWidget {
             separatorBuilder: (context, index) => const SizedBox(height: 12),
             itemBuilder: (context, index) {
               final entry = slots[index];
-              return SlotCard(
-                slot: entry.slot,
-                vehicle: entry.vehicle,
-                providerName: 'You',
-                providerAvatar: '',
-                providerRating: 5.0,
-                isOffer: true,
-                isUserPost: false,
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => SlotDetailScreen(
-                        slot: entry.slot,
-                        vehicle: entry.vehicle,
-                        providerName: 'You',
-                        providerAvatar: '',
-                        providerRating: 5.0,
-                        isOffer: true,
-                      ),
-                    ),
+              return ValueListenableBuilder<ProfileInfo>(
+                valueListenable: ProfileRepository.instance.profile,
+                builder: (context, currentProfile, _) {
+                  final userAvatar = currentProfile.avatarUrl ?? '';
+
+                  return SlotCard(
+                    slot: entry.slot,
+                    vehicle: entry.vehicle,
+                    providerName: 'You',
+                    providerAvatar: userAvatar,
+                    providerRating: 5.0,
+                    isOffer: true,
+                    isUserPost: false,
+                    minPriceFilter: null,
+                    maxPriceFilter: null,
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => SlotDetailScreen(
+                            slot: entry.slot,
+                            vehicle: entry.vehicle,
+                            providerName: 'You',
+                            providerAvatar: userAvatar,
+                            providerRating: 5.0,
+                            isOffer: true,
+                          ),
+                        ),
+                      );
+                    },
+                    onAction: () {},
                   );
                 },
-                onAction: () {},
               );
             },
           );

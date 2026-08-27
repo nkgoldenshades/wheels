@@ -98,11 +98,23 @@ SELECT
   'Recent Posts (Last 24h)' as info,
   id,
   from_location,
-  CONCAT(from_lat, ',', from_lng) as from_coords,
+  CASE 
+    WHEN from_lat IS NOT NULL AND from_lng IS NOT NULL 
+    THEN CONCAT(from_lat, ',', from_lng)
+    ELSE 'No coordinates'
+  END as from_coords,
   to_location,
-  CONCAT(to_lat, ',', to_lng) as to_coords,
+  CASE 
+    WHEN to_lat IS NOT NULL AND to_lng IS NOT NULL 
+    THEN CONCAT(to_lat, ',', to_lng)
+    ELSE 'No coordinates'
+  END as to_coords,
   base_location,
-  CONCAT(base_lat, ',', base_lng) as base_coords,
+  CASE 
+    WHEN base_lat IS NOT NULL AND base_lng IS NOT NULL 
+    THEN CONCAT(base_lat, ',', base_lng)
+    ELSE 'No coordinates'
+  END as base_coords,
   created_at
 FROM posts 
 WHERE created_at > NOW() - INTERVAL '24 hours'
@@ -113,39 +125,37 @@ ORDER BY created_at DESC;
 /*
 CREATE OR REPLACE FUNCTION extract_coordinates(location_string TEXT)
 RETURNS TABLE(lat NUMERIC, lng NUMERIC) AS $$
+DECLARE
+  parts TEXT[];
+  coords TEXT[];
 BEGIN
   IF location_string IS NULL OR location_string = '' THEN
     RETURN;
   END IF;
   
   -- Split by | to get parts
-  DECLARE
-    parts TEXT[];
-    coords TEXT[];
+  parts := string_to_array(location_string, '|');
+  
+  -- Need at least 2 parts: Name|lat,lng
+  IF array_length(parts, 1) < 2 THEN
+    RETURN;
+  END IF;
+  
+  -- Split coordinates by comma
+  coords := string_to_array(parts[2], ',');
+  
+  -- Need exactly 2 coordinates
+  IF array_length(coords, 1) != 2 THEN
+    RETURN;
+  END IF;
+  
+  -- Try to parse as numbers
   BEGIN
-    parts := string_to_array(location_string, '|');
-    
-    -- Need at least 2 parts: Name|lat,lng
-    IF array_length(parts, 1) < 2 THEN
-      RETURN;
-    END IF;
-    
-    -- Split coordinates by comma
-    coords := string_to_array(parts[2], ',');
-    
-    -- Need exactly 2 coordinates
-    IF array_length(coords, 1) != 2 THEN
-      RETURN;
-    END IF;
-    
-    -- Try to parse as numbers
-    BEGIN
-      lat := coords[1]::NUMERIC;
-      lng := coords[2]::NUMERIC;
-      RETURN NEXT;
-    EXCEPTION WHEN OTHERS THEN
-      RETURN;
-    END;
+    lat := coords[1]::NUMERIC;
+    lng := coords[2]::NUMERIC;
+    RETURN NEXT;
+  EXCEPTION WHEN OTHERS THEN
+    RETURN;
   END;
 END;
 $$ LANGUAGE plpgsql;
@@ -185,3 +195,31 @@ SELECT
   
   (SELECT COUNT(*) FROM posts WHERE is_active = true) as total_active_posts,
   (SELECT COUNT(*) FROM posts WHERE is_active = true AND (from_lat IS NOT NULL OR to_lat IS NOT NULL OR base_lat IS NOT NULL)) as posts_with_coordinates;
+
+-- 9. Diagnose coordinate extraction issues
+SELECT 
+  '========== DIAGNOSTIC INFO ==========' as diagnostic,
+  COUNT(*) as total_posts,
+  COUNT(*) FILTER (WHERE from_location IS NOT NULL AND from_location != '') as posts_with_from_location_text,
+  COUNT(*) FILTER (WHERE from_lat IS NOT NULL) as posts_with_from_lat,
+  COUNT(*) FILTER (WHERE to_location IS NOT NULL AND to_location != '') as posts_with_to_location_text,
+  COUNT(*) FILTER (WHERE to_lat IS NOT NULL) as posts_with_to_lat,
+  COUNT(*) FILTER (WHERE base_location IS NOT NULL AND base_location != '') as posts_with_base_location_text,
+  COUNT(*) FILTER (WHERE base_lat IS NOT NULL) as posts_with_base_lat,
+  ROUND(
+    100.0 * COUNT(*) FILTER (WHERE from_lat IS NOT NULL) / 
+    NULLIF(COUNT(*) FILTER (WHERE from_location IS NOT NULL AND from_location != ''), 0), 
+    1
+  ) as from_extraction_success_rate,
+  ROUND(
+    100.0 * COUNT(*) FILTER (WHERE to_lat IS NOT NULL) / 
+    NULLIF(COUNT(*) FILTER (WHERE to_location IS NOT NULL AND to_location != ''), 0), 
+    1
+  ) as to_extraction_success_rate,
+  ROUND(
+    100.0 * COUNT(*) FILTER (WHERE base_lat IS NOT NULL) / 
+    NULLIF(COUNT(*) FILTER (WHERE base_location IS NOT NULL AND base_location != ''), 0), 
+    1
+  ) as base_extraction_success_rate
+FROM posts 
+WHERE is_active = true;

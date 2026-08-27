@@ -36,11 +36,17 @@ class UserPost {
   // Parcel-specific fields
   final double? parcelWeight; // kg
   final double? parcelLength; // cm
-  final double? parcelWidth;  // cm
+  final double? parcelWidth; // cm
   final double? parcelHeight; // cm
+  final String? parcelType; // "Normal", "Fragile", "Perishable", etc.
+  final String?
+  hsCode; // HS Code for customs (8-10 digits depending on country)
 
   // Escrow payment
   final String? escrowPaymentId; // Razorpay payment ID for escrow
+
+  // Post media
+  final List<String> images; // Post-specific images (URLs)
 
   static const Object _unset = Object();
 
@@ -72,7 +78,10 @@ class UserPost {
     this.parcelLength,
     this.parcelWidth,
     this.parcelHeight,
+    this.parcelType,
+    this.hsCode,
     this.escrowPaymentId,
+    this.images = const [],
   });
 
   UserPost copyWith({
@@ -103,7 +112,10 @@ class UserPost {
     Object? parcelLength = _unset,
     Object? parcelWidth = _unset,
     Object? parcelHeight = _unset,
+    Object? parcelType = _unset,
+    Object? hsCode = _unset,
     Object? escrowPaymentId = _unset,
+    List<String>? images,
   }) {
     return UserPost(
       id: id ?? this.id,
@@ -127,20 +139,44 @@ class UserPost {
       notes: identical(notes, _unset) ? this.notes : notes as String?,
       requiresVerifiedVehicle:
           requiresVerifiedVehicle ?? this.requiresVerifiedVehicle,
-      requiresExpertVehicle: requiresExpertVehicle ?? this.requiresExpertVehicle,
+      requiresExpertVehicle:
+          requiresExpertVehicle ?? this.requiresExpertVehicle,
       demandPlan: demandPlan ?? this.demandPlan,
-      minRatings: identical(minRatings, _unset) ? this.minRatings : minRatings as double?,
-      maxRatings: identical(maxRatings, _unset) ? this.maxRatings : maxRatings as double?,
-      minNoRatings: identical(minNoRatings, _unset) ? this.minNoRatings : minNoRatings as int?,
-      maxNoRatings: identical(maxNoRatings, _unset) ? this.maxNoRatings : maxNoRatings as int?,
+      minRatings: identical(minRatings, _unset)
+          ? this.minRatings
+          : minRatings as double?,
+      maxRatings: identical(maxRatings, _unset)
+          ? this.maxRatings
+          : maxRatings as double?,
+      minNoRatings: identical(minNoRatings, _unset)
+          ? this.minNoRatings
+          : minNoRatings as int?,
+      maxNoRatings: identical(maxNoRatings, _unset)
+          ? this.maxNoRatings
+          : maxNoRatings as int?,
       createdAt: createdAt ?? this.createdAt,
       status: status ?? this.status,
       isOnline: isOnline ?? this.isOnline,
-      parcelWeight: identical(parcelWeight, _unset) ? this.parcelWeight : parcelWeight as double?,
-      parcelLength: identical(parcelLength, _unset) ? this.parcelLength : parcelLength as double?,
-      parcelWidth: identical(parcelWidth, _unset) ? this.parcelWidth : parcelWidth as double?,
-      parcelHeight: identical(parcelHeight, _unset) ? this.parcelHeight : parcelHeight as double?,
-      escrowPaymentId: identical(escrowPaymentId, _unset) ? this.escrowPaymentId : escrowPaymentId as String?,
+      parcelWeight: identical(parcelWeight, _unset)
+          ? this.parcelWeight
+          : parcelWeight as double?,
+      parcelLength: identical(parcelLength, _unset)
+          ? this.parcelLength
+          : parcelLength as double?,
+      parcelWidth: identical(parcelWidth, _unset)
+          ? this.parcelWidth
+          : parcelWidth as double?,
+      parcelHeight: identical(parcelHeight, _unset)
+          ? this.parcelHeight
+          : parcelHeight as double?,
+      parcelType: identical(parcelType, _unset)
+          ? this.parcelType
+          : parcelType as String?,
+      hsCode: identical(hsCode, _unset) ? this.hsCode : hsCode as String?,
+      escrowPaymentId: identical(escrowPaymentId, _unset)
+          ? this.escrowPaymentId
+          : escrowPaymentId as String?,
+      images: images ?? this.images,
     );
   }
 
@@ -173,7 +209,10 @@ class UserPost {
       'parcel_length': parcelLength,
       'parcel_width': parcelWidth,
       'parcel_height': parcelHeight,
+      'parcel_type': parcelType,
+      'hs_code': hsCode,
       'escrow_payment_id': escrowPaymentId,
+      'images': images,
       // Marker: user request posts have no vehicle_id — used as discriminator
       // when reading back from the shared posts table
     };
@@ -196,7 +235,9 @@ class UserPost {
       fromLocation: json['from_location'] as String?,
       toLocation: json['to_location'] as String?,
       baseLocation: json['base_location'] as String?,
-      radius: json['radius'] != null ? (json['radius'] as num).toDouble() : null,
+      radius: json['radius'] != null
+          ? (json['radius'] as num).toDouble()
+          : null,
       startTime: DateTime.parse(json['start_time'] as String).toLocal(),
       endTime: DateTime.parse(json['end_time'] as String).toLocal(),
       // budget and persons are user-request-only fields; default safely for
@@ -207,7 +248,9 @@ class UserPost {
       requiresVerifiedVehicle:
           json['requires_verified_vehicle'] as bool? ?? false,
       requiresExpertVehicle: json['requires_expert_vehicle'] as bool? ?? false,
-      demandPlan: DemandPlanExtension.fromDbValue(json['demand_plan'] as String?),
+      demandPlan: DemandPlanExtension.fromDbValue(
+        json['demand_plan'] as String?,
+      ),
       minRatings: (json['min_ratings'] as num?)?.toDouble(),
       maxRatings: (json['max_ratings'] as num?)?.toDouble(),
       minNoRatings: json['min_no_ratings'] as int?,
@@ -222,7 +265,9 @@ class UserPost {
       parcelLength: (json['parcel_length'] as num?)?.toDouble(),
       parcelWidth: (json['parcel_width'] as num?)?.toDouble(),
       parcelHeight: (json['parcel_height'] as num?)?.toDouble(),
+      hsCode: json['hs_code'] as String?,
       escrowPaymentId: json['escrow_payment_id'] as String?,
+      images: (json['images'] as List<dynamic>?)?.cast<String>() ?? [],
     );
   }
 }
@@ -302,10 +347,7 @@ class UserPostRepository {
   Future<void> update(UserPost post) async {
     try {
       // Update in Supabase
-      await _supabase
-          .from('posts')
-          .update(post.toJson())
-          .eq('id', post.id);
+      await _supabase.from('posts').update(post.toJson()).eq('id', post.id);
 
       // Update local state
       posts.value = posts.value
@@ -415,6 +457,3 @@ class UserPostRepository {
     }
   }
 }
-
-
-

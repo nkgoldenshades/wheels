@@ -270,7 +270,7 @@ class BookingRepository {
       }
     }
 
-    // Update expired bookings in database
+    // Update expired bookings in database and process refunds
     for (final booking in expiredBookings) {
       try {
         await supabase
@@ -283,6 +283,9 @@ class BookingRepository {
           status: BookingStatus.expired,
         );
         debugPrint('✅ Expired booking: ${booking.id}');
+
+        // 💰 Process refund when booking expires
+        await _processExpiredBookingRefund(booking);
       } catch (e) {
         debugPrint('❌ Failed to expire booking ${booking.id}: $e');
       }
@@ -1298,5 +1301,48 @@ class BookingRepository {
     }).toList();
 
     return {'type': type, 'layout': modifiedLayout};
+  }
+
+  /// Process refund when booking expires
+  /// Automatically refunds the payment to the customer's wallet
+  Future<void> _processExpiredBookingRefund(Booking booking) async {
+    try {
+      final supabase = Supabase.instance.client;
+
+      // Only refund if payment was made (status is expired, not cancelled)
+      if (booking.status != BookingStatus.expired) return;
+
+      debugPrint('💰 Processing refund for expired booking: ${booking.id}');
+
+      // Get the booking payment amount (price in double, convert to paise)
+      final amountInRupees = booking.price;
+      final amountPaise = (amountInRupees * 100).toInt();
+
+      if (amountPaise == 0) {
+        debugPrint('⚠️ No amount to refund for booking ${booking.id}');
+        return;
+      }
+
+      // Create refund record in database
+      await supabase.from('payment_refunds').insert({
+        'booking_id': booking.id,
+        'user_id': booking.userId, // Refund to customer
+        'amount_paise': amountPaise,
+        'reason': 'booking_expired',
+        'status': 'completed',
+        'created_at': DateTime.now().toIso8601String(),
+      });
+
+      debugPrint(
+        '✅ Refund processed for expired booking ${booking.id}: $amountPaise paise (₹$amountInRupees)',
+      );
+
+      // Notify customer (optional: send notification)
+      // await _notifyRefund(booking.userId, amountInRupees);
+    } catch (e) {
+      debugPrint(
+        '❌ Failed to process refund for expired booking ${booking.id}: $e',
+      );
+    }
   }
 }

@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import '../services/upi_repository.dart';
-import '../services/auth_repository.dart';
 
 /// Simple UPI ID management screen
 /// Collect UPI ID for Razorpay payouts - no noise!
@@ -106,7 +105,7 @@ class _UPISettingsScreenState extends State<UPISettingsScreen> {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'Add your UPI ID to receive instant payouts of your earnings.',
+                    'Add your UPI ID to receive instant payouts of your earnings. We take 5% commission on each payout.',
                     style: TextStyle(fontSize: 12, color: Colors.grey[700]),
                   ),
                   const SizedBox(height: 8),
@@ -119,7 +118,7 @@ class _UPISettingsScreenState extends State<UPISettingsScreen> {
                       ),
                       const SizedBox(width: 8),
                       Text(
-                        'Instant delivery • Zero fees',
+                        'Instant delivery • 5% commission',
                         style: TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.w600,
@@ -180,7 +179,8 @@ class _UPISettingsScreenState extends State<UPISettingsScreen> {
                   Text(
                     '• john@upi\n'
                     '• user@okhdfcbank\n'
-                    '• name@ibl\n'
+                    '• 8925021005@apl\n'
+                    '• name@googleplay\n'
                     '• person@ybl',
                     style: TextStyle(fontSize: 11, color: Colors.grey[600]),
                   ),

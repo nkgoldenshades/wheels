@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
-import 'package:url_launcher/url_launcher.dart';
 import '../../services/auth_repository.dart';
 import '../../services/profile_name_registry.dart';
 import 'login_screen.dart';
@@ -20,6 +19,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   bool _obscurePassword = true;
   bool _isCheckingName = false;
   bool? _isNameAvailable;
+  bool _acceptedTerms = false;
 
   @override
   void dispose() {
@@ -55,25 +55,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
     }
   }
 
-  Future<void> _launchURL(String url) async {
-    final uri = Uri.parse(url);
-    try {
-      if (await canLaunchUrl(uri)) {
-        await launchUrl(uri, mode: LaunchMode.externalApplication);
-      } else {
-        if (!mounted) return;
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Could not open $url')));
-      }
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Error opening link: $e')));
-    }
-  }
-
   Future<void> _signUp() async {
     final email = _emailController.text.trim();
     final password = _passwordController.text.trim();
@@ -83,6 +64,13 @@ class _RegisterScreenState extends State<RegisterScreen> {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('Please fill all fields')));
+      return;
+    }
+
+    if (!_acceptedTerms) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please accept Terms & Conditions')),
+      );
       return;
     }
 
@@ -209,13 +197,89 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 ),
               ),
               const SizedBox(height: 24),
+              // Terms & Conditions Checkbox
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  border: Border.all(
+                    color: _acceptedTerms ? Colors.green : Colors.grey.shade300,
+                    width: 1.5,
+                  ),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    CheckboxListTile(
+                      value: _acceptedTerms,
+                      onChanged: (value) {
+                        setState(() => _acceptedTerms = value ?? false);
+                      },
+                      title: const Text(
+                        'I agree to Terms & Conditions',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      controlAffinity: ListTileControlAffinity.leading,
+                      contentPadding: EdgeInsets.zero,
+                      dense: true,
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.only(left: 32),
+                      child: RichText(
+                        text: TextSpan(
+                          style: const TextStyle(
+                            fontSize: 11,
+                            color: Colors.grey,
+                          ),
+                          children: [
+                            const TextSpan(text: 'Read our '),
+                            TextSpan(
+                              text: 'Terms & Conditions',
+                              style: const TextStyle(
+                                color: Colors.blue,
+                                decoration: TextDecoration.underline,
+                              ),
+                              recognizer: TapGestureRecognizer()
+                                ..onTap = () => Navigator.pushNamed(
+                                  context,
+                                  '/terms-of-service',
+                                ),
+                            ),
+                            const TextSpan(text: ' and '),
+                            TextSpan(
+                              text: 'Privacy Policy',
+                              style: const TextStyle(
+                                color: Colors.blue,
+                                decoration: TextDecoration.underline,
+                              ),
+                              recognizer: TapGestureRecognizer()
+                                ..onTap = () => Navigator.pushNamed(
+                                  context,
+                                  '/privacy-policy',
+                                ),
+                            ),
+                            const TextSpan(text: ' in the app.'),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 24),
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(
-                  onPressed: _isLoading ? null : _signUp,
+                  onPressed: _isLoading || _isNameAvailable != true
+                      ? null
+                      : _signUp,
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Theme.of(context).primaryColor,
                     padding: const EdgeInsets.symmetric(vertical: 16),
+                    backgroundColor: Colors.green,
+                    disabledBackgroundColor: Colors.grey.shade300,
                   ),
                   child: _isLoading
                       ? const SizedBox(
@@ -223,52 +287,19 @@ class _RegisterScreenState extends State<RegisterScreen> {
                           width: 20,
                           child: CircularProgressIndicator(
                             strokeWidth: 2,
-                            color: Colors.white,
+                            valueColor: AlwaysStoppedAnimation<Color>(
+                              Colors.white,
+                            ),
                           ),
                         )
                       : const Text(
-                          'Sign Up',
-                          style: TextStyle(fontSize: 16, color: Colors.white),
-                        ),
-                ),
-              ),
-              const SizedBox(height: 12),
-              // Terms acceptance text - Simple approach
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8.0),
-                child: RichText(
-                  textAlign: TextAlign.center,
-                  text: TextSpan(
-                    style: const TextStyle(fontSize: 11, color: Colors.grey),
-                    children: [
-                      const TextSpan(
-                        text: 'By clicking Sign Up, you agree to our ',
-                      ),
-                      TextSpan(
-                        text: 'Terms & Conditions',
-                        style: const TextStyle(
-                          color: Colors.blue,
-                          decoration: TextDecoration.underline,
-                        ),
-                        recognizer: TapGestureRecognizer()
-                          ..onTap = () => _launchURL(
-                            'https://vaultwheels.web.app/terms.html',
+                          'Create Account',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
                           ),
-                      ),
-                      const TextSpan(text: ' and '),
-                      TextSpan(
-                        text: 'Privacy Policy',
-                        style: const TextStyle(
-                          color: Colors.blue,
-                          decoration: TextDecoration.underline,
                         ),
-                        recognizer: TapGestureRecognizer()
-                          ..onTap = () => _launchURL(
-                            'https://vaultwheels.web.app/privacy.html',
-                          ),
-                      ),
-                    ],
-                  ),
                 ),
               ),
               const SizedBox(height: 16),

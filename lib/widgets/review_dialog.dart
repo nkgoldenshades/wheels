@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/review.dart';
+import '../models/service_type.dart';
 import '../services/review_repository.dart';
 import '../services/auth_repository.dart';
+import '../services/image_content_filter_service.dart';
 
 class ReviewDialog extends StatefulWidget {
   final String bookingId;
@@ -11,6 +13,8 @@ class ReviewDialog extends StatefulWidget {
   final String revieweeId;
   final String revieweeName;
   final ReviewType type;
+  final ServiceType? serviceType;
+  final bool hasOperator;
 
   const ReviewDialog({
     super.key,
@@ -19,6 +23,8 @@ class ReviewDialog extends StatefulWidget {
     required this.revieweeId,
     required this.revieweeName,
     required this.type,
+    this.serviceType,
+    this.hasOperator = false,
   });
 
   @override
@@ -26,7 +32,7 @@ class ReviewDialog extends StatefulWidget {
 }
 
 class _ReviewMediaItem {
-  final String url;        // public URL after upload
+  final String url; // public URL after upload
   final bool isVideo;
   _ReviewMediaItem({required this.url, required this.isVideo});
 }
@@ -52,14 +58,16 @@ class _ReviewDialogState extends State<ReviewDialog> {
     try {
       final bytes = await file.readAsBytes();
       final supabase = Supabase.instance.client;
-      await supabase.storage.from('review_media').uploadBinary(
-        path,
-        bytes,
-        fileOptions: FileOptions(
-          contentType: file.mimeType ?? 'application/octet-stream',
-          upsert: true,
-        ),
-      );
+      await supabase.storage
+          .from('review_media')
+          .uploadBinary(
+            path,
+            bytes,
+            fileOptions: FileOptions(
+              contentType: file.mimeType ?? 'application/octet-stream',
+              upsert: true,
+            ),
+          );
       return supabase.storage.from('review_media').getPublicUrl(path);
     } catch (e) {
       debugPrint('❌ Review media upload failed: $e');
@@ -90,14 +98,34 @@ class _ReviewDialogState extends State<ReviewDialog> {
     );
     if (picked == null) return;
 
-    setState(() { _isUploading = true; _uploadError = null; });
+    // Validate image content (check for phone numbers, emails, etc.)
+    final filterError = await ImageContentFilterService.instance.validateImage(
+      picked,
+    );
+
+    if (filterError != null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(filterError), backgroundColor: Colors.red),
+        );
+      }
+      return;
+    }
+
+    setState(() {
+      _isUploading = true;
+      _uploadError = null;
+    });
     try {
       final ext = picked.name.split('.').last;
       final url = await _uploadToStorage(picked, _storagePath('photo.$ext'));
       if (url != null) {
         setState(() => _media.add(_ReviewMediaItem(url: url, isVideo: false)));
       } else {
-        setState(() => _uploadError = 'Photo upload failed. Check storage permissions.');
+        setState(
+          () =>
+              _uploadError = 'Photo upload failed. Check storage permissions.',
+        );
       }
     } finally {
       if (mounted) setState(() => _isUploading = false);
@@ -120,14 +148,34 @@ class _ReviewDialogState extends State<ReviewDialog> {
     );
     if (picked == null) return;
 
-    setState(() { _isUploading = true; _uploadError = null; });
+    // Validate video content (check for phone numbers, emails, etc.)
+    final filterError = await ImageContentFilterService.instance.validateImage(
+      picked,
+    );
+
+    if (filterError != null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(filterError), backgroundColor: Colors.red),
+        );
+      }
+      return;
+    }
+
+    setState(() {
+      _isUploading = true;
+      _uploadError = null;
+    });
     try {
       final ext = picked.name.split('.').last;
       final url = await _uploadToStorage(picked, _storagePath('video.$ext'));
       if (url != null) {
         setState(() => _media.add(_ReviewMediaItem(url: url, isVideo: true)));
       } else {
-        setState(() => _uploadError = 'Video upload failed. Check storage permissions.');
+        setState(
+          () =>
+              _uploadError = 'Video upload failed. Check storage permissions.',
+        );
       }
     } finally {
       if (mounted) setState(() => _isUploading = false);
@@ -146,6 +194,8 @@ class _ReviewDialogState extends State<ReviewDialog> {
         reviewerId: widget.reviewerId,
         revieweeId: widget.revieweeId,
         type: widget.type,
+        serviceType: widget.serviceType,
+        hasOperator: widget.hasOperator,
         rating: _rating,
         comment: _commentController.text.trim().isEmpty
             ? null
@@ -156,9 +206,9 @@ class _ReviewDialogState extends State<ReviewDialog> {
       Navigator.pop(context, true);
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Error: $e')));
     } finally {
       if (mounted) setState(() => _isSubmitting = false);
     }
@@ -184,9 +234,13 @@ class _ReviewDialogState extends State<ReviewDialog> {
                 const Icon(Icons.star, color: Colors.amber, size: 28),
                 const SizedBox(width: 8),
                 Expanded(
-                  child: Text('Review ${widget.revieweeName}',
-                      style: const TextStyle(
-                          fontSize: 20, fontWeight: FontWeight.bold)),
+                  child: Text(
+                    'Review ${widget.revieweeName}',
+                    style: const TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
                 ),
                 IconButton(
                   onPressed: () => Navigator.pop(context),
@@ -197,8 +251,10 @@ class _ReviewDialogState extends State<ReviewDialog> {
             const SizedBox(height: 20),
 
             // Stars
-            const Text('How was your experience?',
-                style: TextStyle(fontSize: 16)),
+            const Text(
+              'How was your experience?',
+              style: TextStyle(fontSize: 16),
+            ),
             const SizedBox(height: 12),
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -222,9 +278,10 @@ class _ReviewDialogState extends State<ReviewDialog> {
               _getRatingText(_rating),
               textAlign: TextAlign.center,
               style: TextStyle(
-                  fontSize: 14,
-                  color: Colors.grey[700],
-                  fontWeight: FontWeight.w500),
+                fontSize: 14,
+                color: Colors.grey[700],
+                fontWeight: FontWeight.w500,
+              ),
             ),
             const SizedBox(height: 20),
 
@@ -244,28 +301,37 @@ class _ReviewDialogState extends State<ReviewDialog> {
             // Media section header
             Row(
               children: [
-                const Icon(Icons.perm_media_outlined,
-                    size: 18, color: Colors.blue),
+                const Icon(
+                  Icons.perm_media_outlined,
+                  size: 18,
+                  color: Colors.blue,
+                ),
                 const SizedBox(width: 6),
-                const Text('Photos & Video',
-                    style: TextStyle(
-                        fontWeight: FontWeight.w600, fontSize: 14)),
+                const Text(
+                  'Photos & Video',
+                  style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+                ),
                 const SizedBox(width: 4),
-                Text('($photoCount/5 photos · ${hasVideo ? '1' : '0'}/1 video)',
-                    style:
-                        TextStyle(fontSize: 11, color: Colors.grey[600])),
+                Text(
+                  '($photoCount/5 photos · ${hasVideo ? '1' : '0'}/1 video)',
+                  style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+                ),
               ],
             ),
             const SizedBox(height: 4),
-            Text('Max 5 photos + 1 video (30s)',
-                style: TextStyle(fontSize: 11, color: Colors.grey[500])),
+            Text(
+              'Max 5 photos + 1 video (30s)',
+              style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+            ),
             const SizedBox(height: 10),
 
             if (_uploadError != null)
               Padding(
                 padding: const EdgeInsets.only(bottom: 8),
-                child: Text(_uploadError!,
-                    style: const TextStyle(color: Colors.red, fontSize: 12)),
+                child: Text(
+                  _uploadError!,
+                  style: const TextStyle(color: Colors.red, fontSize: 12),
+                ),
               ),
 
             // Media thumbnails
@@ -296,12 +362,18 @@ class _ReviewDialogState extends State<ReviewDialog> {
                                       mainAxisAlignment:
                                           MainAxisAlignment.center,
                                       children: [
-                                        const Icon(Icons.videocam,
-                                            color: Colors.blue, size: 32),
-                                        Text('Video',
-                                            style: TextStyle(
-                                                fontSize: 10,
-                                                color: Colors.grey[700])),
+                                        const Icon(
+                                          Icons.videocam,
+                                          color: Colors.blue,
+                                          size: 32,
+                                        ),
+                                        Text(
+                                          'Video',
+                                          style: TextStyle(
+                                            fontSize: 10,
+                                            color: Colors.grey[700],
+                                          ),
+                                        ),
                                       ],
                                     )
                                   : Image.network(
@@ -319,11 +391,15 @@ class _ReviewDialogState extends State<ReviewDialog> {
                               onTap: () => _removeMedia(i),
                               child: Container(
                                 decoration: const BoxDecoration(
-                                    color: Colors.black54,
-                                    shape: BoxShape.circle),
+                                  color: Colors.black54,
+                                  shape: BoxShape.circle,
+                                ),
                                 padding: const EdgeInsets.all(2),
-                                child: const Icon(Icons.close,
-                                    size: 14, color: Colors.white),
+                                child: const Icon(
+                                  Icons.close,
+                                  size: 14,
+                                  color: Colors.white,
+                                ),
                               ),
                             ),
                           ),
@@ -371,7 +447,10 @@ class _ReviewDialogState extends State<ReviewDialog> {
                       height: 20,
                       width: 20,
                       child: CircularProgressIndicator(
-                          strokeWidth: 2, color: Colors.white))
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
                   : const Text('Submit Review'),
             ),
           ],
@@ -397,16 +476,17 @@ class _ReviewDialogState extends State<ReviewDialog> {
       child: loading
           ? const Center(
               child: SizedBox(
-                  width: 24,
-                  height: 24,
-                  child: CircularProgressIndicator(strokeWidth: 2)))
+                width: 24,
+                height: 24,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            )
           : Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Icon(icon, color: color, size: 28),
                 const SizedBox(height: 4),
-                Text(label,
-                    style: TextStyle(fontSize: 11, color: color)),
+                Text(label, style: TextStyle(fontSize: 11, color: color)),
               ],
             ),
     );

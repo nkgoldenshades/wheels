@@ -14,9 +14,6 @@ class CreditPackage {
     this.isPopular = false,
   });
 
-  // Base rate: 1 credit = $0.06 (100 credits = $5.99)
-  static const double _baseRate = 0.06;
-
   // Predefined packages
   static const List<CreditPackage> packages = [
     CreditPackage(

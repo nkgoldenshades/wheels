@@ -12,6 +12,11 @@ class ContentFilterService {
     final normalized = _normalizeText(text);
     final lower = text.toLowerCase();
 
+    // 0. Check for profanity and abuse words FIRST
+    if (_containsAbusiveLanguage(lower, normalized)) {
+      return '❌ Offensive language is not allowed. Please be respectful.';
+    }
+
     // 1. Check for phone numbers
     if (_containsPhoneNumber(text, normalized)) {
       return 'Phone numbers are not allowed. Use in-app messaging.';
@@ -60,6 +65,11 @@ class ContentFilterService {
     // Check for contact information (phone, email, URLs)
     final normalized = _normalizeText(text);
     final lower = text.toLowerCase();
+
+    // Check for profanity and abuse words FIRST
+    if (_containsAbusiveLanguage(lower, normalized)) {
+      return '❌ Offensive language is not allowed. Please be respectful.';
+    }
 
     if (_containsPhoneNumber(text, normalized)) {
       return 'Phone numbers are not allowed. Use in-app messaging.';
@@ -163,8 +173,9 @@ class ContentFilterService {
   /// Detect email addresses
   bool _containsEmail(String original, String normalized) {
     // Standard email pattern
-    if (RegExp(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}')
-        .hasMatch(original)) {
+    if (RegExp(
+      r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}',
+    ).hasMatch(original)) {
       return true;
     }
 
@@ -279,7 +290,68 @@ class ContentFilterService {
 
     return false;
   }
+
+  /// Detect abusive, profane, and offensive language
+  /// Checks for common curse words, slurs, and harassment terms
+  bool _containsAbusiveLanguage(String lower, String normalized) {
+    // Common profanity and abuse words (expanded list for Indian English context)
+    final abusiveWords = [
+      // Common curse words (multiple variations)
+      r'\bf[*u]ck', r'f[*u]cking', r'f[*u]cker',
+      r'\bsh[*i]t', r'sh[*i]tty',
+      r'\bass[*h]ole', r'\bassh[*i]ole',
+      r'\bb[*i]tch', r'b[*i]tches',
+      r'\bd[*a]mn', r'd[*a]mned',
+      r'\bhell', r'\bcrap',
+
+      // Slurs and derogatory terms
+      r'\bidiot', r'\bstupid', r'\bdumb', r'\bmoron',
+      r'\bprick', r'\basshole', r'\bwanker',
+      r'\bsuck', r'sucks',
+
+      // Harassment and threat terms
+      r'\bgo\s*die', r'\bkill\s*yourself', r'\bkys',
+      r'\bgo\s*to\s*hell', r'\bdestroy',
+      r'\bstfu', r'\bshut\s*up',
+
+      // Discriminatory terms (variations)
+      r'\bn[*i]g+', // Common slur variations
+      r'\bgay\s*', // When used as insult
+      r'\bretard',
+
+      // Indian context abuse words (Hinglish and Hindi)
+      r'\bbhosdi', r'\bmadarchod', r'\bsala',
+      r'\bbhen\s*chod', r'\bbakchodi',
+      r'\bullo', r'\bchutiya',
+
+      // Harassment phrases
+      r'\byou\s*suck', r'\byou\s*suck', r'\byou\s*are\s*gay',
+      r'\byou\s*are\s*stupid', r'\byou\s*are\s*dumb',
+    ];
+
+    final lowerWithSpaces = ' $lower '; // Add spaces to match word boundaries
+
+    for (final word in abusiveWords) {
+      if (RegExp(word, caseSensitive: false).hasMatch(lowerWithSpaces)) {
+        return true;
+      }
+    }
+
+    // Check normalized version for obfuscated variations (with *, -, etc.)
+    for (final word in abusiveWords) {
+      if (RegExp(word, caseSensitive: false).hasMatch(normalized)) {
+        return true;
+      }
+    }
+
+    // Check for repeated abuse (same word multiple times)
+    if (RegExp(
+      r'(fuck|shit|ass|damn|hell|stupid|idiot)\s+(fuck|shit|ass|damn|hell|stupid|idiot)',
+      caseSensitive: false,
+    ).hasMatch(lower)) {
+      return true;
+    }
+
+    return false;
+  }
 }
-
-
-

@@ -13,10 +13,7 @@ class ServiceTypeScreen extends StatelessWidget {
       children: [
         const Text(
           'Choose Service Type',
-          style: TextStyle(
-            fontSize: 24,
-            fontWeight: FontWeight.bold,
-          ),
+          style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
           textAlign: TextAlign.center,
         ),
         const SizedBox(height: 32),
@@ -37,8 +34,8 @@ class ServiceTypeScreen extends StatelessWidget {
         _buildServiceTypeCard(
           context,
           serviceType: ServiceType.lease,
-          icon: Icons.car_rental,
-          description: 'Lease your vehicle to others',
+          icon: Icons.handshake,
+          description: 'Help others with vehicle needs',
         ),
       ],
     );
@@ -57,7 +54,11 @@ class ServiceTypeScreen extends StatelessWidget {
           final vehicles = VehicleRepository.instance.allVehicles;
           if (vehicles.isEmpty) {
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('No vehicles available. Please add a vehicle first.')),
+              const SnackBar(
+                content: Text(
+                  'No vehicles available. Please add a vehicle first.',
+                ),
+              ),
             );
             return;
           }
@@ -74,11 +75,7 @@ class ServiceTypeScreen extends StatelessWidget {
           padding: const EdgeInsets.all(16.0),
           child: Row(
             children: [
-              Icon(
-                icon,
-                size: 48,
-                color: Theme.of(context).primaryColor,
-              ),
+              Icon(icon, size: 48, color: Theme.of(context).primaryColor),
               const SizedBox(width: 16),
               Expanded(
                 child: Column(
@@ -94,10 +91,7 @@ class ServiceTypeScreen extends StatelessWidget {
                     const SizedBox(height: 4),
                     Text(
                       description,
-                      style: TextStyle(
-                        fontSize: 14,
-                        color: Colors.grey[600],
-                      ),
+                      style: TextStyle(fontSize: 14, color: Colors.grey[600]),
                     ),
                   ],
                 ),
@@ -110,6 +104,3 @@ class ServiceTypeScreen extends StatelessWidget {
     );
   }
 }
-
-
-

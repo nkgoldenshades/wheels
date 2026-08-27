@@ -25,6 +25,8 @@ import '../services/location_autocomplete_service.dart';
 import 'booking_map_screen.dart';
 import 'location_map_screen.dart';
 import '../utils/timezone_utils.dart';
+import '../controllers/seat_layout_controller.dart';
+import 'add_flow/seat_layout_builder_screen.dart';
 
 class SlotDetailScreen extends StatelessWidget {
   final Slot slot;
@@ -302,6 +304,49 @@ class SlotDetailScreen extends StatelessWidget {
                             );
                           },
                         ),
+                        // Operating section — show operator info if available
+                        if (resolvedSlot.operatorName != null &&
+                            resolvedSlot.operatorName!.isNotEmpty) ...[
+                          const SizedBox(height: 16),
+                          const Text(
+                            'Operating',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Colors.purple.shade50,
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: Colors.purple.shade200),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                _InfoRow(
+                                  icon: Icons.person,
+                                  title: 'Operator Name',
+                                  value: resolvedSlot.operatorName ?? '-',
+                                ),
+                                if (resolvedSlot.operatorGender != null) ...[
+                                  const SizedBox(height: 8),
+                                  _InfoRow(
+                                    icon: resolvedSlot.operatorGender == 'male'
+                                        ? Icons.male
+                                        : Icons.female,
+                                    title: 'Gender',
+                                    value: resolvedSlot.operatorGender!
+                                        .toUpperCase(),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
+                        ],
                         // Parcel dimensions — only shown for parcel service type
                         if (resolvedSlot.serviceType == ServiceType.parcel &&
                             (resolvedSlot.maxWeight != null ||
@@ -356,6 +401,36 @@ class SlotDetailScreen extends StatelessWidget {
                               ],
                             ),
                           ),
+                          const SizedBox(height: 12),
+                        ],
+                        // Parcel Type and HS Code — shown for parcel service type
+                        if (resolvedSlot.serviceType == ServiceType.parcel &&
+                            (resolvedSlot.parcelType != null ||
+                                resolvedSlot.hsCode != null)) ...[
+                          const SizedBox(height: 12),
+                          const Text(
+                            'Parcel Type & Customs',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          if (resolvedSlot.parcelType != null) ...[
+                            _InfoRow(
+                              icon: Icons.inventory_2,
+                              title: 'Parcel Type',
+                              value: resolvedSlot.parcelType ?? '-',
+                            ),
+                          ],
+                          if (resolvedSlot.hsCode != null) ...[
+                            const SizedBox(height: 8),
+                            _InfoRow(
+                              icon: Icons.local_shipping,
+                              title: 'HS Code',
+                              value: resolvedSlot.hsCode ?? '-',
+                            ),
+                          ],
                         ],
                         // Lease details — only shown for lease service type
                         if (resolvedSlot.serviceType == ServiceType.lease) ...[
@@ -393,14 +468,6 @@ class SlotDetailScreen extends StatelessWidget {
                                     icon: Icons.local_gas_station,
                                     title: 'Fuel Policy',
                                     value: resolvedSlot.fuelPolicy!,
-                                  ),
-                                ],
-                                if (resolvedSlot.insuranceIncluded == true) ...[
-                                  const SizedBox(height: 4),
-                                  _InfoRow(
-                                    icon: Icons.verified_user,
-                                    title: 'Insurance',
-                                    value: 'Included',
                                   ),
                                 ],
                                 if (resolvedSlot.leaseTerms != null &&
@@ -447,9 +514,11 @@ class SlotDetailScreen extends StatelessWidget {
                               return Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  const Text(
-                                    'Seat Layout',
-                                    style: TextStyle(
+                                  Text(
+                                    resolvedSlot.serviceType.name == 'parcel'
+                                        ? 'Parcel Layout'
+                                        : 'Passenger Layout',
+                                    style: const TextStyle(
                                       fontSize: 16,
                                       fontWeight: FontWeight.bold,
                                     ),
@@ -591,6 +660,12 @@ class SlotDetailScreen extends StatelessWidget {
     );
     final notesController = TextEditingController(text: slot.notes ?? '');
 
+    // Operator information controllers
+    final operatorNameController = TextEditingController(
+      text: slot.operatorName ?? '',
+    );
+    String? selectedOperatorGender = slot.operatorGender;
+
     // Parcel dimension controllers
     final weightController = TextEditingController(
       text: slot.maxWeight?.toString() ?? '',
@@ -604,6 +679,10 @@ class SlotDetailScreen extends StatelessWidget {
     final heightController = TextEditingController(
       text: slot.maxHeight?.toString() ?? '',
     );
+
+    // Parcel type and HS code controllers
+    String parcelTypeValue = slot.parcelType ?? 'Normal';
+    final hsCodeController = TextEditingController(text: slot.hsCode ?? '');
 
     LocationSuggestion? fromSuggestion;
     LocationSuggestion? toSuggestion;
@@ -821,24 +900,75 @@ class SlotDetailScreen extends StatelessWidget {
                     ],
                   ),
                   const SizedBox(height: 12),
-                  TextField(
-                    controller: priceController,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(
-                      labelText: 'Price',
-                      border: OutlineInputBorder(),
+                  // Price and Capacity - only for simple mode
+                  if (slot.seatLayoutStructure == null ||
+                      slot.seatLayoutStructure!.layout.isEmpty) ...[
+                    TextField(
+                      controller: priceController,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                        labelText: 'Price',
+                        border: OutlineInputBorder(),
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: capacityController,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(
-                      labelText: 'Capacity',
-                      border: OutlineInputBorder(),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: capacityController,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                        labelText: 'Capacity',
+                        border: OutlineInputBorder(),
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 12),
+                    const SizedBox(height: 12),
+                  ],
+
+                  // Operating Section - Only for simple mode (no layout)
+                  if (slot.seatLayoutOwnerId == null &&
+                      slot.seatLayoutStructure == null) ...[
+                    const Text(
+                      'Operating',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: operatorNameController,
+                      decoration: const InputDecoration(
+                        labelText: 'Operator Name (optional)',
+                        hintText: 'Driver/Operator name',
+                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.person),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    DropdownButtonFormField<String?>(
+                      initialValue: selectedOperatorGender,
+                      decoration: const InputDecoration(
+                        labelText: 'Operator Gender',
+                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.wc),
+                      ),
+                      items: const [
+                        DropdownMenuItem(
+                          value: null,
+                          child: Text('Not specified'),
+                        ),
+                        DropdownMenuItem(value: 'male', child: Text('Male')),
+                        DropdownMenuItem(
+                          value: 'female',
+                          child: Text('Female'),
+                        ),
+                      ],
+                      onChanged: (value) {
+                        setSheetState(() => selectedOperatorGender = value);
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+
                   TextField(
                     controller: notesController,
                     minLines: 2,
@@ -848,8 +978,10 @@ class SlotDetailScreen extends StatelessWidget {
                       border: OutlineInputBorder(),
                     ),
                   ),
-                  // Parcel dimensions (only for parcel service type)
-                  if (slot.serviceType == ServiceType.parcel) ...[
+                  // Parcel dimensions (only for parcel service type in simple mode)
+                  if (slot.serviceType == ServiceType.parcel &&
+                      (slot.seatLayoutStructure == null ||
+                          slot.seatLayoutStructure!.layout.isEmpty)) ...[
                     const SizedBox(height: 16),
                     const Text(
                       'Parcel Dimensions',
@@ -859,15 +991,24 @@ class SlotDetailScreen extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 12),
+
+                    // Weight row
                     TextField(
                       controller: weightController,
                       keyboardType: TextInputType.number,
                       decoration: const InputDecoration(
-                        labelText: 'Max Weight (kg)',
+                        labelText: 'Weight (kg)',
                         border: OutlineInputBorder(),
+                        isDense: true,
+                        contentPadding: EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 10,
+                        ),
                       ),
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 8),
+
+                    // Dimensions row: Length x Width
                     Row(
                       children: [
                         Expanded(
@@ -875,8 +1016,13 @@ class SlotDetailScreen extends StatelessWidget {
                             controller: lengthController,
                             keyboardType: TextInputType.number,
                             decoration: const InputDecoration(
-                              labelText: 'Length (cm)',
+                              labelText: 'L (cm)',
                               border: OutlineInputBorder(),
+                              isDense: true,
+                              contentPadding: EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 10,
+                              ),
                             ),
                           ),
                         ),
@@ -886,24 +1032,180 @@ class SlotDetailScreen extends StatelessWidget {
                             controller: widthController,
                             keyboardType: TextInputType.number,
                             decoration: const InputDecoration(
-                              labelText: 'Width (cm)',
+                              labelText: 'W (cm)',
                               border: OutlineInputBorder(),
+                              isDense: true,
+                              contentPadding: EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 10,
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: TextField(
+                            controller: heightController,
+                            keyboardType: TextInputType.number,
+                            decoration: const InputDecoration(
+                              labelText: 'H (cm)',
+                              border: OutlineInputBorder(),
+                              isDense: true,
+                              contentPadding: EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 10,
+                              ),
                             ),
                           ),
                         ),
                       ],
                     ),
                     const SizedBox(height: 12),
-                    TextField(
-                      controller: heightController,
-                      keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(
-                        labelText: 'Height (cm)',
-                        border: OutlineInputBorder(),
-                      ),
+
+                    // Parcel Type + HS Code on same row
+                    Row(
+                      children: [
+                        Expanded(
+                          child: StatefulBuilder(
+                            builder: (context, setEditState) {
+                              return DropdownButtonFormField<String>(
+                                initialValue: parcelTypeValue,
+                                decoration: const InputDecoration(
+                                  labelText: 'Type',
+                                  border: OutlineInputBorder(),
+                                  isDense: true,
+                                  contentPadding: EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 10,
+                                  ),
+                                ),
+                                items: const [
+                                  DropdownMenuItem(
+                                    value: 'Normal',
+                                    child: Text('Normal'),
+                                  ),
+                                  DropdownMenuItem(
+                                    value: 'Fragile',
+                                    child: Text('Fragile'),
+                                  ),
+                                  DropdownMenuItem(
+                                    value: 'Perishable',
+                                    child: Text('Perishable'),
+                                  ),
+                                  DropdownMenuItem(
+                                    value: 'Medical',
+                                    child: Text('Medical'),
+                                  ),
+                                  DropdownMenuItem(
+                                    value: 'Hazardous',
+                                    child: Text('Hazardous'),
+                                  ),
+                                  DropdownMenuItem(
+                                    value: 'Live Animals',
+                                    child: Text('Live Animals'),
+                                  ),
+                                ],
+                                onChanged: (value) {
+                                  setEditState(
+                                    () => parcelTypeValue = value ?? 'Normal',
+                                  );
+                                },
+                              );
+                            },
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: TextField(
+                            controller: hsCodeController,
+                            decoration: const InputDecoration(
+                              labelText: 'HS Code',
+                              hintText: 'e.g., 392310',
+                              border: OutlineInputBorder(),
+                              isDense: true,
+                              contentPadding: EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 10,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
+                    const SizedBox(height: 12),
                   ],
-                  const SizedBox(height: 16),
+
+                  // Edit Layout Button - if layout already exists (for both layout-based sections)
+                  if (slot.seatLayoutOwnerId != null ||
+                      slot.seatLayoutStructure != null) ...[
+                    FilledButton.icon(
+                      onPressed: () async {
+                        // Build existing layout
+                        SeatLayout? existingLayout =
+                            slot.seatLayoutOwnerId != null
+                            ? SeatLayoutRepository.instance.getLayout(
+                                slot.seatLayoutOwnerId!,
+                              )
+                            : null;
+
+                        if (existingLayout == null &&
+                            slot.seatLayoutStructure != null) {
+                          existingLayout = _simpleSeatLayoutToSeatLayout(
+                            slot.seatLayoutStructure!,
+                            slot.id,
+                          );
+                        }
+
+                        if (existingLayout == null) {
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Unable to load layout'),
+                              ),
+                            );
+                          }
+                          return;
+                        }
+
+                        // Open layout builder with existing layout
+                        if (!context.mounted) return;
+                        final updatedLayout = await Navigator.push<SeatLayout?>(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => SeatLayoutBuilderScreen(
+                              controller: SeatLayoutController(
+                                initialLayout: existingLayout!,
+                              ),
+                              ownerId: slot.seatLayoutOwnerId,
+                              serviceType: ServiceType.parcel,
+                            ),
+                          ),
+                        );
+
+                        if (updatedLayout != null) {
+                          if (context.mounted) {
+                            setSheetState(() {
+                              // Store the updated layout for saving later
+                              slot = slot.copyWith(
+                                seatLayoutStructure:
+                                    _seatLayoutToSimpleSeatLayout(
+                                      updatedLayout,
+                                    ),
+                              );
+                            });
+
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('Layout updated')),
+                            );
+                          }
+                        }
+                      },
+                      icon: const Icon(Icons.grid_3x3),
+                      label: const Text('Edit Layout Grid'),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+
                   // Images removed - posts use vehicle images
                   // To change images, edit the vehicle instead
                   Row(
@@ -1081,6 +1383,23 @@ class SlotDetailScreen extends StatelessWidget {
                               maxHeight: slot.serviceType == ServiceType.parcel
                                   ? maxHeight
                                   : null,
+                              // Parcel type and HS code (only for parcel service type)
+                              parcelType: slot.serviceType == ServiceType.parcel
+                                  ? parcelTypeValue
+                                  : null,
+                              hsCode:
+                                  slot.serviceType == ServiceType.parcel &&
+                                      hsCodeController.text.trim().isNotEmpty
+                                  ? hsCodeController.text.trim()
+                                  : null,
+                              // Layout structure (may be updated from layout editor)
+                              seatLayoutStructure: slot.seatLayoutStructure,
+                              // Operator information
+                              operatorName:
+                                  operatorNameController.text.trim().isEmpty
+                                  ? null
+                                  : operatorNameController.text.trim(),
+                              operatorGender: selectedOperatorGender,
                               // images removed - posts use vehicle images
                             );
 
@@ -1106,6 +1425,7 @@ class SlotDetailScreen extends StatelessWidget {
     priceController.dispose();
     capacityController.dispose();
     notesController.dispose();
+    operatorNameController.dispose();
     weightController.dispose();
     lengthController.dispose();
     widthController.dispose();
@@ -1149,7 +1469,7 @@ class SlotDetailScreen extends StatelessWidget {
       case ServiceType.working:
         return Icons.build;
       case ServiceType.lease:
-        return Icons.car_rental;
+        return Icons.handshake;
     }
   }
 
@@ -1211,6 +1531,40 @@ class SlotDetailScreen extends StatelessWidget {
     );
   }
 
+  /// Convert SeatLayout back to SimpleSeatLayout for storage
+  static SimpleSeatLayout _seatLayoutToSimpleSeatLayout(SeatLayout layout) {
+    final items = <LayoutItem>[];
+
+    for (final entry in layout.cells.entries) {
+      final cell = entry.value;
+
+      if (cell.type == CellType.space) {
+        // Gap item
+        items.add(
+          ParcelSlot(
+            key: cell.key,
+            matrix: '${cell.row}x${cell.col}',
+            status: SlotStatus.gap,
+            price: 0,
+          ),
+        );
+      } else if (cell.type == CellType.seat) {
+        // Seat item - could be passenger or parcel
+        items.add(
+          ParcelSlot(
+            key: cell.seatName ?? cell.key,
+            matrix: '${cell.row}x${cell.col}',
+            status: cell.isLocked ? SlotStatus.locked : SlotStatus.available,
+            price: cell.price ?? 0,
+            bookingId: null,
+          ),
+        );
+      }
+    }
+
+    return SimpleSeatLayout(type: 'parcel', layout: items);
+  }
+
   static IconData _capacityIcon(Slot slot) {
     switch (slot.serviceType) {
       case ServiceType.passenger:
@@ -1229,16 +1583,67 @@ class SlotDetailScreen extends StatelessWidget {
       slot.id,
       slot.capacity,
     );
+    final total = slot.capacity;
+
     switch (slot.serviceType) {
       case ServiceType.passenger:
-        return 'Passengers: $remaining';
+        return 'Passengers: $remaining/$total';
       case ServiceType.parcel:
-        return 'Parcels: $remaining';
+        // Get available parcel numbers from layout
+        final availableParcels = _getAvailableParcelNumbers(slot);
+        if (availableParcels.isNotEmpty) {
+          return 'Parcels: ${availableParcels.first} ($remaining/$total)';
+        }
+        return 'Parcels: $remaining/$total';
       case ServiceType.working:
-        return 'Jobs/units: $remaining';
+        return 'Jobs/units: $remaining/$total';
       case ServiceType.lease:
-        return 'Available: $remaining';
+        return 'Available: $remaining/$total';
     }
+  }
+
+  static List<int> _getAvailableParcelNumbers(Slot slot) {
+    // Get booked seat keys
+    final bookedSeatKeys = <String>{};
+    final slotIds = {slot.id};
+
+    bookedSeatKeys.addAll(
+      BookingRepository.instance.bookings.value
+          .where(
+            (b) =>
+                slotIds.contains(b.slotId) &&
+                b.seatKey != null &&
+                b.status.isActive,
+          )
+          .map((b) => b.seatKey!),
+    );
+
+    // If there's no layout structure, return empty
+    if (slot.seatLayoutStructure == null) return [];
+
+    final availableNumbers = <int>[];
+    for (final item in slot.seatLayoutStructure!.layout) {
+      // Only count available items that are not booked
+      if (item.isAvailable && !bookedSeatKeys.contains(item.key)) {
+        // Try to extract number from seat key like "1", "A1", "Parcel 1", etc.
+        final number = _extractNumberFromSeatName(item.key);
+        if (number != null) {
+          availableNumbers.add(number);
+        }
+      }
+    }
+
+    availableNumbers.sort();
+    return availableNumbers;
+  }
+
+  static int? _extractNumberFromSeatName(String name) {
+    // Try to extract the numeric part from names like "1", "A1", "Parcel 1", etc.
+    final match = RegExp(r'(\d+)').firstMatch(name);
+    if (match != null) {
+      return int.tryParse(match.group(1)!);
+    }
+    return null;
   }
 
   /// Show dialog to collect customer details before booking
@@ -1699,9 +2104,7 @@ class _Header extends StatelessWidget {
       children: [
         CircleAvatar(
           radius: 22,
-          backgroundImage: providerAvatar.isNotEmpty
-              ? NetworkImage(providerAvatar)
-              : null,
+          backgroundImage: _getAvatarImageProvider(providerAvatar),
           child: providerAvatar.isEmpty ? const Icon(Icons.person) : null,
         ),
         const SizedBox(width: 12),
@@ -1891,6 +2294,32 @@ class _Header extends StatelessWidget {
         ),
       ],
     );
+  }
+
+  /// Helper to get image provider from URL or base64
+  ImageProvider? _getAvatarImageProvider(String? avatar) {
+    if (avatar == null || avatar.trim().isEmpty) return null;
+
+    final a = avatar.trim();
+
+    // Handle URLs
+    if (a.startsWith('http://') || a.startsWith('https://')) {
+      return NetworkImage(a);
+    }
+
+    // Handle base64 images
+    try {
+      String base64String = a;
+      if (a.contains(',')) {
+        base64String = a.split(',').last;
+      }
+      if (base64String.isEmpty) return null;
+      final bytes = base64Decode(base64String);
+      if (bytes.isEmpty) return null;
+      return MemoryImage(bytes);
+    } catch (e) {
+      return null;
+    }
   }
 }
 
@@ -2232,55 +2661,182 @@ class _StickyActionBar extends StatelessWidget {
 
 class _SeatLayoutPreview extends StatelessWidget {
   final SeatLayout layout;
-  static const double _cellSize = 36;
+  static const double _cellSize = 40;
 
   const _SeatLayoutPreview({required this.layout});
 
   @override
   Widget build(BuildContext context) {
     return Center(
-      child: SizedBox(
-        width: layout.cols * _cellSize,
-        height: layout.rows * _cellSize,
-        child: GridView.builder(
-          physics: const NeverScrollableScrollPhysics(),
-          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: layout.cols,
-            childAspectRatio: 1,
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: SingleChildScrollView(
+          scrollDirection: Axis.vertical,
+          child: SizedBox(
+            width: layout.cols * _cellSize,
+            height: layout.rows * _cellSize,
+            child: GridView.builder(
+              physics: const NeverScrollableScrollPhysics(),
+              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: layout.cols,
+                childAspectRatio: 1,
+              ),
+              itemCount: layout.rows * layout.cols,
+              itemBuilder: (context, index) {
+                final row = index ~/ layout.cols;
+                final col = index % layout.cols;
+                final key = '$row:$col';
+                final cell = layout.cells[key];
+                final type = cell?.type ?? CellType.empty;
+
+                if (type == CellType.empty) {
+                  return const SizedBox.shrink();
+                }
+
+                if (type == CellType.space) {
+                  return Container(
+                    margin: const EdgeInsets.all(2),
+                    decoration: BoxDecoration(
+                      color: Colors.grey.withValues(alpha: 0.2),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Center(
+                      child: Icon(
+                        Icons.block,
+                        size: 14,
+                        color: Colors.grey.shade600,
+                      ),
+                    ),
+                  );
+                }
+
+                final seat = cell!;
+
+                // Parse parcel dimensions if they exist
+                String? length, breadth, height, weight;
+                String displayName = seat.seatName ?? 'Seat';
+
+                if (seat.seatName != null && seat.seatName!.contains('|')) {
+                  final parts = seat.seatName!.split('|');
+                  displayName = parts[0];
+                  for (final part in parts.skip(1)) {
+                    if (part.startsWith('L:')) {
+                      length = part.substring(2);
+                    } else if (part.startsWith('B:')) {
+                      breadth = part.substring(2);
+                    } else if (part.startsWith('H:')) {
+                      height = part.substring(2);
+                    } else if (part.startsWith('W:')) {
+                      weight = part.substring(2);
+                    }
+                  }
+                }
+
+                final hasCompleteParcelDimensions =
+                    length != null &&
+                    length.isNotEmpty &&
+                    breadth != null &&
+                    breadth.isNotEmpty &&
+                    height != null &&
+                    height.isNotEmpty &&
+                    weight != null &&
+                    weight.isNotEmpty;
+
+                // Determine border color based on gender
+                Color borderColor = Colors.grey.shade400;
+                if (seat.gender == SeatGender.male) {
+                  borderColor = Colors.blue;
+                } else if (seat.gender == SeatGender.female) {
+                  borderColor = Colors.pink;
+                }
+
+                return Container(
+                  margin: const EdgeInsets.all(2),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    border: Border.all(color: borderColor, width: 1.5),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Stack(
+                    children: [
+                      // Compartment name (top-left)
+                      Positioned(
+                        top: 2,
+                        left: 2,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              displayName.length > 6
+                                  ? displayName.substring(0, 6)
+                                  : displayName,
+                              style: const TextStyle(
+                                fontSize: 8,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.black,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            // Gender label
+                            if (seat.gender == SeatGender.male)
+                              const Text(
+                                'M',
+                                style: TextStyle(
+                                  fontSize: 6,
+                                  color: Colors.blue,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              )
+                            else if (seat.gender == SeatGender.female)
+                              const Text(
+                                'F',
+                                style: TextStyle(
+                                  fontSize: 6,
+                                  color: Colors.pink,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                      // Parcel dimensions (bottom-left)
+                      if (hasCompleteParcelDimensions)
+                        Positioned(
+                          bottom: 2,
+                          left: 2,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                'L:$length',
+                                style: const TextStyle(
+                                  fontSize: 5,
+                                  color: Colors.blue,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              Text(
+                                'B:$breadth',
+                                style: const TextStyle(
+                                  fontSize: 5,
+                                  color: Colors.blue,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ],
+                          ),
+                        ),
+                    ],
+                  ),
+                );
+              },
+            ),
           ),
-          itemCount: layout.rows * layout.cols,
-          itemBuilder: (context, index) {
-            final row = index ~/ layout.cols;
-            final col = index % layout.cols;
-            final key = '$row:$col';
-            final cell = layout.cells[key];
-            final type = cell?.type ?? CellType.empty;
-
-            if (type == CellType.empty || type == CellType.space) {
-              return const SizedBox.shrink();
-            }
-
-            final seat = cell!;
-            final isLocked = seat.isLocked;
-
-            return Container(
-              margin: const EdgeInsets.all(2),
-              decoration: BoxDecoration(
-                color: isLocked ? Colors.grey[300] : Colors.grey[400],
-                border: Border.all(
-                  color: isLocked ? Colors.grey : Colors.blueGrey,
-                  width: 1,
-                ),
-                borderRadius: BorderRadius.circular(4),
-              ),
-              child: Center(
-                child: Text(
-                  seat.seatName ?? '',
-                  style: const TextStyle(fontSize: 10),
-                ),
-              ),
-            );
-          },
         ),
       ),
     );
@@ -2292,12 +2848,24 @@ class _Legend extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Row(
-      mainAxisAlignment: MainAxisAlignment.center,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        _LegendItem(color: Colors.grey, label: 'Booked'),
-        SizedBox(width: 20),
-        _LegendItem(color: Colors.blueGrey, label: 'Available'),
+        const Text(
+          'Gender Indicators:',
+          style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 8),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            _LegendItem(color: Colors.blue, label: 'Male'),
+            const SizedBox(width: 24),
+            _LegendItem(color: Colors.pink, label: 'Female'),
+            const SizedBox(width: 24),
+            _LegendItem(color: Colors.grey, label: 'Any'),
+          ],
+        ),
       ],
     );
   }
@@ -2316,8 +2884,8 @@ class _LegendItem extends StatelessWidget {
           width: 12,
           height: 12,
           decoration: BoxDecoration(
-            color: color.withValues(alpha: 0.5),
-            border: Border.all(color: color),
+            color: Colors.white,
+            border: Border.all(color: color, width: 2),
             borderRadius: BorderRadius.circular(2),
           ),
         ),

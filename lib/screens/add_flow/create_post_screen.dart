@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../vehicle/vehicle_list_screen.dart';
 import '../../models/service_type.dart';
@@ -72,6 +73,9 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   final _maxLengthController = TextEditingController();
   final _maxWidthController = TextEditingController();
   final _maxHeightController = TextEditingController();
+  String _parcelType = 'Normal'; // Default parcel type
+  String _hsCode = ''; // HS Code for customs classification
+  String _hsCodeMode = 'simple'; // 'simple' or 'advanced'
 
   // Lease fields (only for lease service)
   final _securityDepositController = TextEditingController();
@@ -1014,14 +1018,23 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         maxHeight: widget.serviceType == ServiceType.parcel
             ? double.tryParse(_maxHeightController.text)
             : null,
+        parcelType: widget.serviceType == ServiceType.parcel
+            ? (_hsCodeMode == 'simple'
+                  ? (_parcelType.isNotEmpty
+                        ? (_hsCode.isNotEmpty
+                              ? 'type:$_parcelType|code:$_hsCode'
+                              : 'type:$_parcelType')
+                        : null)
+                  : (_hsCode.isNotEmpty
+                        ? 'code:$_hsCode'
+                        : '')) // Advanced mode: just the HS code number
+            : null,
+        hsCode: null,
         leaseDuration:
             null, // No duration selection - just time frame and total price
         securityDeposit: double.tryParse(_securityDepositController.text),
         fuelPolicy: widget.serviceType == ServiceType.lease
             ? _fuelPolicy
-            : null,
-        insuranceIncluded: widget.serviceType == ServiceType.lease
-            ? _insuranceIncluded
             : null,
         leaseTerms:
             widget.serviceType == ServiceType.lease &&
@@ -1155,9 +1168,9 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
               const SizedBox(height: 20),
             ],
 
-            // Parcel Dimensions (only for parcel service in simple mode)
+            // Parcel Dimensions (only for parcel service in layout-based mode)
             if (widget.serviceType == ServiceType.parcel &&
-                _useSimpleSeating) ...[
+                !_useSimpleSeating) ...[
               _buildParcelDimensionsSection(),
               const SizedBox(height: 20),
             ],
@@ -2179,6 +2192,87 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
             ),
           ],
         ),
+        const SizedBox(height: 12),
+        // Toggle: Advanced (HS Code) or Simple (Parcel Type)
+        SegmentedButton<String>(
+          segments: const <ButtonSegment<String>>[
+            ButtonSegment<String>(value: 'simple', label: Text('Simple')),
+            ButtonSegment<String>(value: 'advanced', label: Text('HS Code')),
+          ],
+          selected: <String>{_hsCodeMode},
+          onSelectionChanged: (Set<String> newSelection) {
+            setState(() {
+              _hsCodeMode = newSelection.first;
+              _hsCode = ''; // Clear when switching
+              _parcelType = 'Normal'; // Reset
+            });
+          },
+        ),
+        const SizedBox(height: 12),
+        // Simple mode: Parcel type dropdown
+        if (_hsCodeMode == 'simple') ...[
+          DropdownButtonFormField<String>(
+            initialValue: _parcelType,
+            decoration: const InputDecoration(
+              labelText: 'Parcel Type',
+              border: OutlineInputBorder(),
+              prefixIcon: Icon(Icons.category),
+            ),
+            items: const [
+              DropdownMenuItem(value: 'Normal', child: Text('Normal')),
+              DropdownMenuItem(value: 'Fragile', child: Text('Fragile')),
+              DropdownMenuItem(value: 'Perishable', child: Text('Perishable')),
+              DropdownMenuItem(value: 'Medical', child: Text('Medical')),
+              DropdownMenuItem(value: 'Hazardous', child: Text('Hazardous')),
+              DropdownMenuItem(
+                value: 'Live Animals',
+                child: Text('Live Animals'),
+              ),
+            ],
+            onChanged: (v) {
+              if (v == null) return;
+              setState(() => _parcelType = v);
+            },
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            decoration: const InputDecoration(
+              labelText: 'HS Code (Optional)',
+              border: OutlineInputBorder(),
+              hintText: 'Enter HS code',
+              prefixIcon: Icon(Icons.edit),
+            ),
+            keyboardType: TextInputType.number,
+            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+            onChanged: (value) {
+              setState(() => _hsCode = value.trim());
+            },
+          ),
+        ],
+        // Advanced mode: Direct HS Code input
+        if (_hsCodeMode == 'advanced') ...[
+          const Text(
+            'HS Code',
+            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            decoration: const InputDecoration(
+              labelText: 'Enter HS Code',
+              border: OutlineInputBorder(),
+              hintText: 'e.g., 39231000',
+              prefixIcon: Icon(Icons.numbers),
+            ),
+            keyboardType: TextInputType.number,
+            inputFormatters: [
+              FilteringTextInputFormatter.digitsOnly,
+              LengthLimitingTextInputFormatter(10),
+            ],
+            onChanged: (value) {
+              setState(() => _hsCode = value.trim());
+            },
+          ),
+        ],
       ],
     );
   }
@@ -2222,7 +2316,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const Text(
-          '🚗 Lease Specific Details',
+          '🤝 Help Vehicle Details',
           style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
         ),
         const SizedBox(height: 12),
@@ -2243,15 +2337,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
           onChanged: (value) => setState(() => _fuelPolicy = value!),
         ),
         const SizedBox(height: 12),
-
-        // Insurance Included
-        SwitchListTile(
-          title: const Text('Insurance Included'),
-          subtitle: const Text('Is insurance included in the lease price?'),
-          value: _insuranceIncluded,
-          onChanged: (value) => setState(() => _insuranceIncluded = value),
-          secondary: const Icon(Icons.shield),
-        ),
       ],
     );
   }
@@ -2593,9 +2678,11 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
-          '🎟 Seating Setup (optional)',
-          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+        Text(
+          widget.serviceType == ServiceType.parcel
+              ? '📦 Compartment Setup (optional)'
+              : '🎟 Seating Setup (optional)',
+          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
         ),
         const SizedBox(height: 8),
         Container(
@@ -2741,10 +2828,15 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   }
 
   Widget _buildPostMediaSection() {
-    final tempPostId = 'draft_${DateTime.now().millisecondsSinceEpoch}';
+    // Generate a unique ID for this post (will be replaced with real ID after post creation)
+    // Format: post_timestamp_randomHash
+    final timestamp = DateTime.now().millisecondsSinceEpoch;
+    final randomHash = (timestamp % 999999).toString().padLeft(6, '0');
+    final postId = 'post_${timestamp}_$randomHash';
+
     return PostMediaUploadWidget(
       initialMedia: const [],
-      postId: tempPostId,
+      postId: postId,
       onMediaChanged: (media) {
         setState(() {
           _postMediaUrls = media.map((item) => item.url).toList();

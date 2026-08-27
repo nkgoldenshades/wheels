@@ -1,6 +1,6 @@
 {
   "projects": {
-    "default": "vaultwheels"
+    "default": "quickohunt-app"
   },
   "targets": {
     "quickohunt-app": {

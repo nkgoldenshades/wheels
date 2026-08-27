@@ -469,6 +469,26 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
                     '${_formatTime(slot.startTime)} – ${_formatTime(slot.endTime)}',
               ),
               const SizedBox(height: 8),
+              // Parcel details — only shown for parcel service type
+              if (slot.serviceType.name == 'parcel') ...[
+                if (slot.parcelType != null) ...[
+                  _Row(
+                    icon: Icons.inventory_2,
+                    text: 'Type: ${slot.parcelType}',
+                  ),
+                  const SizedBox(height: 4),
+                ],
+                if (slot.hsCode != null) ...[
+                  _Row(
+                    icon: Icons.local_shipping,
+                    text: 'HS Code: ${slot.hsCode}',
+                  ),
+                  const SizedBox(height: 4),
+                ],
+                if (slot.parcelType != null || slot.hsCode != null) ...[
+                  const SizedBox(height: 4),
+                ],
+              ],
               // Terms/notes banner
               if (slot.notes != null && slot.notes!.isNotEmpty) ...[
                 Container(
@@ -550,21 +570,32 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
                   }
 
                   if (isLease && deposit > 0) {
+                    // Calculate commission
+                    final basePrice =
+                        totalPrice / 1.05; // Remove commission to get base
+                    final commission = totalPrice - basePrice;
+
                     return Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         _Row(
                           icon: Icons.payments,
                           text:
-                              'Lease: ${AppPreferences.instance.formatMoney(totalPrice)}',
+                              'Service Price: ${AppPreferences.instance.formatMoney(basePrice.toInt())}',
+                        ),
+                        const SizedBox(height: 4),
+                        _Row(
+                          icon: Icons.receipt,
+                          text:
+                              'Platform Fee (5%): ${AppPreferences.instance.formatMoney(commission.toInt())}',
                         ),
                         const SizedBox(height: 4),
                         _Row(
                           icon: Icons.security,
                           text:
-                              'Security deposit: ${AppPreferences.instance.formatMoney(deposit.toInt())} (refundable on handover)',
+                              'Security deposit: ${AppPreferences.instance.formatMoney(deposit.toInt())} (refundable)',
                         ),
-                        const SizedBox(height: 4),
+                        const SizedBox(height: 8),
                         _Row(
                           icon: Icons.receipt_long,
                           text:
@@ -573,9 +604,33 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
                       ],
                     );
                   }
-                  return _Row(
-                    icon: Icons.payments,
-                    text: AppPreferences.instance.formatMoney(totalPrice),
+
+                  // Regular price display with commission breakdown
+                  final basePrice =
+                      totalPrice / 1.05; // Remove commission to get base
+                  final commission = totalPrice - basePrice;
+
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _Row(
+                        icon: Icons.payments,
+                        text:
+                            'Service Price: ${AppPreferences.instance.formatMoney(basePrice.toInt())}',
+                      ),
+                      const SizedBox(height: 4),
+                      _Row(
+                        icon: Icons.receipt,
+                        text:
+                            'Platform Fee (5%): ${AppPreferences.instance.formatMoney(commission.toInt())}',
+                      ),
+                      const SizedBox(height: 8),
+                      _Row(
+                        icon: Icons.receipt_long,
+                        text:
+                            'Total: ${AppPreferences.instance.formatMoney(totalPrice)}',
+                      ),
+                    ],
                   );
                 },
               ),
@@ -610,7 +665,7 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
                 ),
                 const SizedBox(height: 12),
                 // Seat legend
-                _SeatLegend(),
+                _SeatLegend(slot: slot),
                 const SizedBox(height: 16),
                 if (_selectedSeats.isNotEmpty) ...[
                   Container(
@@ -1027,6 +1082,70 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
                   ),
               ],
               const SizedBox(height: 16),
+              // Parcel details during payment — only for parcel service type
+              if (slot.serviceType.name == 'parcel') ...[
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.orange.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.orange.shade200),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Parcel Details',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      if (slot.parcelType != null) ...[
+                        Row(
+                          children: [
+                            Icon(
+                              Icons.inventory_2,
+                              size: 16,
+                              color: Colors.orange.shade700,
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              'Type: ${slot.parcelType}',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey[800],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                      if (slot.hsCode != null) ...[
+                        const SizedBox(height: 6),
+                        Row(
+                          children: [
+                            Icon(
+                              Icons.local_shipping,
+                              size: 16,
+                              color: Colors.orange.shade700,
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              'HS Code: ${slot.hsCode}',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey[800],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ],
               // Payment Method Guide - Show before payment
               ValueListenableBuilder<String>(
                 valueListenable: AppPreferences.instance.currencyCode,
@@ -1741,7 +1860,11 @@ class _BookingConfirmSheetState extends State<BookingConfirmSheet> {
         ? seatSecurityDeposit
         : slotDeposit;
 
-    return basePrice + totalDeposit;
+    // Add 5% platform commission to customer's payment
+    // Provider gets basePrice, customer pays basePrice + 5%
+    final platformCommission = basePrice * 0.05;
+
+    return basePrice + platformCommission + totalDeposit;
   }
 
   static String _formatTime(DateTime time) {
@@ -2187,10 +2310,16 @@ class _SeatGrid extends StatelessWidget {
   }
 }
 
-/// Legend showing seat status colors and symbols
+/// Legend showing seat status colors and symbols (or compartment info for parcels)
 class _SeatLegend extends StatelessWidget {
+  final Slot slot;
+
+  const _SeatLegend({required this.slot});
+
   @override
   Widget build(BuildContext context) {
+    final isParcel = slot.serviceType.name == 'parcel';
+
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
@@ -2210,23 +2339,27 @@ class _SeatLegend extends StatelessWidget {
             spacing: 16,
             runSpacing: 8,
             children: [
-              _LegendItem(
-                color: Colors.blue.shade100,
-                border: Colors.blue.shade300,
-                icon: Icons.male,
-                label: 'Male',
-              ),
-              _LegendItem(
-                color: Colors.pink.shade100,
-                border: Colors.pink.shade300,
-                icon: Icons.female,
-                label: 'Female',
-              ),
-              _LegendItem(
-                color: Colors.grey.shade100,
-                border: Colors.grey.shade300,
-                label: 'Any',
-              ),
+              // For passenger: show gender filters
+              if (!isParcel) ...[
+                _LegendItem(
+                  color: Colors.blue.shade100,
+                  border: Colors.blue.shade300,
+                  icon: Icons.male,
+                  label: 'Male',
+                ),
+                _LegendItem(
+                  color: Colors.pink.shade100,
+                  border: Colors.pink.shade300,
+                  icon: Icons.female,
+                  label: 'Female',
+                ),
+                _LegendItem(
+                  color: Colors.grey.shade100,
+                  border: Colors.grey.shade300,
+                  label: 'Any',
+                ),
+              ],
+              // Common for all: show status
               _LegendItem(
                 color: Colors.green.shade400,
                 border: Colors.green.shade700,
@@ -2247,45 +2380,90 @@ class _SeatLegend extends StatelessWidget {
           const SizedBox(height: 8),
           const Divider(height: 1),
           const SizedBox(height: 8),
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.6),
-                  borderRadius: BorderRadius.circular(2),
-                ),
-                child: const Text(
-                  'S',
-                  style: TextStyle(
-                    fontSize: 8,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white,
+          if (!isParcel) ...[
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 4,
+                    vertical: 2,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.6),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                  child: const Text(
+                    'S',
+                    style: TextStyle(
+                      fontSize: 8,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
                   ),
                 ),
-              ),
-              const SizedBox(width: 4),
-              const Text('= Seat', style: TextStyle(fontSize: 11)),
-              const SizedBox(width: 16),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.6),
-                  borderRadius: BorderRadius.circular(2),
-                ),
-                child: const Text(
-                  'B',
-                  style: TextStyle(
-                    fontSize: 8,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white,
+                const SizedBox(width: 4),
+                const Text('= Seat', style: TextStyle(fontSize: 11)),
+                const SizedBox(width: 16),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 4,
+                    vertical: 2,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.6),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                  child: const Text(
+                    'B',
+                    style: TextStyle(
+                      fontSize: 8,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
                   ),
                 ),
+                const SizedBox(width: 4),
+                const Text('= Berth', style: TextStyle(fontSize: 11)),
+              ],
+            ),
+          ] else ...[
+            // For parcel: show compartment info
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 4,
+                    vertical: 2,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.orange.shade100,
+                    borderRadius: BorderRadius.circular(2),
+                    border: Border.all(color: Colors.orange.shade300),
+                  ),
+                  child: const Text(
+                    'C',
+                    style: TextStyle(
+                      fontSize: 8,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.orange,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 4),
+                const Text('= Compartment', style: TextStyle(fontSize: 11)),
+              ],
+            ),
+            if (slot.parcelType != null || slot.hsCode != null) ...[
+              const SizedBox(height: 8),
+              Text(
+                'Type: ${slot.parcelType ?? "N/A"} | HS: ${slot.hsCode ?? "N/A"}',
+                style: const TextStyle(
+                  fontSize: 11,
+                  fontStyle: FontStyle.italic,
+                ),
               ),
-              const SizedBox(width: 4),
-              const Text('= Berth', style: TextStyle(fontSize: 11)),
             ],
-          ),
+          ],
         ],
       ),
     );

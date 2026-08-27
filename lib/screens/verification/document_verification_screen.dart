@@ -88,9 +88,9 @@ class _DocumentVerificationScreenState
       Navigator.pop(context, bytes);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to pick image: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed to pick image: $e')));
         Navigator.pop(context);
       }
     }
@@ -719,7 +719,7 @@ class _DocumentVerificationScreenState
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
-        title: Text('Verify ${_getDocumentName()}'),
+        title: Text('Add ${_getDocumentName()}'),
         backgroundColor: Colors.black,
         foregroundColor: Colors.white,
       ),
@@ -915,7 +915,8 @@ class _DocumentVerificationScreenState
         break;
       case VerificationStep.holdDocument:
         instruction = 'Hold your ${_getDocumentName()} next to your face';
-        subInstruction = 'Show both your face and the document clearly in camera';
+        subInstruction =
+            'Show both your face and the document clearly in camera';
         icon = Icons.description;
         color = Colors.purple;
         break;
@@ -958,10 +959,7 @@ class _DocumentVerificationScreenState
             const SizedBox(height: 4),
             Text(
               subInstruction,
-              style: const TextStyle(
-                color: Colors.white70,
-                fontSize: 14,
-              ),
+              style: const TextStyle(color: Colors.white70, fontSize: 14),
               textAlign: TextAlign.center,
             ),
           ],
@@ -1002,6 +1000,3 @@ class _DocumentVerificationScreenState
     );
   }
 }
-
-
-

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/vehicle_media_service.dart';
+import '../services/image_content_filter_service.dart';
 
 class VehicleMediaUploadWidget extends StatefulWidget {
   final String vehicleId;
@@ -18,7 +19,8 @@ class VehicleMediaUploadWidget extends StatefulWidget {
   });
 
   @override
-  State<VehicleMediaUploadWidget> createState() => _VehicleMediaUploadWidgetState();
+  State<VehicleMediaUploadWidget> createState() =>
+      _VehicleMediaUploadWidgetState();
 }
 
 class _VehicleMediaUploadWidgetState extends State<VehicleMediaUploadWidget> {
@@ -57,6 +59,16 @@ class _VehicleMediaUploadWidgetState extends State<VehicleMediaUploadWidget> {
         // Upload from device
         final file = await VehicleMediaService.instance.pickImage();
         if (file != null) {
+          // Validate image content (check for phone numbers, emails, etc.)
+          final filterError = await ImageContentFilterService.instance
+              .validateImage(file);
+
+          if (filterError != null) {
+            _showError(filterError);
+            setState(() => _uploading = false);
+            return;
+          }
+
           newImage = await VehicleMediaService.instance.uploadImage(
             vehicleId: widget.vehicleId,
             imageFile: file,
@@ -65,7 +77,8 @@ class _VehicleMediaUploadWidgetState extends State<VehicleMediaUploadWidget> {
       } else {
         // External URL
         final url = _imageUrlController.text.trim();
-        if (url.isNotEmpty && VehicleMediaService.instance.isValidImageUrl(url)) {
+        if (url.isNotEmpty &&
+            VehicleMediaService.instance.isValidImageUrl(url)) {
           newImage = VehicleMediaService.instance.createExternalMedia(url);
           _imageUrlController.clear();
         } else {
@@ -96,6 +109,16 @@ class _VehicleMediaUploadWidgetState extends State<VehicleMediaUploadWidget> {
         // Upload from device
         final file = await VehicleMediaService.instance.pickVideo();
         if (file != null) {
+          // Validate video (check for phone numbers, emails, etc. in audio/subtitle text)
+          final filterError = await ImageContentFilterService.instance
+              .validateImage(file);
+
+          if (filterError != null) {
+            _showError(filterError);
+            setState(() => _uploading = false);
+            return;
+          }
+
           newVideo = await VehicleMediaService.instance.uploadVideo(
             vehicleId: widget.vehicleId,
             videoFile: file,
@@ -104,7 +127,8 @@ class _VehicleMediaUploadWidgetState extends State<VehicleMediaUploadWidget> {
       } else {
         // External URL
         final url = _videoUrlController.text.trim();
-        if (url.isNotEmpty && VehicleMediaService.instance.isValidVideoUrl(url)) {
+        if (url.isNotEmpty &&
+            VehicleMediaService.instance.isValidVideoUrl(url)) {
           newVideo = VehicleMediaService.instance.createExternalMedia(url);
           _videoUrlController.clear();
         } else {
@@ -125,7 +149,7 @@ class _VehicleMediaUploadWidgetState extends State<VehicleMediaUploadWidget> {
 
   void _removeImage(int index) {
     final image = _images[index];
-    
+
     // Delete from storage if uploaded
     if (image.source == MediaSource.uploaded && image.storageId != null) {
       VehicleMediaService.instance.deleteUploadedMedia(image.storageId!);
@@ -228,10 +252,13 @@ class _VehicleMediaUploadWidgetState extends State<VehicleMediaUploadWidget> {
                         top: 4,
                         left: 4,
                         child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 4,
+                            vertical: 2,
+                          ),
                           decoration: BoxDecoration(
-                            color: image.source == MediaSource.uploaded 
-                                ? Colors.green 
+                            color: image.source == MediaSource.uploaded
+                                ? Colors.green
                                 : Colors.blue,
                             borderRadius: BorderRadius.circular(4),
                           ),
@@ -326,9 +353,14 @@ class _VehicleMediaUploadWidgetState extends State<VehicleMediaUploadWidget> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text('Video added', style: TextStyle(fontWeight: FontWeight.bold)),
+                      const Text(
+                        'Video added',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
                       Text(
-                        _video!.source == MediaSource.uploaded ? 'Uploaded' : 'External URL',
+                        _video!.source == MediaSource.uploaded
+                            ? 'Uploaded'
+                            : 'External URL',
                         style: TextStyle(fontSize: 12, color: Colors.grey[600]),
                       ),
                     ],
@@ -356,8 +388,12 @@ class _VehicleMediaUploadWidgetState extends State<VehicleMediaUploadWidget> {
         const SizedBox(height: 8),
         ElevatedButton.icon(
           onPressed: _uploading ? null : _addImage,
-          icon: _uploading 
-              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+          icon: _uploading
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
               : const Icon(Icons.photo_camera),
           label: Text(_uploading ? 'Uploading...' : 'Add Image'),
         ),
@@ -406,8 +442,12 @@ class _VehicleMediaUploadWidgetState extends State<VehicleMediaUploadWidget> {
         const SizedBox(height: 8),
         ElevatedButton.icon(
           onPressed: _uploading || _video != null ? null : _addVideo,
-          icon: _uploading 
-              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+          icon: _uploading
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
               : const Icon(Icons.videocam),
           label: Text(_uploading ? 'Uploading...' : 'Add Video'),
         ),
@@ -446,6 +486,3 @@ class _VehicleMediaUploadWidgetState extends State<VehicleMediaUploadWidget> {
     );
   }
 }
-
-
-

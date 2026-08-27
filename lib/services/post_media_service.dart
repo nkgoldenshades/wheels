@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'auth_repository.dart';
 
 /// Service for handling post media uploads (images, videos)
 /// Stores media in the 'post_media' bucket in Supabase
@@ -13,14 +14,30 @@ class PostMediaService {
   final _imagePicker = ImagePicker();
 
   /// Upload image to post_media bucket
+  /// Path structure: {userId}/posts/{postId}/{timestamp}_{filename}
+  /// This allows RLS policies to validate ownership
   Future<String?> uploadPostImage({
     required String postId,
     required XFile imageFile,
   }) async {
     try {
+      // Get user ID from AuthRepository instead of auth.currentUser
+      final user = AuthRepository.instance.currentUser;
+      if (user == null) {
+        debugPrint('❌ User not authenticated');
+        return null;
+      }
+
+      debugPrint('📤 Uploading image: ${imageFile.name}');
       final bytes = await imageFile.readAsBytes();
+      debugPrint(
+        '📦 Image size: ${(bytes.length / 1024).toStringAsFixed(2)} KB',
+      );
+
       final fileName =
-          'posts/$postId/${DateTime.now().millisecondsSinceEpoch}_${imageFile.name}';
+          '${user.id}/posts/$postId/${DateTime.now().millisecondsSinceEpoch}_${imageFile.name}';
+
+      debugPrint('📍 Storage path: $fileName');
 
       final response = await _supabase.storage
           .from('post_media')
@@ -30,15 +47,17 @@ class PostMediaService {
             fileOptions: const FileOptions(cacheControl: '3600', upsert: false),
           );
 
+      debugPrint('📥 Upload response: $response');
+
       if (response.isEmpty) {
         debugPrint('❌ Upload response empty');
         return null;
       }
 
-      // Get public URL
+      // Get public URL - use fileName, not response
       final publicUrl = _supabase.storage
           .from('post_media')
-          .getPublicUrl(response);
+          .getPublicUrl(fileName);
 
       debugPrint('✅ Post image uploaded: $publicUrl');
       return publicUrl;
@@ -49,14 +68,30 @@ class PostMediaService {
   }
 
   /// Upload video to post_media bucket
+  /// Path structure: {userId}/posts/{postId}/videos/{timestamp}_{filename}
+  /// This allows RLS policies to validate ownership
   Future<String?> uploadPostVideo({
     required String postId,
     required XFile videoFile,
   }) async {
     try {
+      // Get user ID from AuthRepository instead of auth.currentUser
+      final user = AuthRepository.instance.currentUser;
+      if (user == null) {
+        debugPrint('❌ User not authenticated');
+        return null;
+      }
+
+      debugPrint('📹 Uploading video: ${videoFile.name}');
       final bytes = await videoFile.readAsBytes();
+      debugPrint(
+        '📦 Video size: ${(bytes.length / 1024 / 1024).toStringAsFixed(2)} MB',
+      );
+
       final fileName =
-          'posts/$postId/videos/${DateTime.now().millisecondsSinceEpoch}_${videoFile.name}';
+          '${user.id}/posts/$postId/videos/${DateTime.now().millisecondsSinceEpoch}_${videoFile.name}';
+
+      debugPrint('📍 Storage path: $fileName');
 
       final response = await _supabase.storage
           .from('post_media')
@@ -66,15 +101,17 @@ class PostMediaService {
             fileOptions: const FileOptions(cacheControl: '3600', upsert: false),
           );
 
+      debugPrint('📥 Upload response: $response');
+
       if (response.isEmpty) {
         debugPrint('❌ Upload response empty');
         return null;
       }
 
-      // Get public URL
+      // Get public URL - use fileName, not response
       final publicUrl = _supabase.storage
           .from('post_media')
-          .getPublicUrl(response);
+          .getPublicUrl(fileName);
 
       debugPrint('✅ Post video uploaded: $publicUrl');
       return publicUrl;
@@ -89,7 +126,7 @@ class PostMediaService {
     try {
       return await _imagePicker.pickImage(
         source: ImageSource.gallery,
-        imageQuality: 85,
+        imageQuality: 95, // High quality for post media
       );
     } catch (e) {
       debugPrint('❌ Failed to pick image: $e');
@@ -100,7 +137,10 @@ class PostMediaService {
   /// Pick multiple images from gallery for post
   Future<List<XFile>> pickMultiplePostImages() async {
     try {
-      return await _imagePicker.pickMultipleMedia(imageQuality: 85);
+      final files = await _imagePicker.pickMultiImage(
+        imageQuality: 95,
+      ); // High quality for post media
+      return files;
     } catch (e) {
       debugPrint('❌ Failed to pick images: $e');
       return [];

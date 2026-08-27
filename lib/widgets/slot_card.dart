@@ -28,6 +28,10 @@ class SlotCard extends StatelessWidget {
   final VoidCallback onAction;
   final VoidCallback? onRatingTap;
 
+  // Filter parameters for displaying filtered price range
+  final double? minPriceFilter;
+  final double? maxPriceFilter;
+
   const SlotCard({
     super.key,
     required this.slot,
@@ -40,6 +44,8 @@ class SlotCard extends StatelessWidget {
     required this.onTap,
     required this.onAction,
     this.onRatingTap,
+    this.minPriceFilter,
+    this.maxPriceFilter,
   });
 
   @override
@@ -148,6 +154,27 @@ class SlotCard extends StatelessWidget {
     } catch (_) {
       return null;
     }
+  }
+
+  ImageProvider? _getAvatarProvider(String avatar) {
+    if (avatar.isEmpty) return null;
+
+    // Handle URLs
+    if (avatar.startsWith('http://') || avatar.startsWith('https://')) {
+      return NetworkImage(avatar);
+    }
+
+    // Handle base64 images
+    try {
+      final bytes = _tryDecodePhoto(avatar);
+      if (bytes != null && bytes.isNotEmpty) {
+        return MemoryImage(bytes);
+      }
+    } catch (e) {
+      debugPrint('❌ Failed to decode post avatar: $e');
+    }
+
+    return null;
   }
 
   double? _distanceKm() {
@@ -281,10 +308,16 @@ class SlotCard extends StatelessWidget {
         // Provider avatar (second)
         CircleAvatar(
           radius: 20,
-          backgroundImage: providerAvatar.isNotEmpty
-              ? NetworkImage(providerAvatar)
+          backgroundColor: Colors.grey[300],
+          backgroundImage: _getAvatarProvider(providerAvatar),
+          onBackgroundImageError: _getAvatarProvider(providerAvatar) != null
+              ? (exception, stackTrace) {
+                  debugPrint('⚠️ Failed to load post avatar: $providerAvatar');
+                }
               : null,
-          child: providerAvatar.isEmpty ? const Icon(Icons.person) : null,
+          child: _getAvatarProvider(providerAvatar) == null
+              ? const Icon(Icons.person, color: Colors.grey)
+              : null,
         ),
         const SizedBox(width: 12),
 
@@ -954,6 +987,9 @@ class SlotCard extends StatelessWidget {
           slot.capacity,
         );
 
+        // ═══════════════════════════════════════════════════════════════════
+        // 💰 PRICING DISPLAY LOGIC (CRITICAL FOR ACCURACY)
+        // ═══════════════════════════════════════════════════════════════════
         // Check if slot has a layout (with variable prices per seat/compartment)
         final hasLayout =
             slot.seatLayoutOwnerId != null || slot.seatLayoutStructure != null;
@@ -961,9 +997,20 @@ class SlotCard extends StatelessWidget {
         return Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            // Only show price if NO layout (prices are fixed for entire post)
-            // Hide price if layout exists (prices vary per seat/compartment)
+            // ┌─────────────────────────────────────────────────────────────┐
+            // │ PRICING DISPLAY STRATEGY                                   │
+            // │                                                             │
+            // │ ✅ NO LAYOUT (Fixed price for all):                        │
+            // │   └─ Display: ₹500 (clear, single price)                   │
+            // │                                                             │
+            // │ ✅ WITH LAYOUT (Variable prices per seat):                 │
+            // │   └─ Display: ₹300-₹500 + "3 seats"                       │
+            // │   └ Shows price range & compartment count                 │
+            // │   └ Users know what to expect before tapping              │
+            // │   └ Better for search accuracy & UX                       │
+            // └─────────────────────────────────────────────────────────────┘
             if (!hasLayout)
+              // FIXED PRICE MODE: Show single price
               Text(
                 '${slot.currencySymbol}${slot.price.toStringAsFixed(0)}',
                 style: const TextStyle(
@@ -973,14 +1020,13 @@ class SlotCard extends StatelessWidget {
                 ),
               )
             else
-              // Show placeholder text when layout exists
-              Text(
-                'View details',
-                style: TextStyle(
-                  fontSize: 14,
-                  color: Colors.grey[600],
-                  fontStyle: FontStyle.italic,
-                ),
+              // LAYOUT MODE: Show price range + compartment count
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _buildPriceRangeDisplay(slot, hasLayout),
+                  _buildCompartmentCountDisplay(slot),
+                ],
               ),
             Row(
               children: [
@@ -1079,7 +1125,8 @@ class SlotCard extends StatelessWidget {
       case ServiceType.working:
         return Icons.build;
       case ServiceType.lease:
-        return Icons.car_rental;
+        return Icons
+            .handshake; // Changed from car_rental to handshake (helping)
     }
   }
 
@@ -1113,6 +1160,143 @@ class SlotCard extends StatelessWidget {
         return 'Wait Full';
       case PostMode.fullPost:
         return 'Full Post';
+    }
+  }
+
+  /// Build price range display for layout mode
+  /// Shows filtered price range based on user's price filter (if any)
+  /// Shows: "₹300-₹500" (min to max compartment prices that match filters)
+  Widget _buildPriceRangeDisplay(Slot slot, bool hasLayout) {
+    if (!hasLayout || slot.seatLayoutStructure == null) {
+      return Text(
+        '${slot.currencySymbol}${slot.price.toStringAsFixed(0)}',
+        style: const TextStyle(
+          fontSize: 18,
+          fontWeight: FontWeight.bold,
+          color: Colors.green,
+        ),
+      );
+    }
+
+    try {
+      final items = slot.seatLayoutStructure!.layout;
+
+      // Get all prices from layout
+      var prices = items
+          .where((item) => !item.isGap && item.price > 0)
+          .map((item) => item.price)
+          .toList();
+
+      // Apply price filters (from user's filter settings)
+      if (minPriceFilter != null) {
+        prices = prices.where((p) => p >= minPriceFilter!).toList();
+      }
+      if (maxPriceFilter != null) {
+        prices = prices.where((p) => p <= maxPriceFilter!).toList();
+      }
+
+      if (prices.isEmpty) {
+        // No compartments match the filter
+        return Text(
+          'No available',
+          style: TextStyle(
+            fontSize: 14,
+            color: Colors.red[400],
+            fontStyle: FontStyle.italic,
+          ),
+        );
+      }
+
+      final minPrice = prices.reduce((a, b) => a < b ? a : b);
+      final maxPrice = prices.reduce((a, b) => a > b ? a : b);
+
+      if (minPrice == maxPrice) {
+        // All available seats same price
+        return Text(
+          '${slot.currencySymbol}${minPrice.toStringAsFixed(0)}',
+          style: const TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+            color: Colors.green,
+          ),
+        );
+      }
+
+      // Show filtered range
+      return Text(
+        '${slot.currencySymbol}${minPrice.toStringAsFixed(0)} - ${slot.currencySymbol}${maxPrice.toStringAsFixed(0)}',
+        style: const TextStyle(
+          fontSize: 16,
+          fontWeight: FontWeight.bold,
+          color: Colors.green,
+        ),
+      );
+    } catch (e) {
+      return Text(
+        '${slot.currencySymbol}${slot.price.toStringAsFixed(0)}',
+        style: const TextStyle(
+          fontSize: 18,
+          fontWeight: FontWeight.bold,
+          color: Colors.green,
+        ),
+      );
+    }
+  }
+
+  /// Build compartment count display for layout mode
+  /// Shows filtered compartment count based on price filters
+  /// Shows: "3 seats" or "4 compartments" (only those matching filters)
+  Widget _buildCompartmentCountDisplay(Slot slot) {
+    if (slot.seatLayoutStructure == null) {
+      return const SizedBox.shrink();
+    }
+
+    try {
+      final items = slot.seatLayoutStructure!.layout;
+
+      // Get all compartments
+      var compartments = items.where((item) => !item.isGap).toList();
+
+      // Apply price filters (only show compartments within price range)
+      if (minPriceFilter != null) {
+        compartments = compartments
+            .where((item) => item.price >= minPriceFilter!)
+            .toList();
+      }
+      if (maxPriceFilter != null) {
+        compartments = compartments
+            .where((item) => item.price <= maxPriceFilter!)
+            .toList();
+      }
+
+      final compartmentCount = compartments.length;
+
+      if (compartmentCount == 0) {
+        return const SizedBox.shrink();
+      }
+
+      String label;
+      switch (slot.serviceType) {
+        case ServiceType.passenger:
+          label = compartmentCount == 1 ? 'seat' : 'seats';
+          break;
+        case ServiceType.parcel:
+          label = compartmentCount == 1 ? 'compartment' : 'compartments';
+          break;
+        case ServiceType.lease:
+          label = compartmentCount == 1 ? 'item' : 'items';
+          break;
+        case ServiceType.working:
+          label = compartmentCount == 1 ? 'slot' : 'slots';
+          break;
+      }
+
+      return Text(
+        '$compartmentCount $label',
+        style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+      );
+    } catch (e) {
+      return const SizedBox.shrink();
     }
   }
 

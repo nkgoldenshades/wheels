@@ -21,7 +21,7 @@ class AISearchService {
   Future<AISearchResult> searchWithAI(String query) async {
     try {
       debugPrint('🤖 AI Search: "$query"');
-      
+
       // Call Supabase Edge Function for AI search
       final supabase = Supabase.instance.client;
       final response = await supabase.functions.invoke(
@@ -34,16 +34,18 @@ class AISearchService {
       }
 
       final data = response.data as Map<String, dynamic>;
-      
+
       return AISearchResult(
         query: query,
         intent: SearchIntent.fromJson(data['intent'] as Map<String, dynamic>),
-        suggestions: (data['suggestions'] as List?)
-            ?.map((s) => s.toString())
-            .toList() ?? [],
-        matchedPostIds: (data['matched_post_ids'] as List?)
-            ?.map((id) => id.toString())
-            .toList() ?? [],
+        suggestions:
+            (data['suggestions'] as List?)?.map((s) => s.toString()).toList() ??
+            [],
+        matchedPostIds:
+            (data['matched_post_ids'] as List?)
+                ?.map((id) => id.toString())
+                .toList() ??
+            [],
       );
     } catch (e) {
       debugPrint('❌ AI search error: $e');
@@ -59,14 +61,11 @@ class AISearchService {
   }) async {
     try {
       debugPrint('🤖 Getting AI recommendations for user: $userId');
-      
+
       final supabase = Supabase.instance.client;
       final response = await supabase.functions.invoke(
         'ai-recommend-posts',
-        body: {
-          'user_id': userId,
-          'limit': limit,
-        },
+        body: {'user_id': userId, 'limit': limit},
       );
 
       if (response.status != 200) {
@@ -116,7 +115,7 @@ class AISearchService {
   /// Fallback search using local keyword matching
   AISearchResult _fallbackSearch(String query) {
     final lowerQuery = query.toLowerCase();
-    
+
     // Get all slots (not SlotEntry, just Slot objects)
     final allSlots = [
       ...SlotRepository.instance.allSlotsRaw,
@@ -129,22 +128,31 @@ class AISearchService {
     final List<String> suggestions = [];
 
     // Service type detection
-    if (lowerQuery.contains('passenger') || lowerQuery.contains('ride') || lowerQuery.contains('taxi')) {
+    if (lowerQuery.contains('passenger') ||
+        lowerQuery.contains('ride') ||
+        lowerQuery.contains('taxi')) {
       serviceType = ServiceType.passenger;
       suggestions.add('Try filtering by "Passenger" service');
-    } else if (lowerQuery.contains('parcel') || lowerQuery.contains('delivery') || lowerQuery.contains('package')) {
+    } else if (lowerQuery.contains('parcel') ||
+        lowerQuery.contains('delivery') ||
+        lowerQuery.contains('package')) {
       serviceType = ServiceType.parcel;
       suggestions.add('Try filtering by "Parcel" service');
-    } else if (lowerQuery.contains('lease') || lowerQuery.contains('rent') || lowerQuery.contains('rental')) {
+    } else if (lowerQuery.contains('lease') ||
+        lowerQuery.contains('rent') ||
+        lowerQuery.contains('rental') ||
+        lowerQuery.contains('help vehicle')) {
       serviceType = ServiceType.lease;
-      suggestions.add('Try filtering by "Lease" service');
+      suggestions.add('Try filtering by "Help Vehicle" service');
     }
 
     // Route type detection
     if (lowerQuery.contains('from') && lowerQuery.contains('to')) {
       slotType = SlotType.fromTo;
       suggestions.add('Searching for point-to-point routes');
-    } else if (lowerQuery.contains('nearby') || lowerQuery.contains('around') || lowerQuery.contains('near')) {
+    } else if (lowerQuery.contains('nearby') ||
+        lowerQuery.contains('around') ||
+        lowerQuery.contains('near')) {
       slotType = SlotType.fromRange;
       suggestions.add('Searching for services in your area');
     }
@@ -155,46 +163,55 @@ class AISearchService {
     if (priceMatch != null) {
       maxPrice = double.tryParse(priceMatch.group(1)!);
       if (maxPrice != null) {
-        suggestions.add('Filtering by price under ${maxPrice.toStringAsFixed(0)}');
+        suggestions.add(
+          'Filtering by price under ${maxPrice.toStringAsFixed(0)}',
+        );
       }
     }
 
     // Filter posts based on detected intent
-    final matchedPostIds = allSlots.where((slot) {
-      bool matches = true;
+    final matchedPostIds = allSlots
+        .where((slot) {
+          bool matches = true;
 
-      if (serviceType != null && slot.serviceType != serviceType) {
-        matches = false;
-      }
-
-      if (slotType != null && slot.slotType != slotType) {
-        matches = false;
-      }
-
-      if (maxPrice != null && slot.price > maxPrice) {
-        matches = false;
-      }
-
-      // Location matching
-      final locations = [
-        slot.fromLocation,
-        slot.toLocation,
-        slot.baseLocation,
-      ].where((l) => l != null).join(' ').toLowerCase();
-
-      if (!locations.contains(lowerQuery.split(' ').where((w) => w.length > 3).join('|'))) {
-        // Check if any significant word from query appears in locations
-        final queryWords = lowerQuery.split(' ').where((w) => w.length > 3);
-        if (queryWords.isNotEmpty) {
-          final hasMatch = queryWords.any((word) => locations.contains(word));
-          if (!hasMatch && serviceType == null && slotType == null) {
+          if (serviceType != null && slot.serviceType != serviceType) {
             matches = false;
           }
-        }
-      }
 
-      return matches;
-    }).map((s) => s.id).toList();
+          if (slotType != null && slot.slotType != slotType) {
+            matches = false;
+          }
+
+          if (maxPrice != null && slot.price > maxPrice) {
+            matches = false;
+          }
+
+          // Location matching
+          final locations = [
+            slot.fromLocation,
+            slot.toLocation,
+            slot.baseLocation,
+          ].where((l) => l != null).join(' ').toLowerCase();
+
+          if (!locations.contains(
+            lowerQuery.split(' ').where((w) => w.length > 3).join('|'),
+          )) {
+            // Check if any significant word from query appears in locations
+            final queryWords = lowerQuery.split(' ').where((w) => w.length > 3);
+            if (queryWords.isNotEmpty) {
+              final hasMatch = queryWords.any(
+                (word) => locations.contains(word),
+              );
+              if (!hasMatch && serviceType == null && slotType == null) {
+                matches = false;
+              }
+            }
+          }
+
+          return matches;
+        })
+        .map((s) => s.id)
+        .toList();
 
     return AISearchResult(
       query: query,
@@ -204,8 +221,10 @@ class AISearchService {
         maxPrice: maxPrice,
         locations: [],
       ),
-      suggestions: suggestions.isEmpty 
-          ? ['Try using keywords like "passenger", "parcel", "lease", "from", "to", "nearby"']
+      suggestions: suggestions.isEmpty
+          ? [
+              'Try using keywords like "passenger", "parcel", "lease", "from", "to", "nearby"',
+            ]
           : suggestions,
       matchedPostIds: matchedPostIds,
     );
@@ -214,7 +233,7 @@ class AISearchService {
   /// Fallback recommendations using simple heuristics
   List<AIRecommendation> _fallbackRecommendations(int limit) {
     final allSlots = SlotRepository.instance.allSlotsRaw;
-    
+
     // Sort by rating and recent bookings
     final sorted = List<Slot>.from(allSlots)
       ..sort((a, b) {
@@ -255,8 +274,12 @@ class AISearchResult {
     return AISearchResult(
       query: json['query'] as String,
       intent: SearchIntent.fromJson(json['intent'] as Map<String, dynamic>),
-      suggestions: (json['suggestions'] as List).map((s) => s.toString()).toList(),
-      matchedPostIds: (json['matched_post_ids'] as List).map((id) => id.toString()).toList(),
+      suggestions: (json['suggestions'] as List)
+          .map((s) => s.toString())
+          .toList(),
+      matchedPostIds: (json['matched_post_ids'] as List)
+          .map((id) => id.toString())
+          .toList(),
     );
   }
 }
@@ -309,7 +332,8 @@ class SearchIntent {
       endDate: json['end_date'] != null
           ? DateTime.parse(json['end_date'] as String)
           : null,
-      locations: (json['locations'] as List?)?.map((l) => l.toString()).toList() ?? [],
+      locations:
+          (json['locations'] as List?)?.map((l) => l.toString()).toList() ?? [],
       passengers: json['passengers'] as int?,
     );
   }
@@ -358,7 +382,9 @@ class PostInsights {
       postId: json['post_id'] as String,
       priceAnalysis: json['price_analysis'] as String,
       demandLevel: json['demand_level'] as String,
-      suggestions: (json['suggestions'] as List).map((s) => s.toString()).toList(),
+      suggestions: (json['suggestions'] as List)
+          .map((s) => s.toString())
+          .toList(),
     );
   }
 }

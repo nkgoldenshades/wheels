@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart';
 import '../../services/auth_repository.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -24,7 +25,7 @@ class _LoginScreenState extends State<LoginScreen> {
   Future<void> _signIn() async {
     final email = _emailController.text.trim();
     final password = _passwordController.text.trim();
-    
+
     if (email.isEmpty || password.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please enter email and password')),
@@ -33,24 +34,24 @@ class _LoginScreenState extends State<LoginScreen> {
     }
 
     setState(() => _isLoading = true);
-    
+
     try {
       await AuthRepository.instance.signInWithEmail(
         email: email,
         password: password,
       );
-      
+
       // TEST: Check JWT claims after login
       await AuthRepository.instance.testJWTClaims();
-      
+
       if (!mounted) return;
       Navigator.pushReplacementNamed(context, '/main');
     } catch (e) {
       if (!mounted) return;
       setState(() => _isLoading = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.toString())),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(e.toString())));
     }
   }
 
@@ -100,7 +101,9 @@ class _LoginScreenState extends State<LoginScreen> {
                   border: const OutlineInputBorder(),
                   suffixIcon: IconButton(
                     icon: Icon(
-                      _obscurePassword ? Icons.visibility : Icons.visibility_off,
+                      _obscurePassword
+                          ? Icons.visibility
+                          : Icons.visibility_off,
                     ),
                     onPressed: () {
                       setState(() => _obscurePassword = !_obscurePassword);
@@ -132,6 +135,27 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                 ),
               ),
+              const SizedBox(height: 12),
+              RichText(
+                textAlign: TextAlign.center,
+                text: TextSpan(
+                  style: const TextStyle(fontSize: 12, color: Colors.grey),
+                  children: [
+                    const TextSpan(text: 'By signing in, you accept '),
+                    TextSpan(
+                      text: 'Terms and Conditions',
+                      style: const TextStyle(
+                        color: Colors.blue,
+                        decoration: TextDecoration.underline,
+                        fontWeight: FontWeight.w500,
+                      ),
+                      recognizer: TapGestureRecognizer()
+                        ..onTap = () =>
+                            Navigator.pushNamed(context, '/terms-of-service'),
+                    ),
+                  ],
+                ),
+              ),
               const SizedBox(height: 16),
               TextButton(
                 onPressed: () {
@@ -142,14 +166,19 @@ class _LoginScreenState extends State<LoginScreen> {
               const SizedBox(height: 16),
               // Guest mode button
               OutlinedButton.icon(
-                onPressed: _isLoading ? null : () {
-                  // Navigate to main screen without logging in
-                  Navigator.pushReplacementNamed(context, '/main');
-                },
+                onPressed: _isLoading
+                    ? null
+                    : () {
+                        // Navigate to main screen without logging in
+                        Navigator.pushReplacementNamed(context, '/main');
+                      },
                 icon: const Icon(Icons.person_outline),
                 label: const Text('Continue as Guest'),
                 style: OutlinedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
+                  padding: const EdgeInsets.symmetric(
+                    vertical: 16,
+                    horizontal: 24,
+                  ),
                   side: BorderSide(color: Theme.of(context).primaryColor),
                 ),
               ),
@@ -166,6 +195,3 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 }
-
-
-
