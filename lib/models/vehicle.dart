@@ -29,7 +29,7 @@ class Vehicle {
 
   final bool isVerifiedToggle;
   final bool isExpertToggle;
-  
+
   // Rating and statistics
   final double averageRating;
   final int totalRatings;
@@ -38,7 +38,7 @@ class Vehicle {
 
   // Registration Certificate (RC) - MANDATORY
   final String? rcFrontUrl; // Front image of RC
-  final String? rcBackUrl;  // Back image of RC
+  final String? rcBackUrl; // Back image of RC
   final bool rcVerified;
   final DateTime? rcVerifiedAt;
 
@@ -57,18 +57,8 @@ class Vehicle {
   final String? fitnessCertificateUrl;
   final DateTime? fitnessExpiry;
 
-  // Driver's License - MANDATORY for operators
-  final bool dlVerified;
-  final DateTime? dlVerifiedAt;
-  final String? dlImageBase64;
-
-  // Identity Documents - OPTIONAL but increases trust
-  final bool aadhaarVerified;
-  final DateTime? aadhaarVerifiedAt;
-  final String? aadhaarImageBase64;
-  final bool panVerified;
-  final DateTime? panVerifiedAt;
-  final String? panImageBase64;
+  // Personal identity documents removed for legal safety
+  // Trust built through ratings and trip history instead
 
   // Operator information (optional - person who operates/handles this vehicle)
   final String? operatorName;
@@ -77,7 +67,7 @@ class Vehicle {
   final String? operatorPhoto; // base64 or URL
   final String? operatorLicense; // License number for records
   final DateTime? operatorDob; // Date of birth
-  
+
   // Operator Document (single upload - can be image or PDF)
   final String? operatorDocumentUrl; // Single document upload
   final bool operatorDocumentVerified;
@@ -88,22 +78,31 @@ class Vehicle {
 
   /// True only when all mandatory docs are verified and none expired
   bool get isFullyVerified {
-    final insuranceValid = insuranceVerified &&
+    final insuranceValid =
+        insuranceVerified &&
         (insuranceExpiry == null || insuranceExpiry!.isAfter(DateTime.now()));
-    final pollutionValid = pollutionCertificateUrl == null || 
-        pollutionExpiry == null || pollutionExpiry!.isAfter(DateTime.now());
-    final fitnessValid = fitnessCertificateUrl == null ||
-        fitnessExpiry == null || fitnessExpiry!.isAfter(DateTime.now());
-    
-    return rcVerified && insuranceValid && dlVerified && pollutionValid && fitnessValid;
+    final pollutionValid =
+        pollutionCertificateUrl == null ||
+        pollutionExpiry == null ||
+        pollutionExpiry!.isAfter(DateTime.now());
+    final fitnessValid =
+        fitnessCertificateUrl == null ||
+        fitnessExpiry == null ||
+        fitnessExpiry!.isAfter(DateTime.now());
+
+    return rcVerified &&
+        insuranceValid &&
+        dlVerified &&
+        pollutionValid &&
+        fitnessValid;
   }
 
   /// True when mandatory documents are present (but may not be verified)
   bool get hasMandatoryDocuments {
-    return registrationNumber != null && 
-           (rcFrontUrl != null || rcBackUrl != null) &&
-           insuranceNumber != null &&
-           insuranceDocumentUrl != null;
+    return registrationNumber != null &&
+        (rcFrontUrl != null || rcBackUrl != null) &&
+        insuranceNumber != null &&
+        insuranceDocumentUrl != null;
   }
 
   Vehicle({
@@ -290,10 +289,12 @@ class Vehicle {
       insuranceVerified: insuranceVerified ?? this.insuranceVerified,
       insuranceVerifiedAt: insuranceVerifiedAt ?? this.insuranceVerifiedAt,
       // Pollution Certificate
-      pollutionCertificateUrl: pollutionCertificateUrl ?? this.pollutionCertificateUrl,
+      pollutionCertificateUrl:
+          pollutionCertificateUrl ?? this.pollutionCertificateUrl,
       pollutionExpiry: pollutionExpiry ?? this.pollutionExpiry,
       // Fitness Certificate
-      fitnessCertificateUrl: fitnessCertificateUrl ?? this.fitnessCertificateUrl,
+      fitnessCertificateUrl:
+          fitnessCertificateUrl ?? this.fitnessCertificateUrl,
       fitnessExpiry: fitnessExpiry ?? this.fitnessExpiry,
       // Driver's License
       dlVerified: dlVerified ?? this.dlVerified,
@@ -315,7 +316,8 @@ class Vehicle {
       operatorDob: operatorDob ?? this.operatorDob,
       // Operator Document
       operatorDocumentUrl: operatorDocumentUrl ?? this.operatorDocumentUrl,
-      operatorDocumentVerified: operatorDocumentVerified ?? this.operatorDocumentVerified,
+      operatorDocumentVerified:
+          operatorDocumentVerified ?? this.operatorDocumentVerified,
       // Currency and country
       currency: currency ?? this.currency,
       countryCode: countryCode ?? this.countryCode,
@@ -338,31 +340,30 @@ class Vehicle {
       'created_at': createdAt.toIso8601String(),
       'updated_at': DateTime.now().toIso8601String(),
       'is_online': true, // Default to online when serializing
-      
       // RC Documents
       'rc_front_url': rcFrontUrl,
       'rc_back_url': rcBackUrl,
       'is_verified': rcVerified,
       'verified_at': rcVerifiedAt?.toIso8601String(),
-      
+
       // Insurance
       'insurance_number': insuranceNumber,
       'insurance_expiry': insuranceExpiry?.toIso8601String(),
       'insurance_document_url': insuranceDocumentUrl,
-      
+
       // Pollution Certificate
       'pollution_certificate_url': pollutionCertificateUrl,
       'pollution_expiry': pollutionExpiry?.toIso8601String(),
-      
+
       // Fitness Certificate
       'fitness_certificate_url': fitnessCertificateUrl,
       'fitness_expiry': fitnessExpiry?.toIso8601String(),
-      
+
       // Statistics
       'total_trips': totalBookings,
       'total_reviews': totalRatings,
       'active_posts_count': activePostsCount,
-      
+
       // Legacy fields for compatibility
       'user_name': userName,
       'name': name,
@@ -403,24 +404,30 @@ class Vehicle {
 
   factory Vehicle.fromJson(Map<String, dynamic> json) {
     // Support both camelCase (local) and snake_case (Supabase)
-    
-    final userName = json['profile_name'] ??      // ✅ From vehicles query with join
-                     json['user_name'] ?? 
-                     json['userName'] ?? 
-                     json['full_name'] ??
-                     json['operator_name'] ??
-                     'Unknown User';
-    
+
+    final userName =
+        json['profile_name'] ?? // ✅ From vehicles query with join
+        json['user_name'] ??
+        json['userName'] ??
+        json['full_name'] ??
+        json['operator_name'] ??
+        'Unknown User';
+
     // Only log if userName is Unknown User (to debug issues)
     if (kDebugMode && userName == 'Unknown User') {
-      debugPrint('⚠️ Vehicle.fromJson: id=${json['id']}, profile_name=${json['profile_name']}, user_name=${json['user_name']} → Unknown User');
+      debugPrint(
+        '⚠️ Vehicle.fromJson: id=${json['id']}, profile_name=${json['profile_name']}, user_name=${json['user_name']} → Unknown User',
+      );
     }
-    
+
     return Vehicle(
       id: json['id'],
       userId: json['profile_id'] ?? json['user_id'] ?? json['userId'],
       userName: userName,
-      name: json['vehicle_name'] ?? json['name'] ?? '${json['brand'] ?? ''} ${json['model'] ?? ''}'.trim(),
+      name:
+          json['vehicle_name'] ??
+          json['name'] ??
+          '${json['brand'] ?? ''} ${json['model'] ?? ''}'.trim(),
       type: json['vehicle_type'] ?? json['type'],
       brand: json['brand'],
       model: json['model'],
@@ -430,15 +437,24 @@ class Vehicle {
       seatingCapacity: json['seating_capacity'],
       capabilities: json['capabilities'] != null
           ? (json['capabilities'] as List)
-              .map((e) => ServiceType.values.firstWhere((s) => s.name == e))
-              .toList()
+                .map((e) => ServiceType.values.firstWhere((s) => s.name == e))
+                .toList()
           : <ServiceType>[],
-      profileImage: json['vehicle_photo_url'] ?? json['profile_image'] ?? json['profileImage'],
-      galleryImages: json['gallery_images'] != null 
+      profileImage:
+          json['vehicle_photo_url'] ??
+          json['profile_image'] ??
+          json['profileImage'],
+      galleryImages: json['gallery_images'] != null
           ? List<String>.from(json['gallery_images'])
-          : (json['galleryImages'] != null ? List<String>.from(json['galleryImages']) : []),
+          : (json['galleryImages'] != null
+                ? List<String>.from(json['galleryImages'])
+                : []),
       videoUrl: json['video_url'] ?? json['videoUrl'],
-      createdAt: DateTime.parse(json['created_at'] ?? json['createdAt'] ?? DateTime.now().toIso8601String()),
+      createdAt: DateTime.parse(
+        json['created_at'] ??
+            json['createdAt'] ??
+            DateTime.now().toIso8601String(),
+      ),
       gpsMode: json['gps_mode'] != null || json['gpsMode'] != null
           ? VehicleGpsMode.values.firstWhere(
               (m) => m.name == (json['gps_mode'] ?? json['gpsMode']),
@@ -448,67 +464,110 @@ class Vehicle {
       gpsExternalLink: json['gps_external_link'] ?? json['gpsExternalLink'],
       manualLat: (json['manual_lat'] ?? json['manualLat'] as num?)?.toDouble(),
       manualLng: (json['manual_lng'] ?? json['manualLng'] as num?)?.toDouble(),
-      lastKnownLat: (json['last_known_lat'] ?? json['lastKnownLat'] as num?)?.toDouble(),
-      lastKnownLng: (json['last_known_lng'] ?? json['lastKnownLng'] as num?)?.toDouble(),
-      isVerifiedToggle: json['is_verified_toggle'] ?? json['isVerifiedToggle'] ?? false,
-      isExpertToggle: json['is_expert_toggle'] ?? json['isExpertToggle'] ?? false,
-      averageRating: (json['average_rating'] ?? json['averageRating'] as num?)?.toDouble() ?? 0.0,
-      totalRatings: json['total_reviews'] ?? json['total_ratings'] ?? json['totalRatings'] ?? 0,
-      totalBookings: json['total_trips'] ?? json['total_bookings'] ?? json['totalBookings'] ?? 0,
-      activePostsCount: json['active_posts_count'] ?? json['activePostsCount'] ?? 0,
-      
+      lastKnownLat: (json['last_known_lat'] ?? json['lastKnownLat'] as num?)
+          ?.toDouble(),
+      lastKnownLng: (json['last_known_lng'] ?? json['lastKnownLng'] as num?)
+          ?.toDouble(),
+      isVerifiedToggle:
+          json['is_verified_toggle'] ?? json['isVerifiedToggle'] ?? false,
+      isExpertToggle:
+          json['is_expert_toggle'] ?? json['isExpertToggle'] ?? false,
+      averageRating:
+          (json['average_rating'] ?? json['averageRating'] as num?)
+              ?.toDouble() ??
+          0.0,
+      totalRatings:
+          json['total_reviews'] ??
+          json['total_ratings'] ??
+          json['totalRatings'] ??
+          0,
+      totalBookings:
+          json['total_trips'] ??
+          json['total_bookings'] ??
+          json['totalBookings'] ??
+          0,
+      activePostsCount:
+          json['active_posts_count'] ?? json['activePostsCount'] ?? 0,
+
       // RC Documents
       rcFrontUrl: json['rc_front_url'],
       rcBackUrl: json['rc_back_url'],
-      rcVerified: json['is_verified'] ?? json['rc_verified'] ?? json['rcVerified'] ?? false,
-      rcVerifiedAt: json['verified_at'] != null || json['rc_verified_at'] != null || json['rcVerifiedAt'] != null
-          ? DateTime.parse(json['verified_at'] ?? json['rc_verified_at'] ?? json['rcVerifiedAt'])
+      rcVerified:
+          json['is_verified'] ??
+          json['rc_verified'] ??
+          json['rcVerified'] ??
+          false,
+      rcVerifiedAt:
+          json['verified_at'] != null ||
+              json['rc_verified_at'] != null ||
+              json['rcVerifiedAt'] != null
+          ? DateTime.parse(
+              json['verified_at'] ??
+                  json['rc_verified_at'] ??
+                  json['rcVerifiedAt'],
+            )
           : null,
-      
+
       // Insurance
       insuranceNumber: json['insurance_number'],
       insuranceExpiry: json['insurance_expiry'] != null
           ? DateTime.parse(json['insurance_expiry'])
-          : (json['insurance_expiry_date'] != null || json['insuranceExpiryDate'] != null
-              ? DateTime.parse(json['insurance_expiry_date'] ?? json['insuranceExpiryDate'])
-              : null),
+          : (json['insurance_expiry_date'] != null ||
+                    json['insuranceExpiryDate'] != null
+                ? DateTime.parse(
+                    json['insurance_expiry_date'] ??
+                        json['insuranceExpiryDate'],
+                  )
+                : null),
       insuranceDocumentUrl: json['insurance_document_url'],
-      insuranceVerified: json['insurance_verified'] ?? json['insuranceVerified'] ?? false,
-      insuranceVerifiedAt: json['insurance_verified_at'] != null || json['insuranceVerifiedAt'] != null
-          ? DateTime.parse(json['insurance_verified_at'] ?? json['insuranceVerifiedAt'])
+      insuranceVerified:
+          json['insurance_verified'] ?? json['insuranceVerified'] ?? false,
+      insuranceVerifiedAt:
+          json['insurance_verified_at'] != null ||
+              json['insuranceVerifiedAt'] != null
+          ? DateTime.parse(
+              json['insurance_verified_at'] ?? json['insuranceVerifiedAt'],
+            )
           : null,
-      
+
       // Pollution Certificate
       pollutionCertificateUrl: json['pollution_certificate_url'],
       pollutionExpiry: json['pollution_expiry'] != null
           ? DateTime.parse(json['pollution_expiry'])
           : null,
-      
+
       // Fitness Certificate
       fitnessCertificateUrl: json['fitness_certificate_url'],
       fitnessExpiry: json['fitness_expiry'] != null
           ? DateTime.parse(json['fitness_expiry'])
           : null,
-      
+
       // Driver's License
       dlVerified: json['dl_verified'] ?? json['dlVerified'] ?? false,
-      dlVerifiedAt: json['dl_verified_at'] != null || json['dlVerifiedAt'] != null
+      dlVerifiedAt:
+          json['dl_verified_at'] != null || json['dlVerifiedAt'] != null
           ? DateTime.parse(json['dl_verified_at'] ?? json['dlVerifiedAt'])
           : null,
       dlImageBase64: json['dl_image'] ?? json['dlImage'],
-      
+
       // Identity Documents
-      aadhaarVerified: json['aadhaar_verified'] ?? json['aadhaarVerified'] ?? false,
-      aadhaarVerifiedAt: json['aadhaar_verified_at'] != null || json['aadhaarVerifiedAt'] != null
-          ? DateTime.parse(json['aadhaar_verified_at'] ?? json['aadhaarVerifiedAt'])
+      aadhaarVerified:
+          json['aadhaar_verified'] ?? json['aadhaarVerified'] ?? false,
+      aadhaarVerifiedAt:
+          json['aadhaar_verified_at'] != null ||
+              json['aadhaarVerifiedAt'] != null
+          ? DateTime.parse(
+              json['aadhaar_verified_at'] ?? json['aadhaarVerifiedAt'],
+            )
           : null,
       aadhaarImageBase64: json['aadhaar_image'] ?? json['aadhaarImage'],
       panVerified: json['pan_verified'] ?? json['panVerified'] ?? false,
-      panVerifiedAt: json['pan_verified_at'] != null || json['panVerifiedAt'] != null
+      panVerifiedAt:
+          json['pan_verified_at'] != null || json['panVerifiedAt'] != null
           ? DateTime.parse(json['pan_verified_at'] ?? json['panVerifiedAt'])
           : null,
       panImageBase64: json['pan_image'] ?? json['panImage'],
-      
+
       // Operator
       operatorName: json['operator_name'] ?? json['operatorName'],
       operatorPhone: json['operator_phone'] ?? json['operatorPhone'],
@@ -518,17 +577,18 @@ class Vehicle {
       operatorDob: json['operator_dob'] != null || json['operatorDob'] != null
           ? DateTime.tryParse(json['operator_dob'] ?? json['operatorDob'])
           : null,
-      
+
       // Operator Document
-      operatorDocumentUrl: json['operator_document_url'] ?? json['operatorDocumentUrl'],
-      operatorDocumentVerified: json['operator_document_verified'] ?? json['operatorDocumentVerified'] ?? false,
-      
+      operatorDocumentUrl:
+          json['operator_document_url'] ?? json['operatorDocumentUrl'],
+      operatorDocumentVerified:
+          json['operator_document_verified'] ??
+          json['operatorDocumentVerified'] ??
+          false,
+
       // Currency and country
       currency: json['currency'] ?? 'INR',
       countryCode: json['country_code'] ?? json['countryCode'] ?? 'IN',
     );
   }
 }
-
-
-
