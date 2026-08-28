@@ -36,70 +36,27 @@ class Vehicle {
   final int totalBookings;
   final int activePostsCount;
 
-  // Registration Certificate (RC) - MANDATORY
-  final String? rcFrontUrl; // Front image of RC
-  final String? rcBackUrl; // Back image of RC
-  final bool rcVerified;
-  final DateTime? rcVerifiedAt;
-
-  // Insurance - MANDATORY
-  final String? insuranceNumber; // Policy number
-  final DateTime? insuranceExpiry; // Expiry date
-  final String? insuranceDocumentUrl; // Insurance document
-  final bool insuranceVerified;
-  final DateTime? insuranceVerifiedAt;
-
-  // Pollution Certificate (PUC) - OPTIONAL but increases trust
-  final String? pollutionCertificateUrl;
-  final DateTime? pollutionExpiry;
-
-  // Fitness Certificate - OPTIONAL but increases trust
-  final String? fitnessCertificateUrl;
-  final DateTime? fitnessExpiry;
-
-  // Personal identity documents removed for legal safety
-  // Trust built through ratings and trip history instead
+  // ALL document verification removed for legal safety
+  // Vehicle documents (RC, Insurance, Pollution, Fitness) = data liability risk
+  // Trust now based on: phone verify + ratings + trip history (like OLX/Craigslist)
 
   // Operator information (optional - person who operates/handles this vehicle)
   final String? operatorName;
   final String? operatorPhone;
   final String? operatorGender; // 'male', 'female', or null
   final String? operatorPhoto; // base64 or URL
-  final String? operatorLicense; // License number for records
+  final String?
+  operatorLicense; // License number for records (text only, no upload)
   final DateTime? operatorDob; // Date of birth
 
-  // Operator Document (single upload - can be image or PDF)
-  final String? operatorDocumentUrl; // Single document upload
-  final bool operatorDocumentVerified;
+  // Operator documents also removed (no uploads = no liability)
 
   // Currency and country (for pricing)
   final String currency; // INR, USD, EUR, etc.
   final String countryCode; // IN, US, GB, etc.
 
-  /// True only when all mandatory docs are verified and none expired
-  bool get isFullyVerified {
-    final insuranceValid =
-        insuranceVerified &&
-        (insuranceExpiry == null || insuranceExpiry!.isAfter(DateTime.now()));
-    final pollutionValid =
-        pollutionCertificateUrl == null ||
-        pollutionExpiry == null ||
-        pollutionExpiry!.isAfter(DateTime.now());
-    final fitnessValid =
-        fitnessCertificateUrl == null ||
-        fitnessExpiry == null ||
-        fitnessExpiry!.isAfter(DateTime.now());
-
-    return rcVerified && insuranceValid && pollutionValid && fitnessValid;
-  }
-
-  /// True when mandatory documents are present (but may not be verified)
-  bool get hasMandatoryDocuments {
-    return registrationNumber != null &&
-        (rcFrontUrl != null || rcBackUrl != null) &&
-        insuranceNumber != null &&
-        insuranceDocumentUrl != null;
-  }
+  // Document verification removed - trust based on ratings/trips instead
+  // No isFullyVerified or hasMandatoryDocuments getters needed
 
   Vehicle({
     required this.id,
@@ -130,24 +87,7 @@ class Vehicle {
     this.totalRatings = 0,
     this.totalBookings = 0,
     this.activePostsCount = 0,
-    // RC Documents
-    this.rcFrontUrl,
-    this.rcBackUrl,
-    this.rcVerified = false,
-    this.rcVerifiedAt,
-    // Insurance
-    this.insuranceNumber,
-    this.insuranceExpiry,
-    this.insuranceDocumentUrl,
-    this.insuranceVerified = false,
-    this.insuranceVerifiedAt,
-    // Pollution Certificate
-    this.pollutionCertificateUrl,
-    this.pollutionExpiry,
-    // Fitness Certificate
-    this.fitnessCertificateUrl,
-    this.fitnessExpiry,
-    // Personal ID documents removed for legal safety
+    // ALL document fields removed for legal safety
     // Operator
     this.operatorName,
     this.operatorPhone,
@@ -155,9 +95,6 @@ class Vehicle {
     this.operatorPhoto,
     this.operatorLicense,
     this.operatorDob,
-    // Operator Document
-    this.operatorDocumentUrl,
-    this.operatorDocumentVerified = false,
     // Currency and country
     this.currency = 'INR',
     this.countryCode = 'IN',
@@ -192,24 +129,7 @@ class Vehicle {
     int? totalRatings,
     int? totalBookings,
     int? activePostsCount,
-    // RC Documents
-    String? rcFrontUrl,
-    String? rcBackUrl,
-    bool? rcVerified,
-    DateTime? rcVerifiedAt,
-    // Insurance
-    String? insuranceNumber,
-    DateTime? insuranceExpiry,
-    String? insuranceDocumentUrl,
-    bool? insuranceVerified,
-    DateTime? insuranceVerifiedAt,
-    // Pollution Certificate
-    String? pollutionCertificateUrl,
-    DateTime? pollutionExpiry,
-    // Fitness Certificate
-    String? fitnessCertificateUrl,
-    DateTime? fitnessExpiry,
-    // Personal ID documents removed for legal safety
+    // ALL document parameters removed for legal safety
     // Operator
     String? operatorName,
     String? operatorPhone,
@@ -217,9 +137,6 @@ class Vehicle {
     String? operatorPhoto,
     String? operatorLicense,
     DateTime? operatorDob,
-    // Operator Document
-    String? operatorDocumentUrl,
-    bool? operatorDocumentVerified,
     // Currency and country
     String? currency,
     String? countryCode,
@@ -253,26 +170,7 @@ class Vehicle {
       totalRatings: totalRatings ?? this.totalRatings,
       totalBookings: totalBookings ?? this.totalBookings,
       activePostsCount: activePostsCount ?? this.activePostsCount,
-      // RC Documents
-      rcFrontUrl: rcFrontUrl ?? this.rcFrontUrl,
-      rcBackUrl: rcBackUrl ?? this.rcBackUrl,
-      rcVerified: rcVerified ?? this.rcVerified,
-      rcVerifiedAt: rcVerifiedAt ?? this.rcVerifiedAt,
-      // Insurance
-      insuranceNumber: insuranceNumber ?? this.insuranceNumber,
-      insuranceExpiry: insuranceExpiry ?? this.insuranceExpiry,
-      insuranceDocumentUrl: insuranceDocumentUrl ?? this.insuranceDocumentUrl,
-      insuranceVerified: insuranceVerified ?? this.insuranceVerified,
-      insuranceVerifiedAt: insuranceVerifiedAt ?? this.insuranceVerifiedAt,
-      // Pollution Certificate
-      pollutionCertificateUrl:
-          pollutionCertificateUrl ?? this.pollutionCertificateUrl,
-      pollutionExpiry: pollutionExpiry ?? this.pollutionExpiry,
-      // Fitness Certificate
-      fitnessCertificateUrl:
-          fitnessCertificateUrl ?? this.fitnessCertificateUrl,
-      fitnessExpiry: fitnessExpiry ?? this.fitnessExpiry,
-      // Personal ID documents removed for legal safety
+      // ALL document fields removed for legal safety
       // Operator
       operatorName: operatorName ?? this.operatorName,
       operatorPhone: operatorPhone ?? this.operatorPhone,
@@ -280,10 +178,6 @@ class Vehicle {
       operatorPhoto: operatorPhoto ?? this.operatorPhoto,
       operatorLicense: operatorLicense ?? this.operatorLicense,
       operatorDob: operatorDob ?? this.operatorDob,
-      // Operator Document
-      operatorDocumentUrl: operatorDocumentUrl ?? this.operatorDocumentUrl,
-      operatorDocumentVerified:
-          operatorDocumentVerified ?? this.operatorDocumentVerified,
       // Currency and country
       currency: currency ?? this.currency,
       countryCode: countryCode ?? this.countryCode,
@@ -306,24 +200,7 @@ class Vehicle {
       'created_at': createdAt.toIso8601String(),
       'updated_at': DateTime.now().toIso8601String(),
       'is_online': true, // Default to online when serializing
-      // RC Documents
-      'rc_front_url': rcFrontUrl,
-      'rc_back_url': rcBackUrl,
-      'is_verified': rcVerified,
-      'verified_at': rcVerifiedAt?.toIso8601String(),
-
-      // Insurance
-      'insurance_number': insuranceNumber,
-      'insurance_expiry': insuranceExpiry?.toIso8601String(),
-      'insurance_document_url': insuranceDocumentUrl,
-
-      // Pollution Certificate
-      'pollution_certificate_url': pollutionCertificateUrl,
-      'pollution_expiry': pollutionExpiry?.toIso8601String(),
-
-      // Fitness Certificate
-      'fitness_certificate_url': fitnessCertificateUrl,
-      'fitness_expiry': fitnessExpiry?.toIso8601String(),
+      // ALL document fields removed for legal safety
 
       // Statistics
       'total_trips': totalBookings,
@@ -346,15 +223,13 @@ class Vehicle {
       'average_rating': averageRating,
       'total_ratings': totalRatings,
       'total_bookings': totalBookings,
-      // Personal ID documents removed for legal safety
+      // Operator info (no documents)
       'operator_name': operatorName,
       'operator_phone': operatorPhone,
       'operator_gender': operatorGender,
       'operator_photo': operatorPhoto,
       'operator_license': operatorLicense,
       'operator_dob': operatorDob?.toIso8601String().split('T').first,
-      'operator_document_url': operatorDocumentUrl,
-      'operator_document_verified': operatorDocumentVerified,
       'currency': currency,
       'country_code': countryCode,
     };
@@ -448,59 +323,7 @@ class Vehicle {
           json['active_posts_count'] ?? json['activePostsCount'] ?? 0,
 
       // RC Documents
-      rcFrontUrl: json['rc_front_url'],
-      rcBackUrl: json['rc_back_url'],
-      rcVerified:
-          json['is_verified'] ??
-          json['rc_verified'] ??
-          json['rcVerified'] ??
-          false,
-      rcVerifiedAt:
-          json['verified_at'] != null ||
-              json['rc_verified_at'] != null ||
-              json['rcVerifiedAt'] != null
-          ? DateTime.parse(
-              json['verified_at'] ??
-                  json['rc_verified_at'] ??
-                  json['rcVerifiedAt'],
-            )
-          : null,
-
-      // Insurance
-      insuranceNumber: json['insurance_number'],
-      insuranceExpiry: json['insurance_expiry'] != null
-          ? DateTime.parse(json['insurance_expiry'])
-          : (json['insurance_expiry_date'] != null ||
-                    json['insuranceExpiryDate'] != null
-                ? DateTime.parse(
-                    json['insurance_expiry_date'] ??
-                        json['insuranceExpiryDate'],
-                  )
-                : null),
-      insuranceDocumentUrl: json['insurance_document_url'],
-      insuranceVerified:
-          json['insurance_verified'] ?? json['insuranceVerified'] ?? false,
-      insuranceVerifiedAt:
-          json['insurance_verified_at'] != null ||
-              json['insuranceVerifiedAt'] != null
-          ? DateTime.parse(
-              json['insurance_verified_at'] ?? json['insuranceVerifiedAt'],
-            )
-          : null,
-
-      // Pollution Certificate
-      pollutionCertificateUrl: json['pollution_certificate_url'],
-      pollutionExpiry: json['pollution_expiry'] != null
-          ? DateTime.parse(json['pollution_expiry'])
-          : null,
-
-      // Fitness Certificate
-      fitnessCertificateUrl: json['fitness_certificate_url'],
-      fitnessExpiry: json['fitness_expiry'] != null
-          ? DateTime.parse(json['fitness_expiry'])
-          : null,
-
-      // Personal ID documents removed for legal safety
+      // ALL document fields removed for legal safety
 
       // Operator
       operatorName: json['operator_name'] ?? json['operatorName'],
@@ -511,14 +334,6 @@ class Vehicle {
       operatorDob: json['operator_dob'] != null || json['operatorDob'] != null
           ? DateTime.tryParse(json['operator_dob'] ?? json['operatorDob'])
           : null,
-
-      // Operator Document
-      operatorDocumentUrl:
-          json['operator_document_url'] ?? json['operatorDocumentUrl'],
-      operatorDocumentVerified:
-          json['operator_document_verified'] ??
-          json['operatorDocumentVerified'] ??
-          false,
 
       // Currency and country
       currency: json['currency'] ?? 'INR',
