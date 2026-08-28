@@ -99,7 +99,7 @@ class _SplashscreenState extends State<Splashscreen> {
               ),
               const SizedBox(height: 32),
               const Text(
-                'VaultSales',
+                'VaultWheels',
                 style: TextStyle(
                   fontSize: 36,
                   fontWeight: FontWeight.bold,
@@ -109,7 +109,7 @@ class _SplashscreenState extends State<Splashscreen> {
               ),
               const SizedBox(height: 12),
               const Text(
-                'Connect • Serve • Grow',
+                'Your Transport Partner',
                 style: TextStyle(
                   fontSize: 16,
                   color: Colors.grey,
