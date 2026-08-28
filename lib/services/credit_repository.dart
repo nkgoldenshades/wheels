@@ -67,18 +67,33 @@ class CreditRepository {
             profileResponse['ai_credits_available'] as int? ?? 0;
       }
 
-      // Get transaction history
-      final txnResponse = await supabase
-          .from('credit_transactions')
-          .select()
+      // Get transaction history from ai_conversations.aiinfra JSONB column
+      // This replaces the old credit_transactions table approach
+      final conversationsResponse = await supabase
+          .from('ai_conversations')
+          .select('aiinfra, created_at')
           .eq('user_id', authUser.id)
           .order('created_at', ascending: false)
           .limit(100);
 
-      transactions.value = (txnResponse as List)
-          .map((e) => CreditTransaction.fromJson(e as Map<String, dynamic>))
-          .toList();
+      // Parse transactions from aiinfra JSONB
+      final txnList = <CreditTransaction>[];
+      for (final conv in (conversationsResponse as List)) {
+        final aiinfra = conv['aiinfra'] as Map<String, dynamic>?;
+        if (aiinfra != null && aiinfra['transactions'] is List) {
+          for (final txn in aiinfra['transactions']) {
+            try {
+              txnList.add(
+                CreditTransaction.fromJson(txn as Map<String, dynamic>),
+              );
+            } catch (e) {
+              debugPrint('⚠️ Failed to parse transaction: $e');
+            }
+          }
+        }
+      }
 
+      transactions.value = txnList;
       await _persist();
     } catch (e) {
       debugPrint('❌ [CreditRepository] refreshFromSupabase error: $e');

@@ -30,6 +30,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../services/location_autocomplete_service.dart';
 import '../../services/app_preferences.dart';
 import '../../services/payment_service.dart';
+import '../../utils/image_compression_helper.dart';
 
 /// Upload a vehicle sensitive document to vehicle_sensitive_media bucket
 /// Returns the public URL or null on failure
@@ -42,12 +43,22 @@ Future<String?> _uploadVehicleSensitiveDoc({
   try {
     final userId = AuthRepository.instance.currentUser?.id;
     if (userId == null) return null;
+
+    // Compress image documents (800x800)
+    final finalBytes =
+        await ImageCompressionHelper.compressImageBytes(
+          bytes,
+          targetWidth: 800,
+          targetHeight: 800,
+        ) ??
+        bytes;
+
     final supabase = Supabase.instance.client;
     final timestamp = DateTime.now().millisecondsSinceEpoch;
     final path = '$vehicleId/$docType/${docType}_$timestamp.$extension';
     await supabase.storage
         .from('vehicle_sensitive_media')
-        .uploadBinary(path, bytes);
+        .uploadBinary(path, finalBytes);
     return supabase.storage.from('vehicle_sensitive_media').getPublicUrl(path);
   } catch (e) {
     debugPrint('❌ Vehicle sensitive doc upload failed: $e');
@@ -64,12 +75,22 @@ Future<String?> _uploadOperatorPhoto({
   try {
     final userId = AuthRepository.instance.currentUser?.id;
     if (userId == null) return null;
+
+    // Compress operator photo (512x512)
+    final finalBytes =
+        await ImageCompressionHelper.compressImageBytes(
+          bytes,
+          targetWidth: 512,
+          targetHeight: 512,
+        ) ??
+        bytes;
+
     final supabase = Supabase.instance.client;
     final timestamp = DateTime.now().millisecondsSinceEpoch;
     final path = '$vehicleId/operator_photo/photo_$timestamp.jpg';
     await supabase.storage
         .from('vehicle_sensitive_media')
-        .uploadBinary(path, bytes);
+        .uploadBinary(path, finalBytes);
     return supabase.storage.from('vehicle_sensitive_media').getPublicUrl(path);
   } catch (e) {
     debugPrint('❌ Operator photo upload failed: $e');

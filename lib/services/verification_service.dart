@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'profile_repository.dart';
+import '../utils/image_compression_helper.dart';
 
 /// Service to manage optional document verification
 /// All documents are truly optional - user can skip
@@ -44,6 +45,14 @@ class VerificationService {
       // Read image bytes
       final bytes = await image.readAsBytes();
 
+      // Compress document image (800x800)
+      final compressedBytes = await ImageCompressionHelper.compressImageBytes(
+        bytes,
+        targetWidth: 800,
+        targetHeight: 800,
+      );
+      final finalBytes = compressedBytes ?? bytes;
+
       // Create unique file path
       final timestamp = DateTime.now().millisecondsSinceEpoch;
       final fileName = '${documentType}_$timestamp.jpg';
@@ -54,7 +63,7 @@ class VerificationService {
           .from('verification-documents')
           .uploadBinary(
             filePath,
-            bytes,
+            finalBytes,
             fileOptions: const FileOptions(cacheControl: '3600', upsert: true),
           );
 

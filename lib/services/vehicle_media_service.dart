@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'auth_repository.dart';
+import '../utils/image_compression_helper.dart';
 
 enum MediaSource { uploaded, external }
 
@@ -58,8 +59,16 @@ class VehicleMediaService {
       final userId = AuthRepository.instance.currentUser?.id;
       if (userId == null) throw Exception('User not authenticated');
 
-      // Read image bytes (no compression for now - can add later)
+      // Read image bytes
       final imageBytes = await imageFile.readAsBytes();
+
+      // Compress image (1024x1024 for vehicle photos)
+      final compressedBytes = await ImageCompressionHelper.compressImageBytes(
+        imageBytes,
+        targetWidth: 1024,
+        targetHeight: 1024,
+      );
+      final finalBytes = compressedBytes ?? imageBytes;
 
       // Path: {userId}/{vehicleId}/{filename} — [1]=userId matches RLS
       final timestamp = DateTime.now().millisecondsSinceEpoch;
@@ -70,7 +79,7 @@ class VehicleMediaService {
       // Upload to Supabase Storage
       await _supabase.storage
           .from('vehicle_media')
-          .uploadBinary(storagePath, imageBytes);
+          .uploadBinary(storagePath, finalBytes);
 
       // Get public URL
       final publicUrl = _supabase.storage
@@ -170,27 +179,25 @@ class VehicleMediaService {
   bool isValidImageUrl(String url) {
     if (!url.startsWith('https://')) return false;
     final lowerUrl = url.toLowerCase();
-    return lowerUrl.endsWith('.jpg') || 
-           lowerUrl.endsWith('.jpeg') || 
-           lowerUrl.endsWith('.png') || 
-           lowerUrl.endsWith('.webp');
+    return lowerUrl.endsWith('.jpg') ||
+        lowerUrl.endsWith('.jpeg') ||
+        lowerUrl.endsWith('.png') ||
+        lowerUrl.endsWith('.webp');
   }
 
   bool isValidVideoUrl(String url) {
     if (!url.startsWith('https://')) return false;
     final lowerUrl = url.toLowerCase();
-    return lowerUrl.endsWith('.mp4') || 
-           lowerUrl.endsWith('.mov') || 
-           lowerUrl.endsWith('.avi') || 
-           lowerUrl.endsWith('.webm');
+    return lowerUrl.endsWith('.mp4') ||
+        lowerUrl.endsWith('.mov') ||
+        lowerUrl.endsWith('.avi') ||
+        lowerUrl.endsWith('.webm');
   }
 
   // Delete uploaded media from storage
   Future<bool> deleteUploadedMedia(String storagePath) async {
     try {
-      await _supabase.storage
-          .from('vehicle_media')
-          .remove([storagePath]);
+      await _supabase.storage.from('vehicle_media').remove([storagePath]);
       return true;
     } catch (e) {
       debugPrint('❌ Delete media failed: $e');
@@ -198,6 +205,3 @@ class VehicleMediaService {
     }
   }
 }
-
-
-

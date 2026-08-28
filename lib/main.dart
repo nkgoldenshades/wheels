@@ -3495,7 +3495,7 @@ class MyPostsPage extends StatelessWidget {
         return 'Passenger';
       case ServiceType.parcel:
         return 'Parcel';
-      
+
       case ServiceType.lease:
         return 'Help Vehicle';
     }
@@ -5763,7 +5763,7 @@ class _PostsPageState extends State<PostsPage> {
         return 'Passenger';
       case ServiceType.parcel:
         return 'Parcel';
-      
+
       case ServiceType.lease:
         return 'Help Vehicle';
     }
@@ -5775,7 +5775,7 @@ class _PostsPageState extends State<PostsPage> {
         return '🚗 Find verified drivers • Real-time GPS tracking • Transparent pricing';
       case ServiceType.parcel:
         return '📦 Ship quickly • Track deliveries live • Multiple parcel sizes';
-      
+
       case ServiceType.lease:
         return '🤝 Help with vehicles • Flexible terms • Peer community';
     }
@@ -5813,8 +5813,11 @@ class _PostsPageState extends State<PostsPage> {
               vehicle: e.vehicle,
               providerName: e.vehicle.userName, // ? Show real name to everyone
               providerAvatar:
+                  slot_repo.SlotRepository.instance.getProfileAvatar(
+                    e.slot.profileId,
+                  ) ??
                   e.vehicle.operatorPhoto ??
-                  '', // Use operator/user photo, not vehicle image
+                  '', // Use cached avatar from profiles_public, fallback to operator photo
               providerRating: 5.0,
               isOffer: false,
               isUserPost: true,
@@ -5855,8 +5858,11 @@ class _PostsPageState extends State<PostsPage> {
               vehicle: e.vehicle,
               providerName: providerName,
               providerAvatar:
+                  slot_repo.SlotRepository.instance.getProfileAvatar(
+                    e.slot.profileId,
+                  ) ??
                   e.vehicle.operatorPhoto ??
-                  '', // Use operator/user photo, not vehicle image
+                  '', // Use cached avatar from profiles_public, fallback to operator photo
               providerRating: 5.0,
               isOffer: true,
               isUserPost: false,

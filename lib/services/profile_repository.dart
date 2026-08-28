@@ -1,4 +1,7 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:typed_data';
+import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
@@ -607,12 +610,82 @@ class ProfileRepository {
     }
   }
 
+  /// Upload avatar to Supabase Storage and update profile
   Future<void> setLocalAvatarBase64(String? base64) async {
-    await AppPreferences.instance.setAvatarBase64(base64);
-    final p = await _ensureProfileLoaded();
-    await saveProfile(
-      p.copyWith(avatarUrl: base64, setAvatarNull: base64 == null),
-    );
+    if (base64 == null) {
+      // Clear avatar
+      await AppPreferences.instance.setAvatarBase64(null);
+      final p = await _ensureProfileLoaded();
+      await saveProfile(p.copyWith(avatarUrl: null, setAvatarNull: true));
+      return;
+    }
+
+    try {
+      final userId = auth.AuthRepository.instance.currentUser?.id;
+      if (userId == null) {
+        throw Exception('User not authenticated');
+      }
+
+      // Decode base64 to bytes
+      Uint8List bytes = base64Decode(
+        base64.startsWith('data:image') ? base64.split(',')[1] : base64,
+      );
+
+      // Compress image using Flutter's built-in codec
+      // This reduces file size significantly (e.g., 400KB → 50KB)
+      try {
+        final codec = await instantiateImageCodec(
+          bytes,
+          targetWidth: 512, // Resize to max 512px width
+          targetHeight: 512, // Resize to max 512px height
+        );
+        final frame = await codec.getNextFrame();
+        final byteData = await frame.image.toByteData(
+          format: ImageByteFormat.png,
+        );
+        if (byteData != null) {
+          bytes = byteData.buffer.asUint8List();
+          debugPrint(
+            '🗜️ Compressed avatar: ${base64.length} → ${bytes.length} bytes',
+          );
+        }
+      } catch (e) {
+        debugPrint('⚠️ Image compression failed, using original: $e');
+      }
+
+      // Upload to Supabase Storage profile_media bucket
+      final timestamp = DateTime.now().millisecondsSinceEpoch;
+      final path = '$userId/avatar_$timestamp.jpg';
+
+      await Supabase.instance.client.storage
+          .from('profile_media')
+          .uploadBinary(
+            path,
+            bytes,
+            fileOptions: const FileOptions(
+              contentType: 'image/jpeg',
+              upsert: true,
+            ),
+          );
+
+      // Get public URL
+      final publicUrl = Supabase.instance.client.storage
+          .from('profile_media')
+          .getPublicUrl(path);
+
+      debugPrint('✅ Uploaded avatar to Storage: $publicUrl');
+
+      // Save public URL to profile (not base64)
+      await AppPreferences.instance.setAvatarBase64(null); // Clear local base64
+      final p = await _ensureProfileLoaded();
+      await saveProfile(p.copyWith(avatarUrl: publicUrl));
+    } catch (e) {
+      debugPrint('❌ Failed to upload avatar to Storage: $e');
+      // Fallback: save base64 locally
+      await AppPreferences.instance.setAvatarBase64(base64);
+      final p = await _ensureProfileLoaded();
+      await saveProfile(p.copyWith(avatarUrl: base64));
+    }
   }
 
   Future<void> update({

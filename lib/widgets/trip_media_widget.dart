@@ -6,6 +6,7 @@ import '../models/trip_media.dart';
 import '../models/booking.dart';
 import '../services/auth_repository.dart';
 import '../services/image_content_filter_service.dart';
+import '../utils/image_compression_helper.dart';
 
 /// Step-by-step trip media upload widget.
 ///
@@ -72,12 +73,24 @@ class _TripMediaWidgetState extends State<TripMediaWidget> {
   Future<String?> _uploadFile(XFile file, String path) async {
     try {
       final bytes = await file.readAsBytes();
+
+      // Compress image if it's an image file (800x800 for trip photos)
+      final isImage = file.mimeType?.startsWith('image/') ?? false;
+      final finalBytes = isImage
+          ? await ImageCompressionHelper.compressImageBytes(
+                  bytes,
+                  targetWidth: 800,
+                  targetHeight: 800,
+                ) ??
+                bytes
+          : bytes;
+
       final supabase = Supabase.instance.client;
       await supabase.storage
           .from('trip_media')
           .uploadBinary(
             path,
-            bytes,
+            finalBytes,
             fileOptions: FileOptions(
               contentType: file.mimeType ?? 'application/octet-stream',
               upsert: true,

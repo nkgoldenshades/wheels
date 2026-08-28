@@ -19,7 +19,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
   bool _obscurePassword = true;
   bool _isCheckingName = false;
   bool? _isNameAvailable;
-  bool _acceptedTerms = false;
 
   @override
   void dispose() {
@@ -67,12 +66,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
       return;
     }
 
-    if (!_acceptedTerms) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please accept Terms & Conditions')),
-      );
-      return;
-    }
+    // Terms are auto-accepted by creating account (no checkbox required)
+    // User is informed via the blue info box above the button
 
     if (password.length < 6) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -198,75 +193,52 @@ class _RegisterScreenState extends State<RegisterScreen> {
               ),
               const SizedBox(height: 24),
               // Terms & Conditions Checkbox
+              // Terms acceptance info (no checkbox - auto-accepted on signup)
               Container(
-                padding: const EdgeInsets.all(12),
+                padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  border: Border.all(
-                    color: _acceptedTerms ? Colors.green : Colors.grey.shade300,
-                    width: 1.5,
-                  ),
+                  color: Colors.blue.withValues(alpha: 0.05),
+                  border: Border.all(color: Colors.blue.shade200, width: 1.5),
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    CheckboxListTile(
-                      value: _acceptedTerms,
-                      onChanged: (value) {
-                        setState(() => _acceptedTerms = value ?? false);
-                      },
-                      title: const Text(
-                        'I agree to Terms & Conditions',
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                      controlAffinity: ListTileControlAffinity.leading,
-                      contentPadding: EdgeInsets.zero,
-                      dense: true,
+                child: RichText(
+                  textAlign: TextAlign.center,
+                  text: TextSpan(
+                    style: const TextStyle(
+                      fontSize: 13,
+                      color: Colors.black87,
+                      height: 1.4,
                     ),
-                    Padding(
-                      padding: const EdgeInsets.only(left: 32),
-                      child: RichText(
-                        text: TextSpan(
-                          style: const TextStyle(
-                            fontSize: 11,
-                            color: Colors.grey,
-                          ),
-                          children: [
-                            const TextSpan(text: 'Read our '),
-                            TextSpan(
-                              text: 'Terms & Conditions',
-                              style: const TextStyle(
-                                color: Colors.blue,
-                                decoration: TextDecoration.underline,
-                              ),
-                              recognizer: TapGestureRecognizer()
-                                ..onTap = () => Navigator.pushNamed(
-                                  context,
-                                  '/terms-of-service',
-                                ),
-                            ),
-                            const TextSpan(text: ' and '),
-                            TextSpan(
-                              text: 'Privacy Policy',
-                              style: const TextStyle(
-                                color: Colors.blue,
-                                decoration: TextDecoration.underline,
-                              ),
-                              recognizer: TapGestureRecognizer()
-                                ..onTap = () => Navigator.pushNamed(
-                                  context,
-                                  '/privacy-policy',
-                                ),
-                            ),
-                            const TextSpan(text: ' in the app.'),
-                          ],
-                        ),
+                    children: [
+                      const TextSpan(
+                        text: 'By creating an account, you accept our ',
                       ),
-                    ),
-                  ],
+                      TextSpan(
+                        text: 'Terms & Conditions',
+                        style: const TextStyle(
+                          color: Colors.blue,
+                          fontWeight: FontWeight.bold,
+                          decoration: TextDecoration.underline,
+                        ),
+                        recognizer: TapGestureRecognizer()
+                          ..onTap = () =>
+                              Navigator.pushNamed(context, '/terms-of-service'),
+                      ),
+                      const TextSpan(text: ' and '),
+                      TextSpan(
+                        text: 'Privacy Policy',
+                        style: const TextStyle(
+                          color: Colors.blue,
+                          fontWeight: FontWeight.bold,
+                          decoration: TextDecoration.underline,
+                        ),
+                        recognizer: TapGestureRecognizer()
+                          ..onTap = () =>
+                              Navigator.pushNamed(context, '/privacy-policy'),
+                      ),
+                      const TextSpan(text: '.'),
+                    ],
+                  ),
                 ),
               ),
               const SizedBox(height: 24),

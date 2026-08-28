@@ -12,6 +12,7 @@ import '../../models/service_type.dart';
 import '../../services/booking_repository.dart';
 import '../../services/slot_repository.dart';
 import '../../services/auth_repository.dart';
+import '../../utils/image_compression_helper.dart';
 
 class SeatLayoutBuilderScreen extends StatefulWidget {
   final SeatLayoutController controller;
@@ -89,6 +90,14 @@ class _SeatLayoutBuilderScreenState extends State<SeatLayoutBuilderScreen> {
 
         final bytes = await File(image.path).readAsBytes();
 
+        // Compress image (512x512 for layout images)
+        final compressedBytes = await ImageCompressionHelper.compressImageBytes(
+          bytes,
+          targetWidth: 512,
+          targetHeight: 512,
+        );
+        final finalBytes = compressedBytes ?? bytes;
+
         // Upload to Supabase Storage
         final supabase = Supabase.instance.client;
         final timestamp = DateTime.now().millisecondsSinceEpoch;
@@ -99,7 +108,7 @@ class _SeatLayoutBuilderScreenState extends State<SeatLayoutBuilderScreen> {
         try {
           await supabase.storage
               .from('layout-images')
-              .uploadBinary(filePath, bytes);
+              .uploadBinary(filePath, finalBytes);
 
           // Get public URL
           final imageUrl = supabase.storage

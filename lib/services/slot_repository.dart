@@ -28,6 +28,9 @@ class SlotRepository {
   // Cache for vehicle profile images (vehicleId -> profileImageUrl)
   final Map<String, String> _vehicleImageCache = {};
 
+  // Cache for user profile avatars (profileId -> avatarUrl)
+  final Map<String, String> _profileAvatarCache = {};
+
   ValueListenable<List<SlotEntry>> get slotsListenable => _slotEntries;
 
   List<SlotEntry> get allSlots => List.unmodifiable(_slotEntries.value);
@@ -247,10 +250,10 @@ class SlotRepository {
 
       final supabase = Supabase.instance.client;
 
-      // Fetch profile names from profiles_public table
+      // Fetch profile names AND avatars from profiles_public table
       final response = await supabase
           .from('profiles_public')
-          .select('id, full_name')
+          .select('id, full_name, avatar_url')
           .inFilter('id', profileIds);
 
       debugPrint('📝 Fetched ${response.length} profile names from Supabase');
@@ -261,11 +264,18 @@ class SlotRepository {
       for (final profile in response) {
         final id = profile['id'] as String;
         final name = profile['full_name'] as String?;
+        final avatarUrl = profile['avatar_url'] as String?;
 
         if (name != null && name.isNotEmpty) {
           // Directly update the registry (bypass availability check)
           await ProfileNameRegistry.instance.registerName(id, name);
           debugPrint('📝 Registered name for user $id: $name');
+        }
+
+        // Cache avatar URL (we'll create this cache)
+        if (avatarUrl != null && avatarUrl.isNotEmpty) {
+          _profileAvatarCache[id] = avatarUrl;
+          debugPrint('📸 Cached avatar for user $id');
         }
       }
 
@@ -763,6 +773,11 @@ class SlotRepository {
 
   List<Slot> getSlotsByVehicleId(String vehicleId) {
     return getSlotsForVehicle(vehicleId);
+  }
+
+  /// Get cached avatar URL for a profile ID
+  String getProfileAvatar(String profileId) {
+    return _profileAvatarCache[profileId] ?? '';
   }
 
   List<SlotEntry> getSlotEntriesByVehicleId(String vehicleId) {

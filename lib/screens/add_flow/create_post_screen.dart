@@ -110,9 +110,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   double? _minRatings;
   int? _minNoRatings;
 
-  // Working mode (only for working service)
-  String _workingMode = 'On-site';
-
   bool _isPosting = false;
 
   String? _seatLayoutOwnerId;
@@ -1162,12 +1159,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
             _buildPriceCapacitySection(),
             const SizedBox(height: 20),
 
-            // Working Mode (only for working service)
-            if (widget.serviceType == ServiceType.passenger) ...[
-              _buildWorkingModeSection(),
-              const SizedBox(height: 20),
-            ],
-
             // Parcel Dimensions (only for parcel service in layout-based mode)
             if (widget.serviceType == ServiceType.parcel &&
                 !_useSimpleSeating) ...[
@@ -1203,10 +1194,9 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
               const SizedBox(height: 20),
             ],
 
-            // Seating Setup (only for Passenger/Parcel, not for Lease/Working)
+            // Seating Setup (only for Passenger/Parcel, not for Lease)
             if (!_useSimpleSeating &&
-                widget.serviceType != ServiceType.lease &&
-                widget.serviceType != ServiceType.passenger) ...[
+                widget.serviceType != ServiceType.lease) ...[
               _buildSeatingSetupSection(),
               const SizedBox(height: 20),
             ],
@@ -1836,9 +1826,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
 
   Widget _buildPriceCapacitySection() {
     final hasLayoutSeats = _hasSeatLayoutSeats;
-    final isLeaseOrWorking =
-        widget.serviceType == ServiceType.lease ||
-        widget.serviceType == ServiceType.passenger;
+    final isLease = widget.serviceType == ServiceType.lease;
 
     if (hasLayoutSeats && _useSimpleSeating) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -1855,8 +1843,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
           style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
         ),
         const SizedBox(height: 8),
-        // Hide layout option for Lease/Working services
-        if (!hasLayoutSeats && !isLeaseOrWorking)
+        // Hide layout option for Lease service only
+        if (!hasLayoutSeats && !isLease)
           Row(
             children: [
               Expanded(
@@ -2044,86 +2032,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
               ],
             ),
         ],
-      ],
-    );
-  }
-
-  Widget _buildWorkingModeSection() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text(
-          '🔧 Working Mode',
-          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-        ),
-        const SizedBox(height: 8),
-        Row(
-          children: [
-            Expanded(
-              child: GestureDetector(
-                onTap: () => setState(() => _workingMode = 'On-site'),
-                child: Container(
-                  constraints: const BoxConstraints(minHeight: 68),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 10,
-                  ),
-                  decoration: BoxDecoration(
-                    color: _workingMode == 'On-site'
-                        ? Colors.purple.withValues(alpha: 0.1)
-                        : Colors.transparent,
-                    border: Border.all(
-                      color: _workingMode == 'On-site'
-                          ? Colors.purple
-                          : Colors.grey.shade300,
-                    ),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Text(
-                    'On-site',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      color: _workingMode == 'On-site'
-                          ? Colors.purple
-                          : Colors.black,
-                    ),
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: GestureDetector(
-                onTap: () => setState(() => _workingMode = 'Remote'),
-                child: Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: _workingMode == 'Remote'
-                        ? Colors.purple.withValues(alpha: 0.1)
-                        : Colors.transparent,
-                    border: Border.all(
-                      color: _workingMode == 'Remote'
-                          ? Colors.purple
-                          : Colors.grey.shade300,
-                    ),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Text(
-                    'Remote',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      color: _workingMode == 'Remote'
-                          ? Colors.purple
-                          : Colors.black,
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
       ],
     );
   }

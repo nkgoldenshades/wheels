@@ -103,6 +103,13 @@ class SlotCard extends StatelessWidget {
               _buildPriceCapacityRow(),
               const SizedBox(height: 12),
 
+              // SECURITY DEPOSIT (if set)
+              if (slot.securityDeposit != null &&
+                  slot.securityDeposit! > 0) ...[
+                _buildSecurityDepositRow(),
+                const SizedBox(height: 12),
+              ],
+
               // PARCEL DIMENSIONS (only for parcel slots with dimensions set)
               if (slot.serviceType == ServiceType.parcel &&
                   (slot.maxWeight != null ||
@@ -1062,6 +1069,48 @@ class SlotCard extends StatelessWidget {
     );
   }
 
+  Widget _buildSecurityDepositRow() {
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: Colors.orange.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.orange.shade300),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.security, size: 16, color: Colors.orange.shade700),
+          const SizedBox(width: 8),
+          Text(
+            'Security Deposit: ',
+            style: TextStyle(
+              fontSize: 13,
+              color: Colors.grey[800],
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          Text(
+            '${slot.currencySymbol}${slot.securityDeposit!.toStringAsFixed(0)}',
+            style: TextStyle(
+              fontSize: 14,
+              color: Colors.orange.shade700,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const Spacer(),
+          Text(
+            'Refundable',
+            style: TextStyle(
+              fontSize: 11,
+              color: Colors.grey[600],
+              fontStyle: FontStyle.italic,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildActionRow() {
     final hasTerms = slot.notes != null && slot.notes!.isNotEmpty;
     return Row(
@@ -1109,7 +1158,7 @@ class SlotCard extends StatelessWidget {
         return Colors.blue;
       case ServiceType.parcel:
         return Colors.orange;
-      
+
       case ServiceType.lease:
         return Colors.green;
     }
@@ -1121,7 +1170,7 @@ class SlotCard extends StatelessWidget {
         return Icons.people;
       case ServiceType.parcel:
         return Icons.local_shipping;
-      
+
       case ServiceType.lease:
         return Icons
             .handshake; // Changed from car_rental to handshake (helping)
@@ -1304,7 +1353,7 @@ class SlotCard extends StatelessWidget {
         return Icons.people;
       case ServiceType.parcel:
         return Icons.inventory_2;
-      
+
       case ServiceType.lease:
         return Icons.event_available;
     }
@@ -1316,7 +1365,7 @@ class SlotCard extends StatelessWidget {
         return 'Seats: $remaining';
       case ServiceType.parcel:
         return 'Parcels: $remaining';
-      
+
       case ServiceType.lease:
         return 'Available: $remaining';
     }

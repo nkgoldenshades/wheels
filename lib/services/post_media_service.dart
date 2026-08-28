@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'auth_repository.dart';
+import '../utils/image_compression_helper.dart';
 
 /// Service for handling post media uploads (images, videos)
 /// Stores media in the 'post_media' bucket in Supabase
@@ -31,7 +32,18 @@ class PostMediaService {
       debugPrint('📤 Uploading image: ${imageFile.name}');
       final bytes = await imageFile.readAsBytes();
       debugPrint(
-        '📦 Image size: ${(bytes.length / 1024).toStringAsFixed(2)} KB',
+        '📦 Original image size: ${(bytes.length / 1024).toStringAsFixed(2)} KB',
+      );
+
+      // Compress image (1024x1024 for post media)
+      final compressedBytes = await ImageCompressionHelper.compressImageBytes(
+        bytes,
+        targetWidth: 1024,
+        targetHeight: 1024,
+      );
+      final finalBytes = compressedBytes ?? bytes;
+      debugPrint(
+        '📦 Compressed image size: ${(finalBytes.length / 1024).toStringAsFixed(2)} KB',
       );
 
       final fileName =
@@ -43,7 +55,7 @@ class PostMediaService {
           .from('post_media')
           .uploadBinary(
             fileName,
-            bytes,
+            finalBytes,
             fileOptions: const FileOptions(cacheControl: '3600', upsert: false),
           );
 

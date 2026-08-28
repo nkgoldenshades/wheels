@@ -6,6 +6,7 @@ import '../models/service_type.dart';
 import '../services/review_repository.dart';
 import '../services/auth_repository.dart';
 import '../services/image_content_filter_service.dart';
+import '../utils/image_compression_helper.dart';
 
 class ReviewDialog extends StatefulWidget {
   final String bookingId;
@@ -57,12 +58,24 @@ class _ReviewDialogState extends State<ReviewDialog> {
   Future<String?> _uploadToStorage(XFile file, String path) async {
     try {
       final bytes = await file.readAsBytes();
+
+      // Compress image if it's an image file (800x800 for review photos)
+      final isImage = file.mimeType?.startsWith('image/') ?? false;
+      final finalBytes = isImage
+          ? await ImageCompressionHelper.compressImageBytes(
+                  bytes,
+                  targetWidth: 800,
+                  targetHeight: 800,
+                ) ??
+                bytes
+          : bytes;
+
       final supabase = Supabase.instance.client;
       await supabase.storage
           .from('review_media')
           .uploadBinary(
             path,
-            bytes,
+            finalBytes,
             fileOptions: FileOptions(
               contentType: file.mimeType ?? 'application/octet-stream',
               upsert: true,

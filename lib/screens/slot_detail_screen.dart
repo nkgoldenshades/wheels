@@ -286,6 +286,75 @@ class SlotDetailScreen extends StatelessWidget {
                               '${resolvedSlot.currencySymbol}${resolvedSlot.price.toStringAsFixed(0)}',
                         ),
                         const SizedBox(height: 12),
+                        // Security Deposit (if set)
+                        if (resolvedSlot.securityDeposit != null &&
+                            resolvedSlot.securityDeposit! > 0) ...[
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Colors.orange.withValues(alpha: 0.1),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: Colors.orange.shade300),
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  Icons.security,
+                                  size: 20,
+                                  color: Colors.orange.shade700,
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        'Security Deposit',
+                                        style: TextStyle(
+                                          fontSize: 13,
+                                          color: Colors.grey[700],
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        '${resolvedSlot.currencySymbol}${resolvedSlot.securityDeposit!.toStringAsFixed(0)}',
+                                        style: TextStyle(
+                                          fontSize: 18,
+                                          color: Colors.orange.shade700,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 4,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: Colors.green.withValues(alpha: 0.1),
+                                    borderRadius: BorderRadius.circular(6),
+                                    border: Border.all(
+                                      color: Colors.green.shade300,
+                                    ),
+                                  ),
+                                  child: Text(
+                                    'Refundable',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: Colors.green.shade700,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                        ],
                         _InfoRow(
                           icon: Icons.mode,
                           title: 'Booking Mode',
@@ -1466,7 +1535,7 @@ class SlotDetailScreen extends StatelessWidget {
         return Icons.people;
       case ServiceType.parcel:
         return Icons.local_shipping;
-      
+
       case ServiceType.lease:
         return Icons.handshake;
     }
@@ -1478,7 +1547,7 @@ class SlotDetailScreen extends StatelessWidget {
         return Colors.blue;
       case ServiceType.parcel:
         return Colors.orange;
-      
+
       case ServiceType.lease:
         return Colors.green;
     }
@@ -1569,7 +1638,7 @@ class SlotDetailScreen extends StatelessWidget {
         return Icons.people;
       case ServiceType.parcel:
         return Icons.inventory_2;
-      
+
       case ServiceType.lease:
         return Icons.event_available;
     }
@@ -1592,7 +1661,7 @@ class SlotDetailScreen extends StatelessWidget {
           return 'Parcels: ${availableParcels.first} ($remaining/$total)';
         }
         return 'Parcels: $remaining/$total';
-      
+
       case ServiceType.lease:
         return 'Available: $remaining/$total';
     }
