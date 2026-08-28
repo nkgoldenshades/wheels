@@ -5813,9 +5813,7 @@ class _PostsPageState extends State<PostsPage> {
               vehicle: e.vehicle,
               providerName: e.vehicle.userName, // ? Show real name to everyone
               providerAvatar:
-                  slotRepo.SlotRepository.instance.getProfileAvatar(
-                    e.slot.profileId,
-                  ) ??
+                  SlotRepository.instance.getProfileAvatar(e.slot.profileId) ??
                   e.vehicle.operatorPhoto ??
                   '', // Use cached avatar from profiles_public, fallback to operator photo
               providerRating: 5.0,
@@ -5858,9 +5856,7 @@ class _PostsPageState extends State<PostsPage> {
               vehicle: e.vehicle,
               providerName: providerName,
               providerAvatar:
-                  slotRepo.SlotRepository.instance.getProfileAvatar(
-                    e.slot.profileId,
-                  ) ??
+                  SlotRepository.instance.getProfileAvatar(e.slot.profileId) ??
                   e.vehicle.operatorPhoto ??
                   '', // Use cached avatar from profiles_public, fallback to operator photo
               providerRating: 5.0,
