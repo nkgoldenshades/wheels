@@ -132,15 +132,13 @@ class SlotCard extends StatelessWidget {
   }
 
   bool _isInsuranceValidNow() {
-    if (!vehicle.insuranceVerified) return false;
-    final exp = vehicle.insuranceExpiry;
-    if (exp == null) return true;
-    return exp.isAfter(DateTime.now());
+    // All document verification removed
+    return false;
   }
 
   bool _isVerifiedOptionAProviderVehicle() {
-    // Changed: Only vehicle docs (RC + insurance), no personal ID
-    return vehicle.rcVerified && _isInsuranceValidNow();
+    // Changed: No document verification - trust based on ratings/trips
+    return false;
   }
 
   bool _isVerifiedOptionBUser() {

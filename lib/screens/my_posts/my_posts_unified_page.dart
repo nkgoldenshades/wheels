@@ -24,15 +24,13 @@ class _MyPostsUnifiedPageState extends State<MyPostsUnifiedPage>
   late TabController _tabController;
 
   bool _isInsuranceValidNow(Vehicle vehicle) {
-    if (!vehicle.insuranceVerified) return false;
-    final exp = vehicle.insuranceExpiry;
-    if (exp == null) return true;
-    return exp.isAfter(DateTime.now());
+    // All document verification removed
+    return false;
   }
 
   bool _isFullyVerified(Vehicle vehicle) {
-    // Changed: Only vehicle docs (RC + insurance), no personal ID
-    return vehicle.rcVerified && _isInsuranceValidNow(vehicle);
+    // Changed: No document verification - trust based on ratings/trips
+    return false;
   }
 
   @override

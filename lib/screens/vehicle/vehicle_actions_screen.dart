@@ -1848,12 +1848,9 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
   }
 
   Widget _buildDocumentVerificationCard(Vehicle vehicle) {
-    // Get verification status from vehicle model
-    final Map<String, bool> verificationStatus = {
-      'RC Book': vehicle.rcVerified,
-      'Insurance': vehicle.insuranceVerified,
-      // Personal ID docs removed for legal safety
-    };
+    // All document verification removed for legal safety
+    final Map<String, bool> verificationStatus = {};
+    // No documents = no verification UI needed
 
     return ValueListenableBuilder<SubscriptionPlan>(
       valueListenable: AppPreferences.instance.subscriptionPlan,
@@ -1941,30 +1938,22 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                   ],
                 ),
                 const SizedBox(height: 8),
-                _buildDocumentItem(
-                  'RC Book',
-                  'Registration Certificate - Proves ownership',
-                  verificationStatus['RC Book']!,
-                  DocumentType.rc,
-                  imageBase64: vehicle.rcFrontUrl,
-                  isMandatory: false,
-                  canVerify: canVerify,
+                // ALL document verification removed for legal safety
+                // No RC, Insurance, Pollution, or Fitness uploads needed
+                const SizedBox(height: 8),
+                const Text(
+                  '📋 Document verification removed',
+                  style: TextStyle(fontSize: 14, color: Colors.grey),
                 ),
-                const Divider(height: 1),
-                _buildDocumentItemWithExpiry(
-                  'Insurance',
-                  'Vehicle Insurance - Shows professionalism',
-                  verificationStatus['Insurance']!,
-                  DocumentType.insurance,
-                  imageBase64: vehicle.insuranceDocumentUrl,
-                  expiryDate: vehicle.insuranceExpiry,
-                  isMandatory: false,
-                  canVerify: canVerify,
+                const SizedBox(height: 4),
+                const Text(
+                  'Trust built through ratings and trip history instead',
+                  style: TextStyle(fontSize: 12, color: Colors.grey),
                 ),
 
                 const SizedBox(height: 16),
 
-                // Additional Documents
+                // Additional Documents section removed
                 Row(
                   children: [
                     const Icon(
