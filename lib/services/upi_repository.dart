@@ -73,18 +73,51 @@ class UPIRepository {
   /// Accepts: letters, numbers, dots, underscores before @
   /// Bank/provider name: letters and numbers only (no hyphens)
   bool _isValidUPI(String upi) {
-    // Strict regex: no hyphens allowed
-    // - Before @: letters, numbers, dots, underscores only
-    // - After @: letters, numbers only (standard bank codes: upi, apl, ybl, okhdfcbank, etc.)
-    final regex = RegExp(r'^[a-zA-Z0-9._]+@[a-zA-Z0-9]+$');
-    final isMatch = regex.hasMatch(upi);
-    final isLength = upi.length >= 5 && upi.length <= 60;
+    // Check @ symbol exists
+    if (!upi.contains('@')) {
+      debugPrint('[UPIRepository] ❌ Missing @ symbol: $upi');
+      return false;
+    }
+
+    final parts = upi.split('@');
+    if (parts.length != 2) {
+      debugPrint('[UPIRepository] ❌ Invalid format (multiple @): $upi');
+      return false;
+    }
+
+    final username = parts[0];
+    final provider = parts[1];
+
+    // Validate username part (before @)
+    final usernameRegex = RegExp(r'^[a-zA-Z0-9._]{1,}$');
+    if (!usernameRegex.hasMatch(username)) {
+      debugPrint(
+        '[UPIRepository] ❌ Invalid username part: $username (only letters, numbers, dots, underscores allowed)',
+      );
+      return false;
+    }
+
+    // Validate provider part (after @)
+    final providerRegex = RegExp(r'^[a-zA-Z0-9]{2,}$');
+    if (!providerRegex.hasMatch(provider)) {
+      debugPrint(
+        '[UPIRepository] ❌ Invalid provider part: $provider (only letters and numbers, min 2 chars)',
+      );
+      return false;
+    }
+
+    // Check overall length
+    if (upi.length < 5 || upi.length > 60) {
+      debugPrint(
+        '[UPIRepository] ❌ Invalid length: ${upi.length} (must be 5-60 chars)',
+      );
+      return false;
+    }
 
     debugPrint(
-      '[UPIRepository] Strict validation: $upi | Regex: $isMatch | Length: $isLength',
+      '[UPIRepository] ✅ Valid UPI: $upi (username: $username, provider: $provider)',
     );
-
-    return isMatch && isLength;
+    return true;
   }
 
   /// Check if UPI ID is saved
