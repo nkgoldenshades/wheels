@@ -90,11 +90,7 @@ class Vehicle {
         fitnessExpiry == null ||
         fitnessExpiry!.isAfter(DateTime.now());
 
-    return rcVerified &&
-        insuranceValid &&
-        dlVerified &&
-        pollutionValid &&
-        fitnessValid;
+    return rcVerified && insuranceValid && pollutionValid && fitnessValid;
   }
 
   /// True when mandatory documents are present (but may not be verified)
@@ -151,17 +147,7 @@ class Vehicle {
     // Fitness Certificate
     this.fitnessCertificateUrl,
     this.fitnessExpiry,
-    // Driver's License
-    this.dlVerified = false,
-    this.dlVerifiedAt,
-    this.dlImageBase64,
-    // Identity Documents
-    this.aadhaarVerified = false,
-    this.aadhaarVerifiedAt,
-    this.aadhaarImageBase64,
-    this.panVerified = false,
-    this.panVerifiedAt,
-    this.panImageBase64,
+    // Personal ID documents removed for legal safety
     // Operator
     this.operatorName,
     this.operatorPhone,
@@ -223,17 +209,7 @@ class Vehicle {
     // Fitness Certificate
     String? fitnessCertificateUrl,
     DateTime? fitnessExpiry,
-    // Driver's License
-    bool? dlVerified,
-    DateTime? dlVerifiedAt,
-    String? dlImageBase64,
-    // Identity Documents
-    bool? aadhaarVerified,
-    DateTime? aadhaarVerifiedAt,
-    String? aadhaarImageBase64,
-    bool? panVerified,
-    DateTime? panVerifiedAt,
-    String? panImageBase64,
+    // Personal ID documents removed for legal safety
     // Operator
     String? operatorName,
     String? operatorPhone,
@@ -296,17 +272,7 @@ class Vehicle {
       fitnessCertificateUrl:
           fitnessCertificateUrl ?? this.fitnessCertificateUrl,
       fitnessExpiry: fitnessExpiry ?? this.fitnessExpiry,
-      // Driver's License
-      dlVerified: dlVerified ?? this.dlVerified,
-      dlVerifiedAt: dlVerifiedAt ?? this.dlVerifiedAt,
-      dlImageBase64: dlImageBase64 ?? this.dlImageBase64,
-      // Identity Documents
-      aadhaarVerified: aadhaarVerified ?? this.aadhaarVerified,
-      aadhaarVerifiedAt: aadhaarVerifiedAt ?? this.aadhaarVerifiedAt,
-      aadhaarImageBase64: aadhaarImageBase64 ?? this.aadhaarImageBase64,
-      panVerified: panVerified ?? this.panVerified,
-      panVerifiedAt: panVerifiedAt ?? this.panVerifiedAt,
-      panImageBase64: panImageBase64 ?? this.panImageBase64,
+      // Personal ID documents removed for legal safety
       // Operator
       operatorName: operatorName ?? this.operatorName,
       operatorPhone: operatorPhone ?? this.operatorPhone,
@@ -380,15 +346,7 @@ class Vehicle {
       'average_rating': averageRating,
       'total_ratings': totalRatings,
       'total_bookings': totalBookings,
-      'dl_verified': dlVerified,
-      'dl_verified_at': dlVerifiedAt?.toIso8601String(),
-      'dl_image': dlImageBase64,
-      'aadhaar_verified': aadhaarVerified,
-      'aadhaar_verified_at': aadhaarVerifiedAt?.toIso8601String(),
-      'aadhaar_image': aadhaarImageBase64,
-      'pan_verified': panVerified,
-      'pan_verified_at': panVerifiedAt?.toIso8601String(),
-      'pan_image': panImageBase64,
+      // Personal ID documents removed for legal safety
       'operator_name': operatorName,
       'operator_phone': operatorPhone,
       'operator_gender': operatorGender,
@@ -542,31 +500,7 @@ class Vehicle {
           ? DateTime.parse(json['fitness_expiry'])
           : null,
 
-      // Driver's License
-      dlVerified: json['dl_verified'] ?? json['dlVerified'] ?? false,
-      dlVerifiedAt:
-          json['dl_verified_at'] != null || json['dlVerifiedAt'] != null
-          ? DateTime.parse(json['dl_verified_at'] ?? json['dlVerifiedAt'])
-          : null,
-      dlImageBase64: json['dl_image'] ?? json['dlImage'],
-
-      // Identity Documents
-      aadhaarVerified:
-          json['aadhaar_verified'] ?? json['aadhaarVerified'] ?? false,
-      aadhaarVerifiedAt:
-          json['aadhaar_verified_at'] != null ||
-              json['aadhaarVerifiedAt'] != null
-          ? DateTime.parse(
-              json['aadhaar_verified_at'] ?? json['aadhaarVerifiedAt'],
-            )
-          : null,
-      aadhaarImageBase64: json['aadhaar_image'] ?? json['aadhaarImage'],
-      panVerified: json['pan_verified'] ?? json['panVerified'] ?? false,
-      panVerifiedAt:
-          json['pan_verified_at'] != null || json['panVerifiedAt'] != null
-          ? DateTime.parse(json['pan_verified_at'] ?? json['panVerifiedAt'])
-          : null,
-      panImageBase64: json['pan_image'] ?? json['panImage'],
+      // Personal ID documents removed for legal safety
 
       // Operator
       operatorName: json['operator_name'] ?? json['operatorName'],
