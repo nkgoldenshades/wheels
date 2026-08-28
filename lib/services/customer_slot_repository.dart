@@ -89,9 +89,7 @@ class CustomerSlotRepository {
           activePostsCount: 0,
           rcVerified: false,
           insuranceVerified: false,
-          dlVerified: false,
-          aadhaarVerified: false,
-          panVerified: false,
+          // Personal ID fields removed for legal safety
           currency: 'INR',
           countryCode: 'IN',
         );

@@ -2651,27 +2651,11 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
             insuranceImageBase64: base64Doc,
           );
           break;
+        // Personal ID document cases removed for legal safety
         case DocumentType.dl:
-          updatedVehicle = vehicle.copyWith(
-            dlVerified: true,
-            dlVerifiedAt: now,
-            dlImageBase64: base64Doc,
-          );
-          break;
         case DocumentType.aadhaar:
-          updatedVehicle = vehicle.copyWith(
-            aadhaarVerified: true,
-            aadhaarVerifiedAt: now,
-            aadhaarImageBase64: base64Doc,
-          );
-          break;
         case DocumentType.pan:
-          updatedVehicle = vehicle.copyWith(
-            panVerified: true,
-            panVerifiedAt: now,
-            panImageBase64: base64Doc,
-          );
-          break;
+          throw UnsupportedError('Personal ID documents no longer supported');
       }
       // Auto-grant verified badge if all documents are now verified
       final withBadge = updatedVehicle.isFullyVerified
