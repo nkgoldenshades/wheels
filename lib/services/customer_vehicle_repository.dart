@@ -149,12 +149,6 @@ class CustomerVehicleRepository {
 
       // Skip vehicle_sensitive_info - no documents to store anymore
       // All document fields removed for legal safety
-          'operator_profile_photo_url': vehicle.operatorPhoto,
-      };
-      await _supabase
-          .from('vehicle_sensitive_info')
-          .upsert(sensitivePayload, onConflict: 'vehicle_id');
-      debugPrint('✅ Vehicle sensitive info saved');
 
       // Reload from Supabase to ensure consistency
       debugPrint('🔄 Reloading all customer vehicles from database...');
