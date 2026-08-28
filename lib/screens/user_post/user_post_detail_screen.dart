@@ -466,8 +466,9 @@ class _UserPostDetailScreenState extends State<UserPostDetailScreen> {
           continue;
         }
 
-        // Check verified vehicle requirement (legacy)
-        if (widget.post.requiresVerifiedVehicle && !vehicle.isFullyVerified) {
+        // Check verified vehicle requirement (document verification removed)
+        if (widget.post.requiresVerifiedVehicle && false) {
+          // Always false - no document verification
           failureReason = 'Post requires verified vehicle';
           continue;
         }
@@ -738,7 +739,6 @@ class _UserPostDetailScreenState extends State<UserPostDetailScreen> {
         return 'Parcel';
       case ServiceType.lease:
         return 'Help Vehicle';
-      
     }
   }
 
