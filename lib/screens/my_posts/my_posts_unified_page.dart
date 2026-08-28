@@ -31,9 +31,8 @@ class _MyPostsUnifiedPageState extends State<MyPostsUnifiedPage>
   }
 
   bool _isFullyVerified(Vehicle vehicle) {
-    return vehicle.rcVerified &&
-        _isInsuranceValidNow(vehicle) &&
-        vehicle.dlVerified;
+    // Changed: Only vehicle docs (RC + insurance), no personal ID
+    return vehicle.rcVerified && _isInsuranceValidNow(vehicle);
   }
 
   @override
@@ -374,7 +373,6 @@ class _MyPostsUnifiedPageState extends State<MyPostsUnifiedPage>
         return 'Parcel';
       case ServiceType.lease:
         return 'Help Vehicle';
-      
     }
   }
 
@@ -386,7 +384,6 @@ class _MyPostsUnifiedPageState extends State<MyPostsUnifiedPage>
         return Colors.orange.withValues(alpha: 0.1);
       case ServiceType.lease:
         return Colors.green.withValues(alpha: 0.1);
-      
     }
   }
 }

@@ -1852,9 +1852,7 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
     final Map<String, bool> verificationStatus = {
       'RC Book': vehicle.rcVerified,
       'Insurance': vehicle.insuranceVerified,
-      'Driving License': vehicle.dlVerified,
-      'National ID': vehicle.aadhaarVerified,
-      'Tax ID': vehicle.panVerified,
+      // Personal ID docs removed for legal safety
     };
 
     return ValueListenableBuilder<SubscriptionPlan>(

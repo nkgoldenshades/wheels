@@ -232,9 +232,7 @@ class CustomerVehicleRepository {
         if (vehicle.color != null) 'color': vehicle.color,
         'rc_verified': vehicle.rcVerified,
         'insurance_verified': vehicle.insuranceVerified,
-        'dl_verified': vehicle.dlVerified,
-        'aadhaar_verified': vehicle.aadhaarVerified,
-        'pan_verified': vehicle.panVerified,
+        // Personal ID fields removed for legal safety
         if (vehicle.rcVerifiedAt != null)
           'verified_at': vehicle.rcVerifiedAt!.toIso8601String(),
         if (vehicle.insuranceExpiry != null)
@@ -252,10 +250,7 @@ class CustomerVehicleRepository {
               .toIso8601String()
               .split('T')
               .first,
-        if (vehicle.aadhaarVerifiedAt != null)
-          'aadhaar_verified_at': vehicle.aadhaarVerifiedAt!.toIso8601String(),
-        if (vehicle.panVerifiedAt != null)
-          'pan_verified_at': vehicle.panVerifiedAt!.toIso8601String(),
+        // Personal ID timestamp fields removed for legal safety
       };
 
       await _supabase.from('vehicles').update(payload).eq('id', vehicle.id);

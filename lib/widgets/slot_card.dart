@@ -139,11 +139,14 @@ class SlotCard extends StatelessWidget {
   }
 
   bool _isVerifiedOptionAProviderVehicle() {
-    return vehicle.rcVerified && _isInsuranceValidNow() && vehicle.dlVerified;
+    // Changed: Only vehicle docs (RC + insurance), no personal ID
+    return vehicle.rcVerified && _isInsuranceValidNow();
   }
 
   bool _isVerifiedOptionBUser() {
-    return vehicle.aadhaarVerified && vehicle.panVerified && vehicle.dlVerified;
+    // Changed: Personal ID docs removed for legal safety
+    // Verification now based on ratings and trip history instead
+    return false; // Always false - personal docs no longer used
   }
 
   bool _shouldShowGoldenTick() {

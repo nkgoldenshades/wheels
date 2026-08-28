@@ -38,36 +38,32 @@ class VerifiedBadge extends StatelessWidget {
       return false;
     }
 
-    // Profile has documents if any document is uploaded
-    return profile.aadhaarVerified || profile.panVerified || profile.dlVerified;
+    // Personal ID documents removed for legal safety
+    // Trust now based on ratings and trip history, not documents
+    return false; // Always false since we don't store personal ID docs anymore
   }
 }
 
 /// Extension to check if profile has documents
+/// NOTE: Personal ID verification removed for legal safety
 extension ProfileDocuments on ProfileInfo {
-  /// Returns true if profile has at least one document uploaded
+  /// Returns true if profile is trusted (based on behavior, not documents)
   bool get hasDocuments {
-    return aadhaarVerified || panVerified || dlVerified;
+    // Changed: No longer checking aadhaar/pan/dl
+    // Trust is now based on ratings and trip history
+    return false; // Deprecated - use rating/trip-based trust instead
   }
 
-  /// Returns document level: 0 (none), 1 (partial), 2 (full)
+  /// Returns trust level: 0 (new), 1 (regular), 2 (trusted)
+  /// Based on ratings and trips, NOT documents
   int get documentLevel {
-    int count = 0;
-    if (aadhaarVerified) count++;
-    if (panVerified) count++;
-    if (dlVerified) count++;
-
-    if (count == 0) return 0; // No documents
-    if (count < 3) return 1; // Partially uploaded
-    return 2; // Fully uploaded (all 3 documents)
+    // Changed: Now based on behavior, not documents
+    return 0; // Deprecated - use rating-based trust levels instead
   }
 
-  /// Returns a list of uploaded documents
+  /// Returns empty list (documents no longer stored)
   List<String> get uploadedDocuments {
-    final docs = <String>[];
-    if (aadhaarVerified) docs.add('Aadhaar');
-    if (panVerified) docs.add('PAN');
-    if (dlVerified) docs.add('Driving License');
-    return docs;
+    // Personal ID documents removed for legal safety
+    return [];
   }
 }
