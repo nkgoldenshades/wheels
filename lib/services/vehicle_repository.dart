@@ -234,16 +234,6 @@ class VehicleRepository {
 
       // Sensitive info table no longer used (no documents stored)
       // ALL document fields removed for legal safety
-        // ALL document fields removed
-        if (vehicle.operatorName != null) 'operator_name': vehicle.operatorName,
-        if (vehicle.operatorPhone != null)
-          'operator_phone': vehicle.operatorPhone,
-        if (vehicle.operatorGender != null)
-          'operator_gender': vehicle.operatorGender,
-        if (vehicle.operatorPhoto != null)
-          'operator_profile_photo_url': vehicle.operatorPhoto,
-      };
-      // Skip vehicle_sensitive_info insert - no documents to store
 
       // Update local state
       _vehicles.value = [vehicle, ..._vehicles.value];
