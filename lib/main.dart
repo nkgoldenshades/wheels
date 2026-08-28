@@ -5813,7 +5813,7 @@ class _PostsPageState extends State<PostsPage> {
               vehicle: e.vehicle,
               providerName: e.vehicle.userName, // ? Show real name to everyone
               providerAvatar:
-                  slot_repo.SlotRepository.instance.getProfileAvatar(
+                  slotRepo.SlotRepository.instance.getProfileAvatar(
                     e.slot.profileId,
                   ) ??
                   e.vehicle.operatorPhoto ??
@@ -5858,7 +5858,7 @@ class _PostsPageState extends State<PostsPage> {
               vehicle: e.vehicle,
               providerName: providerName,
               providerAvatar:
-                  slot_repo.SlotRepository.instance.getProfileAvatar(
+                  slotRepo.SlotRepository.instance.getProfileAvatar(
                     e.slot.profileId,
                   ) ??
                   e.vehicle.operatorPhoto ??
