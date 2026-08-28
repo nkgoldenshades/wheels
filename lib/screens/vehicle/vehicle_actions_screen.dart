@@ -580,8 +580,8 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
     String? operatorGender =
         vehicle.operatorGender; // 'male', 'female', or null
     DateTime? operatorDob = vehicle.operatorDob;
-    String? operatorDocument =
-        vehicle.operatorDocumentUrl; // Single document (image or PDF)
+    // Operator document field removed for legal safety
+    String? operatorDocument = null;
 
     final picker = ImagePicker();
 
@@ -1396,7 +1396,7 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                                   ? null
                                   : operatorLicenseCtrl.text.trim(),
                               operatorPhoto: finalOperatorPhoto,
-                              operatorDocumentUrl: operatorDocument,
+                              // operatorDocumentUrl removed for legal safety
                             );
                             if (widget.isUserMode) {
                               await CustomerVehicleRepository.instance
@@ -2646,10 +2646,8 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
         case DocumentType.pan:
           throw UnsupportedError('Personal ID documents no longer supported');
       }
-      // Auto-grant verified badge if all documents are now verified
-      final withBadge = updatedVehicle.isFullyVerified
-          ? updatedVehicle.copyWith(isVerifiedToggle: true)
-          : updatedVehicle;
+      // Document verification removed - no auto-badge
+      final withBadge = updatedVehicle; // No changes needed
       if (widget.isUserMode) {
         CustomerVehicleRepository.instance.updateVehicle(withBadge);
       } else {
@@ -2659,7 +2657,7 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            updatedVehicle.isFullyVerified
+            false // Documents no longer verified
                 ? '$docType verified! All documents complete — Verified badge granted ✓'
                 : faceMatched
                 ? '$docType verified! ${matchScore.toStringAsFixed(1)}% match ✓'
