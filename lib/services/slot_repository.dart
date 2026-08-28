@@ -121,9 +121,7 @@ class SlotRepository {
           totalRatings: 0,
           totalBookings: 0,
           activePostsCount: 0,
-          rcVerified: false,
-          insuranceVerified: false,
-          // Personal ID fields removed for legal safety
+          // All document verification fields removed
           currency: 'INR',
           countryCode: 'IN',
         );
