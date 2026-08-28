@@ -74,7 +74,7 @@ class _SplashscreenState extends State<Splashscreen> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              // Service Icons Grid with Shadow
+              // Car Icon with Shadow (VaultWheels style)
               Container(
                 width: 140,
                 height: 140,
@@ -89,18 +89,12 @@ class _SplashscreenState extends State<Splashscreen> {
                     ),
                   ],
                 ),
-                child: GridView.count(
-                  crossAxisCount: 2,
-                  crossAxisSpacing: 12,
-                  mainAxisSpacing: 12,
-                  padding: const EdgeInsets.all(16),
-                  physics: const NeverScrollableScrollPhysics(),
-                  children: [
-                    _buildServiceIcon('🏠', Colors.orange),
-                    _buildServiceIcon('💼', Colors.blue),
-                    _buildServiceIcon('🎪', Colors.purple),
-                    _buildServiceIcon('🛒', Colors.green),
-                  ],
+                child: const Center(
+                  child: Icon(
+                    Icons.directions_car,
+                    size: 80,
+                    color: Colors.blue,
+                  ),
                 ),
               ),
               const SizedBox(height: 32),
@@ -145,17 +139,6 @@ class _SplashscreenState extends State<Splashscreen> {
           ),
         ),
       ),
-    );
-  }
-
-  Widget _buildServiceIcon(String emoji, Color color) {
-    return Container(
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.15),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: color.withValues(alpha: 0.3), width: 1.5),
-      ),
-      child: Center(child: Text(emoji, style: const TextStyle(fontSize: 32))),
     );
   }
 }
