@@ -634,14 +634,14 @@ class ProfileRepository {
       // Compress image using Flutter's built-in codec
       // This reduces file size significantly (e.g., 400KB → 50KB)
       try {
-        final codec = await instantiateImageCodec(
+        final codec = await ui.instantiateImageCodec(
           bytes,
           targetWidth: 512, // Resize to max 512px width
           targetHeight: 512, // Resize to max 512px height
         );
         final frame = await codec.getNextFrame();
         final byteData = await frame.image.toByteData(
-          format: ImageByteFormat.png,
+          format: ui.ImageByteFormat.png,
         );
         if (byteData != null) {
           bytes = byteData.buffer.asUint8List();
