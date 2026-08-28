@@ -1,4 +1,4 @@
-enum ServiceType { passenger, parcel, working, lease }
+enum ServiceType { passenger, parcel, lease }
 
 extension ServiceTypeExtension on ServiceType {
   String get displayName {
@@ -7,8 +7,6 @@ extension ServiceTypeExtension on ServiceType {
         return 'Passenger';
       case ServiceType.parcel:
         return 'Parcel';
-      case ServiceType.working:
-        return 'Working';
       case ServiceType.lease:
         return 'Help Vehicle'; // Community helping - not rental
     }

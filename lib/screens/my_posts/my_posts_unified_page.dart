@@ -374,8 +374,7 @@ class _MyPostsUnifiedPageState extends State<MyPostsUnifiedPage>
         return 'Parcel';
       case ServiceType.lease:
         return 'Help Vehicle';
-      case ServiceType.working:
-        return 'Working';
+      
     }
   }
 
@@ -387,8 +386,7 @@ class _MyPostsUnifiedPageState extends State<MyPostsUnifiedPage>
         return Colors.orange.withValues(alpha: 0.1);
       case ServiceType.lease:
         return Colors.green.withValues(alpha: 0.1);
-      case ServiceType.working:
-        return Colors.purple.withValues(alpha: 0.1);
+      
     }
   }
 }

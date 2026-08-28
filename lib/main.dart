@@ -3495,8 +3495,7 @@ class MyPostsPage extends StatelessWidget {
         return 'Passenger';
       case ServiceType.parcel:
         return 'Parcel';
-      case ServiceType.working:
-        return 'Working';
+      
       case ServiceType.lease:
         return 'Help Vehicle';
     }
@@ -3575,7 +3574,7 @@ class _EarningsPageState extends State<EarningsPage> {
               } else if (slot.serviceType == ServiceType.parcel) {
                 parcelEarnings += booking.price;
               } else if (slot.serviceType == ServiceType.lease ||
-                  slot.serviceType == ServiceType.working) {
+                  slot.serviceType == ServiceType.passenger) {
                 leaseEarnings += booking.price;
               }
             } catch (e) {
@@ -5344,36 +5343,32 @@ class _PostsPageState extends State<PostsPage> {
                   scrollDirection: Axis.horizontal,
                   padding: const EdgeInsets.symmetric(horizontal: 16),
                   children: [
-                    ...ServiceType.values
-                        .where(
-                          (service) => service != ServiceType.working,
-                        ) // Exclude Working
-                        .map(
-                          (service) => Padding(
-                            padding: const EdgeInsets.only(right: 8),
-                            child: FilterChip(
-                              label: Text(
-                                _serviceLabel(service),
-                                style: const TextStyle(fontSize: 14),
-                              ),
-                              selected: _selectedServiceType == service,
-                              onSelected: (_) {
-                                setState(() {
-                                  // Toggle: click to select, click again to unselect
-                                  _selectedServiceType =
-                                      _selectedServiceType == service
-                                      ? null
-                                      : service;
-                                  _withOperator = null; // Reset operator filter
-                                  _requiresSecurityDeposit =
-                                      null; // Reset deposit presence filter
-                                  _minSecurityDeposit = null;
-                                  _maxSecurityDeposit = null;
-                                });
-                              },
-                            ),
+                    ...ServiceType.values.map(
+                      (service) => Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: FilterChip(
+                          label: Text(
+                            _serviceLabel(service),
+                            style: const TextStyle(fontSize: 14),
                           ),
+                          selected: _selectedServiceType == service,
+                          onSelected: (_) {
+                            setState(() {
+                              // Toggle: click to select, click again to unselect
+                              _selectedServiceType =
+                                  _selectedServiceType == service
+                                  ? null
+                                  : service;
+                              _withOperator = null; // Reset operator filter
+                              _requiresSecurityDeposit =
+                                  null; // Reset deposit presence filter
+                              _minSecurityDeposit = null;
+                              _maxSecurityDeposit = null;
+                            });
+                          },
                         ),
+                      ),
+                    ),
                     // Operator filter chips (show ONLY when Lease is selected)
                     if (_selectedServiceType == ServiceType.lease) ...[
                       const SizedBox(width: 8),
@@ -5768,8 +5763,7 @@ class _PostsPageState extends State<PostsPage> {
         return 'Passenger';
       case ServiceType.parcel:
         return 'Parcel';
-      case ServiceType.working:
-        return 'Working';
+      
       case ServiceType.lease:
         return 'Help Vehicle';
     }
@@ -5781,8 +5775,7 @@ class _PostsPageState extends State<PostsPage> {
         return '🚗 Find verified drivers • Real-time GPS tracking • Transparent pricing';
       case ServiceType.parcel:
         return '📦 Ship quickly • Track deliveries live • Multiple parcel sizes';
-      case ServiceType.working:
-        return '💼 Find verified workers • Flexible hours • Hire instantly';
+      
       case ServiceType.lease:
         return '🤝 Help with vehicles • Flexible terms • Peer community';
     }
@@ -11313,7 +11306,7 @@ class _SpendingPageState extends State<SpendingPage> {
               } else if (slot.serviceType == ServiceType.parcel) {
                 parcelSpending += booking.price;
               } else if (slot.serviceType == ServiceType.lease ||
-                  slot.serviceType == ServiceType.working) {
+                  slot.serviceType == ServiceType.passenger) {
                 leaseSpending += booking.price;
               }
             } catch (e) {

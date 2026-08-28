@@ -1109,8 +1109,7 @@ class SlotCard extends StatelessWidget {
         return Colors.blue;
       case ServiceType.parcel:
         return Colors.orange;
-      case ServiceType.working:
-        return Colors.purple;
+      
       case ServiceType.lease:
         return Colors.green;
     }
@@ -1122,8 +1121,7 @@ class SlotCard extends StatelessWidget {
         return Icons.people;
       case ServiceType.parcel:
         return Icons.local_shipping;
-      case ServiceType.working:
-        return Icons.build;
+      
       case ServiceType.lease:
         return Icons
             .handshake; // Changed from car_rental to handshake (helping)
@@ -1286,7 +1284,7 @@ class SlotCard extends StatelessWidget {
         case ServiceType.lease:
           label = compartmentCount == 1 ? 'item' : 'items';
           break;
-        case ServiceType.working:
+        case ServiceType.passenger:
           label = compartmentCount == 1 ? 'slot' : 'slots';
           break;
       }
@@ -1306,8 +1304,7 @@ class SlotCard extends StatelessWidget {
         return Icons.people;
       case ServiceType.parcel:
         return Icons.inventory_2;
-      case ServiceType.working:
-        return Icons.work;
+      
       case ServiceType.lease:
         return Icons.event_available;
     }
@@ -1319,8 +1316,7 @@ class SlotCard extends StatelessWidget {
         return 'Seats: $remaining';
       case ServiceType.parcel:
         return 'Parcels: $remaining';
-      case ServiceType.working:
-        return 'Jobs: $remaining';
+      
       case ServiceType.lease:
         return 'Available: $remaining';
     }

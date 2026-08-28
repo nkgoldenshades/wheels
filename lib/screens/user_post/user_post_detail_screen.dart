@@ -738,8 +738,7 @@ class _UserPostDetailScreenState extends State<UserPostDetailScreen> {
         return 'Parcel';
       case ServiceType.lease:
         return 'Help Vehicle';
-      case ServiceType.working:
-        return 'Working';
+      
     }
   }
 

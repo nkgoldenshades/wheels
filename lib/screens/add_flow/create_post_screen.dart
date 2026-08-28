@@ -943,7 +943,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       // Determine actual service type based on operator toggle for Lease
       final ServiceType actualServiceType =
           widget.serviceType == ServiceType.lease
-          ? (_withOperator ? ServiceType.working : ServiceType.lease)
+          ? (_withOperator ? ServiceType.passenger : ServiceType.lease)
           : widget.serviceType;
 
       // Set withOperator based on service type
@@ -1163,7 +1163,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
             const SizedBox(height: 20),
 
             // Working Mode (only for working service)
-            if (widget.serviceType == ServiceType.working) ...[
+            if (widget.serviceType == ServiceType.passenger) ...[
               _buildWorkingModeSection(),
               const SizedBox(height: 20),
             ],
@@ -1206,7 +1206,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
             // Seating Setup (only for Passenger/Parcel, not for Lease/Working)
             if (!_useSimpleSeating &&
                 widget.serviceType != ServiceType.lease &&
-                widget.serviceType != ServiceType.working) ...[
+                widget.serviceType != ServiceType.passenger) ...[
               _buildSeatingSetupSection(),
               const SizedBox(height: 20),
             ],
@@ -1838,7 +1838,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     final hasLayoutSeats = _hasSeatLayoutSeats;
     final isLeaseOrWorking =
         widget.serviceType == ServiceType.lease ||
-        widget.serviceType == ServiceType.working;
+        widget.serviceType == ServiceType.passenger;
 
     if (hasLayoutSeats && _useSimpleSeating) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -1991,7 +1991,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                 decoration: InputDecoration(
                   labelText: widget.serviceType == ServiceType.lease
                       ? 'Total Lease Price'
-                      : 'Price per ${widget.serviceType == ServiceType.working
+                      : 'Price per ${widget.serviceType == ServiceType.passenger
                             ? 'job'
                             : widget.serviceType == ServiceType.parcel
                             ? 'parcel'
@@ -2034,7 +2034,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                   ],
                 ),
                 Text(
-                  widget.serviceType == ServiceType.working
+                  widget.serviceType == ServiceType.passenger
                       ? 'jobs'
                       : widget.serviceType == ServiceType.parcel
                       ? 'parcels'

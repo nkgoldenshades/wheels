@@ -1466,8 +1466,7 @@ class SlotDetailScreen extends StatelessWidget {
         return Icons.people;
       case ServiceType.parcel:
         return Icons.local_shipping;
-      case ServiceType.working:
-        return Icons.build;
+      
       case ServiceType.lease:
         return Icons.handshake;
     }
@@ -1479,8 +1478,7 @@ class SlotDetailScreen extends StatelessWidget {
         return Colors.blue;
       case ServiceType.parcel:
         return Colors.orange;
-      case ServiceType.working:
-        return Colors.purple;
+      
       case ServiceType.lease:
         return Colors.green;
     }
@@ -1571,8 +1569,7 @@ class SlotDetailScreen extends StatelessWidget {
         return Icons.people;
       case ServiceType.parcel:
         return Icons.inventory_2;
-      case ServiceType.working:
-        return Icons.work;
+      
       case ServiceType.lease:
         return Icons.event_available;
     }
@@ -1595,8 +1592,7 @@ class SlotDetailScreen extends StatelessWidget {
           return 'Parcels: ${availableParcels.first} ($remaining/$total)';
         }
         return 'Parcels: $remaining/$total';
-      case ServiceType.working:
-        return 'Jobs/units: $remaining/$total';
+      
       case ServiceType.lease:
         return 'Available: $remaining/$total';
     }
