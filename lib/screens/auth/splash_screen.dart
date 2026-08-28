@@ -14,10 +14,12 @@ class _SplashscreenState extends State<Splashscreen> {
   @override
   void initState() {
     super.initState();
-    
+
     // Listen for auth state changes - navigate as soon as ready
-    AuthRepository.instance.currentUserListenable.addListener(_onAuthStateChanged);
-    
+    AuthRepository.instance.currentUserListenable.addListener(
+      _onAuthStateChanged,
+    );
+
     // Also set a max timeout - navigate after 5 seconds regardless
     Future.delayed(const Duration(seconds: 5), () {
       if (!mounted || _hasNavigated) return;
@@ -27,7 +29,9 @@ class _SplashscreenState extends State<Splashscreen> {
 
   @override
   void dispose() {
-    AuthRepository.instance.currentUserListenable.removeListener(_onAuthStateChanged);
+    AuthRepository.instance.currentUserListenable.removeListener(
+      _onAuthStateChanged,
+    );
     super.dispose();
   }
 
@@ -43,10 +47,12 @@ class _SplashscreenState extends State<Splashscreen> {
   void _navigate() {
     if (_hasNavigated) return;
     _hasNavigated = true;
-    
+
     // Remove listener to prevent multiple calls
-    AuthRepository.instance.currentUserListenable.removeListener(_onAuthStateChanged);
-    
+    AuthRepository.instance.currentUserListenable.removeListener(
+      _onAuthStateChanged,
+    );
+
     // Guest-first: Always go to main screen (no forced login)
     if (mounted) {
       Navigator.pushReplacementNamed(context, '/main');
@@ -56,37 +62,100 @@ class _SplashscreenState extends State<Splashscreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.directions_car, size: 80, color: Colors.blue),
-            const SizedBox(height: 16),
-            const Text(
-              'VaultWheels',
-              style: TextStyle(
-                fontSize: 32,
-                fontWeight: FontWeight.bold,
-                color: Colors.blue,
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [Colors.blue.shade50, Colors.blue.shade100],
+          ),
+        ),
+        child: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              // Service Icons Grid with Shadow
+              Container(
+                width: 140,
+                height: 140,
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(28),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.blue.withValues(alpha: 0.2),
+                      blurRadius: 16,
+                      offset: const Offset(0, 8),
+                    ),
+                  ],
+                ),
+                child: GridView.count(
+                  crossAxisCount: 2,
+                  crossAxisSpacing: 12,
+                  mainAxisSpacing: 12,
+                  padding: const EdgeInsets.all(16),
+                  physics: const NeverScrollableScrollPhysics(),
+                  children: [
+                    _buildServiceIcon('🏠', Colors.orange),
+                    _buildServiceIcon('💼', Colors.blue),
+                    _buildServiceIcon('🎪', Colors.purple),
+                    _buildServiceIcon('🛒', Colors.green),
+                  ],
+                ),
               ),
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              'Your Transport Partner',
-              style: TextStyle(
-                fontSize: 16,
-                color: Colors.grey,
+              const SizedBox(height: 32),
+              const Text(
+                'VaultSales',
+                style: TextStyle(
+                  fontSize: 36,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.blue,
+                  letterSpacing: 0.5,
+                ),
               ),
-            ),
-            const SizedBox(height: 32),
-            const CircularProgressIndicator(),
-          ],
+              const SizedBox(height: 12),
+              const Text(
+                'Connect • Serve • Grow',
+                style: TextStyle(
+                  fontSize: 16,
+                  color: Colors.grey,
+                  letterSpacing: 1.5,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              const SizedBox(height: 48),
+              const SizedBox(
+                width: 50,
+                height: 50,
+                child: CircularProgressIndicator(
+                  valueColor: AlwaysStoppedAnimation<Color>(Colors.blue),
+                  strokeWidth: 4,
+                ),
+              ),
+              const SizedBox(height: 24),
+              const Text(
+                'Loading...',
+                style: TextStyle(
+                  fontSize: 14,
+                  color: Colors.grey,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
+
+  Widget _buildServiceIcon(String emoji, Color color) {
+    return Container(
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: color.withValues(alpha: 0.3), width: 1.5),
+      ),
+      child: Center(child: Text(emoji, style: const TextStyle(fontSize: 32))),
+    );
+  }
 }
-
-
-
