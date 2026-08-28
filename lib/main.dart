@@ -15,6 +15,7 @@ import 'package:supabase_flutter/supabase_flutter.dart' hide AuthUser;
 import 'package:url_launcher/url_launcher.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:intl_phone_field/intl_phone_field.dart';
 import 'firebase_options.dart';
 import 'models/seat_layout.dart';
 import 'models/service_type.dart';
@@ -4107,13 +4108,17 @@ class SettingsPage extends StatelessWidget {
                     },
                   ),
                   const SizedBox(height: 12),
-                  TextField(
+                  IntlPhoneField(
                     controller: phoneController,
-                    keyboardType: TextInputType.phone,
                     decoration: const InputDecoration(
                       labelText: 'Contact number',
                       border: OutlineInputBorder(),
                     ),
+                    initialCountryCode: 'IN', // Default to India
+                    onChanged: (phone) {
+                      // Store complete number with country code
+                      phoneController.text = phone.completeNumber;
+                    },
                   ),
                   const SizedBox(height: 12),
                   DropdownButtonFormField<String>(
