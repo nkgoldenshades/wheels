@@ -1984,35 +1984,8 @@ class _VehicleActionsScreenState extends State<VehicleActionsScreen> {
                   ],
                 ),
                 const SizedBox(height: 8),
-                _buildDocumentItem(
-                  'Driving License',
-                  'Valid driving license',
-                  verificationStatus['Driving License']!,
-                  DocumentType.dl,
-                  imageBase64: vehicle.dlImageBase64,
-                  isMandatory: false,
-                  canVerify: canVerify,
-                ),
-                const Divider(height: 1),
-                _buildDocumentItem(
-                  'National ID',
-                  'Identity verification',
-                  verificationStatus['National ID']!,
-                  DocumentType.aadhaar,
-                  imageBase64: vehicle.aadhaarImageBase64,
-                  isMandatory: false,
-                  canVerify: canVerify,
-                ),
-                const Divider(height: 1),
-                _buildDocumentItem(
-                  'Tax ID',
-                  'Tax identification',
-                  verificationStatus['Tax ID']!,
-                  DocumentType.pan,
-                  imageBase64: vehicle.panImageBase64,
-                  isMandatory: false,
-                  canVerify: canVerify,
-                ),
+                // Personal ID documents removed for legal safety
+                // (DL, Aadhaar, PAN no longer collected)
                 if (!canVerify) ...[
                   const SizedBox(height: 12),
                   ListTile(
