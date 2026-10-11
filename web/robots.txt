@@ -1,0 +1,6 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://vaultwheels.web.app/sitemap.xml
+Sitemap: https://quickohunt-app.web.app/sitemap.xml
+Sitemap: https://wheels.vervestrideai.com/sitemap.xml
