@@ -1,7 +1,7 @@
 enum UserTier {
-  basic,    // Free - everyone starts here
-  verified, // Paid upgrade - more trust
-  expert,   // Premium - highest trust
+  basic, // Free users - anyone can book
+  verified, // Premium subscribers - financially committed users
+  expert, // Elite subscribers - heavy investment & work dedication
 }
 
 extension UserTierExtension on UserTier {
@@ -30,11 +30,11 @@ extension UserTierExtension on UserTier {
   String get description {
     switch (this) {
       case UserTier.basic:
-        return 'Standard access';
+        return 'Free users - anyone can book';
       case UserTier.verified:
-        return 'Verified identity & documents';
+        return 'Premium subscribers - financially committed users';
       case UserTier.expert:
-        return 'Premium trusted member';
+        return 'Elite subscribers - heavy investment & work dedication';
     }
   }
 
@@ -43,7 +43,8 @@ extension UserTierExtension on UserTier {
       case UserTier.basic:
         return customerTier == UserTier.basic;
       case UserTier.verified:
-        return customerTier == UserTier.basic || customerTier == UserTier.verified;
+        return customerTier == UserTier.basic ||
+            customerTier == UserTier.verified;
       case UserTier.expert:
         return true; // Can accept all
     }
@@ -60,6 +61,3 @@ extension UserTierExtension on UserTier {
     }
   }
 }
-
-
-
