@@ -1,8 +1,4 @@
-enum DemandPlan {
-  basic,
-  verified,
-  expert,
-}
+enum DemandPlan { basic, verified, expert }
 
 extension DemandPlanExtension on DemandPlan {
   String get displayName {
@@ -15,18 +11,18 @@ extension DemandPlanExtension on DemandPlan {
         return 'Expert Users Only';
     }
   }
-  
+
   String get description {
     switch (this) {
       case DemandPlan.basic:
-        return 'Anyone can book this post';
+        return 'Anyone can book';
       case DemandPlan.verified:
-        return 'Requires verified Aadhaar, PAN, or Driving License';
+        return 'Premium subscribers - financially committed users';
       case DemandPlan.expert:
-        return 'Requires 50+ trips with 4.5+ rating';
+        return 'Elite subscribers - heavy investment & work dedication';
     }
   }
-  
+
   String get dbValue {
     switch (this) {
       case DemandPlan.basic:
@@ -37,7 +33,7 @@ extension DemandPlanExtension on DemandPlan {
         return 'expert';
     }
   }
-  
+
   static DemandPlan fromDbValue(String? value) {
     switch (value) {
       case 'verified':
