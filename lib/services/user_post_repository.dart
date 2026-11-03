@@ -445,12 +445,12 @@ class UserPostRepository {
           .from('posts')
           .delete()
           .eq('id', postId)
-          .eq('user_id', user.uid);
+          .eq('profile_id', user.uid);
 
       debugPrint('✅ User post deleted from Supabase: $postId');
 
-      // Update local state
-      posts.value = posts.value.where((p) => p.id != postId).toList();
+      // Update local state - trigger UI refresh
+      posts.value = List.from(posts.value.where((p) => p.id != postId));
     } catch (e) {
       debugPrint('❌ Failed to delete user post: $e');
       rethrow;
