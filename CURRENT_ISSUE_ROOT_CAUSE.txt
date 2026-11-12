@@ -1,0 +1,165 @@
+═══════════════════════════════════════════════════════════════════════════════
+                         ROOT CAUSE ANALYSIS
+═══════════════════════════════════════════════════════════════════════════════
+
+ERROR YOU'RE EXPERIENCING:
+───────────────────────────────────────────────────────────────────────────────
+"22P02: invalid input syntax for type uuid: POST_ID_HERE"
+
+WHEN:
+───────────────────────────────────────────────────────────────────────────────
+Calling: SELECT * FROM secure_create_booking('post-id', 'user-id', ...)
+
+WHY:
+───────────────────────────────────────────────────────────────────────────────
+
+Your database has TWO versions of the function:
+
+  1. OLD UUID VERSION (Created first when you deployed)
+     └─ Signature: secure_create_booking(UUID, TEXT, TEXT[], TEXT, NUMERIC, INTEGER)
+     └─ This tries to cast 'post-id' STRING to UUID type
+     └─ UUID cast fails → Error "invalid input syntax for type uuid"
+     └─ Postgres NEVER reaches the TEXT version because UUID version failed first
+
+  2. NEW TEXT VERSION (Created when you deployed corrected SQL)
+     └─ Signature: secure_create_booking(TEXT, TEXT, TEXT, TEXT, NUMERIC, INTEGER)
+     └─ Would work perfectly if called
+     └─ But Postgres tries UUID version first, fails, returns error
+
+═══════════════════════════════════════════════════════════════════════════════
+
+FLOW DIAGRAM:
+───────────────────────────────────────────────────────────────────────────────
+
+Your call: secure_create_booking('post-id', 'user-id', 'A1', 'shared', 500, 1)
+                                    ↓
+                                    │ STRING value 'post-id'
+                                    ↓
+        ┌───────────────────────────┴───────────────────────────┐
+        │ Postgres looks for matching function signatures:      │
+        ↓                                                       ↓
+    UUID Version                                          TEXT Version
+    (Exists)                                              (Exists)
+        ↓                                                       ↓
+    Try to cast                                          Would match!
+    'post-id' → UUID                                     But we never reach
+        ↓                                                   here because:
+    FAILS! ❌                                                │
+    Error: "invalid input                                    │
+    syntax for type uuid"                                    ↑
+        │                                         Postgres stops looking
+        ↓                                         once first match fails
+    Return error to app
+    (User never knows TEXT version exists)
+
+═══════════════════════════════════════════════════════════════════════════════
+
+WHY BOTH VERSIONS EXIST:
+───────────────────────────────────────────────────────────────────────────────
+
+Timeline of your deployments:
+
+  1. First deployment:
+     Ran: ALL_DATABASE_FUNCTIONS_COMPLETE.sql
+     Result: UUID version created ✓
+     └─ secure_create_booking(UUID, TEXT, TEXT[], ...) → UUID
+
+  2. Second deployment:
+     Ran: SECURE_FUNCTIONS_SCHEMA_CORRECTED.sql
+     Result: TEXT version ADDED (not replaced)
+     └─ secure_create_booking(TEXT, TEXT, TEXT, ...) → BIGINT
+     └─ Old UUID version still exists!
+
+WHY NOT REPLACED:
+  └─ PostgreSQL's CREATE OR REPLACE only replaces IDENTICAL signatures
+  └─ UUID(UUID, TEXT, TEXT[], ...) ≠ TEXT(TEXT, TEXT, TEXT, ...)
+  └─ Different signature = new overload, not replacement
+  └─ So: OLD stays, NEW added = 2 versions coexist
+
+═══════════════════════════════════════════════════════════════════════════════
+
+SOLUTION:
+───────────────────────────────────────────────────────────────────────────────
+
+DROP the UUID versions (all 5 functions have both):
+
+  1. secure_create_booking(UUID, TEXT, TEXT[], TEXT, NUMERIC, INTEGER)
+  2. secure_process_payment(UUID, NUMERIC, TEXT, TEXT)
+  3. secure_generate_otp(UUID, INTEGER)
+  4. secure_verify_otp(UUID, TEXT, TEXT)
+  5. secure_process_refund(UUID, TEXT, TEXT, NUMERIC)
+
+After dropping:
+
+  Postgres has ONLY TEXT/BIGINT versions:
+
+  ✓ secure_create_booking(TEXT, TEXT, TEXT, TEXT, NUMERIC, INTEGER) → BIGINT
+  ✓ secure_process_payment(BIGINT, NUMERIC, TEXT, TEXT) → TABLE
+  ✓ secure_generate_otp(BIGINT, INTEGER) → TABLE
+  ✓ secure_verify_otp(BIGINT, TEXT, TEXT) → TABLE
+  ✓ secure_process_refund(BIGINT, TEXT, TEXT, NUMERIC) → TABLE
+
+  Next call works immediately ✅
+
+═══════════════════════════════════════════════════════════════════════════════
+
+FILES:
+───────────────────────────────────────────────────────────────────────────────
+
+To FIX this:
+  Run: REMOVE_UUID_OVERLOADS.sql
+  └─ Drops all UUID versions
+  └─ Verifies only TEXT versions remain
+
+For reference:
+  Read: FIX_UUID_CONFLICT.md (detailed explanation)
+  Read: FINAL_DEPLOYMENT_GUIDE.md (step-by-step)
+
+═══════════════════════════════════════════════════════════════════════════════
+
+VERIFICATION:
+───────────────────────────────────────────────────────────────────────────────
+
+To see what's in your database RIGHT NOW:
+
+  SELECT 
+    p.proname AS function_name,
+    pg_catalog.pg_get_function_identity_arguments(p.oid) AS args
+  FROM pg_proc p
+  JOIN pg_namespace n ON n.oid = p.pronamespace
+  WHERE p.proname = 'secure_create_booking'
+    AND n.nspname = 'public'
+  ORDER BY args;
+
+Expected output (you'll see BOTH):
+  ┌─────────────────────────────────────────────────────────────┐
+  │ function_name         │ args                                │
+  ├───────────────────────┼─────────────────────────────────────┤
+  │ secure_create_booking │ p_post_id uuid, p_user_id text,... │ ← OLD UUID
+  │ secure_create_booking │ p_post_id text, p_user_id text,... │ ← NEW TEXT
+  └─────────────────────────────────────────────────────────────┘
+
+After running REMOVE_UUID_OVERLOADS.sql:
+  ┌─────────────────────────────────────────────────────────────┐
+  │ function_name         │ args                                │
+  ├───────────────────────┼─────────────────────────────────────┤
+  │ secure_create_booking │ p_post_id text, p_user_id text,... │ ← ONLY TEXT
+  └─────────────────────────────────────────────────────────────┘
+
+═══════════════════════════════════════════════════════════════════════════════
+
+NEXT STEPS:
+───────────────────────────────────────────────────────────────────────────────
+
+1. Run verification query to confirm you have 2 versions
+2. Run REMOVE_UUID_OVERLOADS.sql in Supabase SQL Editor
+3. Run verification query again to confirm only 1 version remains
+4. Restart your app
+5. Test booking creation
+6. Should work! ✅
+
+═══════════════════════════════════════════════════════════════════════════════
+
+ESTIMATED TIME: 10 minutes
+
+═══════════════════════════════════════════════════════════════════════════════

@@ -1,0 +1,2 @@
+﻿case ServiceType.lease:
+        return Colors.green;

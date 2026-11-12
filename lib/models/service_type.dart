@@ -1,0 +1,14 @@
+enum ServiceType { passenger, parcel, lease }
+
+extension ServiceTypeExtension on ServiceType {
+  String get displayName {
+    switch (this) {
+      case ServiceType.passenger:
+        return 'Passenger';
+      case ServiceType.parcel:
+        return 'Parcel';
+      case ServiceType.lease:
+        return 'Help Vehicle'; // Community helping - not rental
+    }
+  }
+}
